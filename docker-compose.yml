@@ -1,0 +1,231 @@
+version: '3.8'
+
+services:
+  # Vector Database - Qdrant
+  qdrant:
+    image: qdrant/qdrant:v1.7.0
+    container_name: web-rag-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    networks:
+      - webrag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL with pgvector (alternative)
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: web-rag-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=rag_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - webrag-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: web-rag-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - webrag-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Firecrawl Service
+  firecrawl:
+    image: mendableai/firecrawl:latest
+    container_name: web-rag-firecrawl
+    ports:
+      - "3002:3002"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - PLAYWRIGHT_MICROSERVICE_URL=http://playwright:3000
+    networks:
+      - webrag-network
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Gateway Service
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.gateway
+    container_name: web-rag-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - GATEWAY_HOST=0.0.0.0
+      - GATEWAY_PORT=8000
+      - CRAWLER_URL=http://crawler:8001
+      - INDEXER_URL=http://indexer:8002
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - webrag-network
+    depends_on:
+      - crawler
+      - indexer
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Crawler Service
+  crawler:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.crawler
+    container_name: web-rag-crawler
+    ports:
+      - "8001:8001"
+    environment:
+      - CRAWLER_HOST=0.0.0.0
+      - CRAWLER_PORT=8001
+      - FIRECRAWL_URL=http://firecrawl:3002
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - /tmp:/tmp  # For Playwright downloads
+    networks:
+      - webrag-network
+    depends_on:
+      - firecrawl
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Indexer Service
+  indexer:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.indexer
+    container_name: web-rag-indexer
+    ports:
+      - "8002:8002"
+    environment:
+      - INDEXER_HOST=0.0.0.0
+      - INDEXER_PORT=8002
+      - QDRANT_URL=http://qdrant:6333
+      - PG_DSN=postgresql://postgres:password@postgres:5432/rag_db
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - webrag-network
+    depends_on:
+      - qdrant
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Demo Web Client (optional)
+  demo-client:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.demo
+    container_name: web-rag-demo
+    ports:
+      - "3000:3000"
+    environment:
+      - GATEWAY_URL=http://gateway:8000
+    volumes:
+      - ./clients/demo:/app
+    networks:
+      - webrag-network
+    depends_on:
+      - gateway
+    profiles:
+      - demo
+
+  # Monitoring - Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: web-rag-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    networks:
+      - webrag-network
+    profiles:
+      - monitoring
+
+  # Monitoring - Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: web-rag-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deploy/grafana-provisioning:/etc/grafana/provisioning
+    networks:
+      - webrag-network
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
+volumes:
+  qdrant_data:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  webrag-network:
+    driver: bridge

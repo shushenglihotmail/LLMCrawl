@@ -1,0 +1,48 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'gateway'
+    static_configs:
+      - targets: ['gateway:8000']
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+
+  - job_name: 'crawler'
+    static_configs:
+      - targets: ['crawler:8001']
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+
+  - job_name: 'indexer'
+    static_configs:
+      - targets: ['indexer:8002']
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+
+  - job_name: 'qdrant'
+    static_configs:
+      - targets: ['qdrant:6333']
+    scrape_interval: 60s
+    metrics_path: '/metrics'
+
+  - job_name: 'firecrawl'
+    static_configs:
+      - targets: ['firecrawl:3002']
+    scrape_interval: 60s
+    metrics_path: '/metrics'
+
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093
