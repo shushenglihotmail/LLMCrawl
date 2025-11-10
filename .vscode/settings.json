@@ -33,5 +33,12 @@
     "python.testing.unittestEnabled": false,
     "docker.showStartPage": false,
     "makefile.configureOnOpen": true,
-    "vscode-nmake-tools.workspaceBuildDirectories": []
+    "vscode-nmake-tools.workspaceBuildDirectories": [],
+    "python-envs.pythonProjects": [
+        {
+            "path": "",
+            "envManager": "ms-python.python:venv",
+            "packageManager": "ms-python.python:pip"
+        }
+    ]
 }

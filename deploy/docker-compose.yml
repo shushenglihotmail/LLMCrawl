@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Vector Database - Qdrant
   qdrant:
@@ -59,7 +57,7 @@ services:
 
   # Firecrawl Service
   firecrawl:
-    image: mendableai/firecrawl:latest
+    image: ghcr.io/firecrawl/firecrawl:latest
     container_name: web-rag-firecrawl
     ports:
       - "3002:3002"
