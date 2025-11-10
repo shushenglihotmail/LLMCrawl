@@ -1,6 +1,40 @@
-.PHONY: build dev test clean up down logs
+.PHONY: build dev test clean up down logs install-dev setup-dev dev-up dev-down dev-logs pre-commit
 
-# Docker operations
+# Development Environment Setup
+install-dev:
+	pip install -r requirements/dev.txt
+
+setup-dev: 
+	python scripts/setup_dev.py
+
+setup-dev-windows:
+	powershell -ExecutionPolicy Bypass -File scripts/setup_dev.ps1
+
+quick-start:
+	python scripts/start_dev.sh
+
+quick-start-windows:
+	powershell -ExecutionPolicy Bypass -File scripts/start_dev.ps1
+
+# Development Docker operations
+dev-up:
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	@echo "Development environment is running!"
+	@echo "Gateway: http://localhost:8000"
+	@echo "Crawler: http://localhost:8001" 
+	@echo "Indexer: http://localhost:8002"
+	@echo "Qdrant Dashboard: http://localhost:6333/dashboard"
+
+dev-down:
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
+
+dev-logs:
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
+
+dev-rebuild:
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+# Production Docker operations
 build:
 	docker-compose build --no-cache
 
@@ -13,19 +47,25 @@ down:
 logs:
 	docker-compose logs -f
 
-# Development
-dev:
-	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Development shortcuts
+dev: dev-up
 
+# Testing
 test:
 	docker-compose exec gateway python -m pytest tests/ -v
 	docker-compose exec crawler python -m pytest tests/ -v
 	docker-compose exec indexer python -m pytest tests/ -v
 
+test-dev:
+	pytest tests/ -v --cov=. --cov-report=html
+
 test-integration:
 	python tests/integration/test_end_to_end.py
 
-# Linting and formatting
+# Code quality
+pre-commit:
+	pre-commit run --all-files
+
 lint:
 	docker-compose exec gateway python -m black . --check
 	docker-compose exec gateway python -m isort . --check-only

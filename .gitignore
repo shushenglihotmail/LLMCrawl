@@ -32,8 +32,18 @@ ENV/
 .env*
 !.env.example
 
-# IDE
-.vscode/
+# Keep only these VS Code files in git:
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Never commit secrets
+.env
+*.secrets.json
+
+# Other IDE files
 .idea/
 *.swp
 *.swo

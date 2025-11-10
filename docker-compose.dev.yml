@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # Override services for development with volume mounts for hot reload
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.gateway
+    container_name: web-rag-gateway-dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./gateway:/app/gateway:rw
+      - ./requirements:/app/requirements:ro
+    environment:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - RELOAD=true
+    networks:
+      - webrag-network
+    depends_on:
+      - qdrant
+      - redis
+      - crawler
+      - indexer
+    command: uvicorn gateway.main:app --host 0.0.0.0 --port 8000 --reload
+    
+  crawler:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.crawler
+    container_name: web-rag-crawler-dev
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./crawler:/app/crawler:rw
+      - ./requirements:/app/requirements:ro
+    environment:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - RELOAD=true
+    networks:
+      - webrag-network
+    depends_on:
+      - redis
+      - firecrawl
+    command: uvicorn crawler.main:app --host 0.0.0.0 --port 8001 --reload
+
+  indexer:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.indexer
+    container_name: web-rag-indexer-dev
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./indexer:/app/indexer:rw
+      - ./requirements:/app/requirements:ro
+    environment:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - RELOAD=true
+    networks:
+      - webrag-network
+    depends_on:
+      - qdrant
+      - postgres
+      - redis
+    command: uvicorn indexer.main:app --host 0.0.0.0 --port 8002 --reload
+
+  # Development tools
+  redis-cli:
+    image: redis:7-alpine
+    container_name: web-rag-redis-cli
+    networks:
+      - webrag-network
+    profiles:
+      - tools
+    command: redis-cli -h redis
+    depends_on:
+      - redis
+
+networks:
+  webrag-network:
+    external: true

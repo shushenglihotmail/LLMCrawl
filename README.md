@@ -63,7 +63,73 @@ ALLOWED_DOMAINS=sec.gov,ft.com,wsj.com,nvidia.com,reuters.com,bloomberg.com
 RESPECT_ROBOTS=true
 ```
 
+## 🛠️ Development Environment
+
+For development work, use the automated setup scripts located in the `scripts/` folder:
+
+### Quick Setup (Recommended)
+
+**Windows (PowerShell):**
+```powershell
+# Complete setup
+.\scripts\setup_dev.ps1
+
+# Quick start (after setup)
+.\scripts\start_dev.ps1
+```
+
+**Unix/Linux/macOS:**
+```bash
+# Complete setup
+python scripts/setup_dev.py
+
+# Quick start (after setup)
+./scripts/start_dev.sh
+```
+
+**Using Makefile:**
+```bash
+# Setup development environment
+make setup-dev              # Cross-platform
+make setup-dev-windows       # Windows specific
+
+# Quick start development environment  
+make quick-start            # Unix/Linux/macOS
+make quick-start-windows    # Windows
+```
+
+### VS Code Integration
+
+For VS Code users, open the workspace file for an optimized development experience:
+
+```bash
+code LLMCrawl.code-workspace
+```
+
+This provides:
+- Pre-configured debug configurations for all services
+- Integrated tasks for setup and development
+- Recommended extensions
+- Python environment auto-detection
+
+See `DEVELOPMENT.md` for detailed development setup instructions.
+
+## 🚀 Production Deployment
+
 ### 3. Start All Services
+
+```bash
+# Start core services
+docker-compose up -d
+
+# Or start with demo client
+docker-compose --profile demo up -d
+
+# Or start with monitoring
+docker-compose --profile monitoring up -d
+```
+
+### 4. Verify Deployment
 
 ```bash
 # Start core services

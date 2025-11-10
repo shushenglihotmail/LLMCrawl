@@ -1,0 +1,122 @@
+{
+    "folders": [
+        {
+            "name": "LLMCrawl",
+            "path": "."
+        }
+    ],
+    "settings": {
+        "python.defaultInterpreterPath": "./venv/Scripts/python.exe",
+        "python.terminal.activateEnvironment": true,
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": [
+            "tests",
+            "-v"
+        ],
+        "files.associations": {
+            "*.dockerfile": "dockerfile",
+            "docker-compose*.yml": "dockercompose",
+            "Dockerfile.*": "dockerfile"
+        },
+        "terminal.integrated.cwd": "${workspaceFolder}",
+        "explorer.fileNesting.enabled": true,
+        "explorer.fileNesting.patterns": {
+            "*.py": "${capture}.pyc",
+            "docker-compose.yml": "docker-compose.*.yml",
+            "requirements.txt": "requirements/*.txt",
+            ".env.example": ".env"
+        }
+    },
+    "launch": {
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "Gateway Service",
+                "type": "debugpy",
+                "request": "launch",
+                "program": "${workspaceFolder}/venv/Scripts/python",
+                "args": [
+                    "-m",
+                    "uvicorn",
+                    "gateway.main:app",
+                    "--host",
+                    "0.0.0.0",
+                    "--port",
+                    "8000",
+                    "--reload"
+                ],
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PYTHONPATH": "${workspaceFolder}",
+                    "ENVIRONMENT": "development",
+                    "LOG_LEVEL": "DEBUG"
+                },
+                "envFile": "${workspaceFolder}/.env",
+                "console": "integratedTerminal"
+            }
+        ]
+    },
+    "tasks": {
+        "version": "2.0.0",
+        "tasks": [
+            {
+                "label": "Setup Development Environment",
+                "type": "shell",
+                "command": "python",
+                "args": [
+                    "scripts/setup_dev.py"
+                ],
+                "group": "build",
+                "presentation": {
+                    "echo": true,
+                    "reveal": "always",
+                    "focus": false,
+                    "panel": "shared"
+                },
+                "options": {
+                    "cwd": "${workspaceFolder}"
+                }
+            },
+            {
+                "label": "Start Dev Environment",
+                "type": "shell",
+                "command": "make",
+                "args": [
+                    "dev-up"
+                ],
+                "group": "build",
+                "presentation": {
+                    "echo": true,
+                    "reveal": "always",
+                    "focus": false,
+                    "panel": "shared"
+                }
+            },
+            {
+                "label": "Quick Start",
+                "type": "shell",
+                "command": "python",
+                "args": [
+                    "scripts/start_dev.ps1"
+                ],
+                "group": "build",
+                "presentation": {
+                    "echo": true,
+                    "reveal": "always",
+                    "focus": false,
+                    "panel": "shared"
+                }
+            }
+        ]
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-python.python",
+            "ms-python.black-formatter",
+            "ms-python.isort",
+            "ms-azuretools.vscode-docker",
+            "redhat.vscode-yaml",
+            "ms-vscode.makefile-tools"
+        ]
+    }
+}
