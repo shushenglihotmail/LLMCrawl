@@ -63,11 +63,20 @@ services:
       - "3002:3002"
     environment:
       - REDIS_URL=redis://redis:6379
-      - PLAYWRIGHT_MICROSERVICE_URL=http://playwright:3000
+      - REDIS_RATE_LIMIT_URL=redis://redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/postgres
+      - NUQ_DATABASE_URL=postgresql://postgres:password@postgres:5432/postgres
+      - PLAYWRIGHT_MICROSERVICE_URL=http://localhost:3000
+      - HOST=0.0.0.0
+      - PORT=3002
+      - NUM_WORKERS=1
     networks:
       - webrag-network
     depends_on:
       - redis
+      - postgres
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
       interval: 30s

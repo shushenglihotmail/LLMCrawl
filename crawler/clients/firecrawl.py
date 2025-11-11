@@ -3,145 +3,158 @@ Firecrawl client for web crawling and content extraction.
 Handles search, crawling, and content processing via Firecrawl API.
 """
 
-import os
 import asyncio
-from typing import Dict, Any, List, Optional
-import httpx
 import logging
+import os
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
+
 class FirecrawlClient:
     """Client for interacting with Firecrawl API."""
-    
+
     def __init__(self):
         self.base_url = os.getenv("FIRECRAWL_URL", "http://firecrawl:3002")
         self.api_key = os.getenv("FIRECRAWL_API_KEY", "")
         self.timeout = int(os.getenv("REQUEST_TIMEOUT_MS", "20000")) / 1000
         self.max_concurrency = int(os.getenv("MAX_CONCURRENCY", "4"))
-        
+
         # Setup HTTP client with authentication
         headers = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-            
+
         self.client = httpx.AsyncClient(
             timeout=self.timeout,
             headers=headers,
-            limits=httpx.Limits(max_connections=self.max_concurrency)
+            limits=httpx.Limits(max_connections=self.max_concurrency),
         )
-        
+
         logger.info(f"Initialized Firecrawl client: {self.base_url}")
-    
+
     async def search_and_crawl(
         self,
         query: str,
         seed_urls: List[str] = None,
         freshness_days: int = 7,
-        max_results: int = 10
+        max_results: int = 10,
     ) -> List[Dict[str, Any]]:
         """
         Search the web and crawl resulting pages.
-        
+
         Args:
             query: Search query
             seed_urls: Optional seed URLs to prioritize
             freshness_days: How recent content should be
             max_results: Maximum number of results to return
-            
+
         Returns:
             List of crawled documents with metadata
         """
         try:
             # First, search for relevant URLs
             search_results = await self._search(query, seed_urls, max_results)
-            
+
             if not search_results:
                 logger.warning(f"No search results for query: {query}")
                 return []
-            
+
             # Filter by freshness if needed
             if freshness_days > 0:
                 cutoff_date = datetime.now() - timedelta(days=freshness_days)
                 search_results = self._filter_by_freshness(search_results, cutoff_date)
-            
+
             # Crawl the resulting URLs
             documents = []
             semaphore = asyncio.Semaphore(self.max_concurrency)
-            
+
             async def crawl_url(url_data):
                 async with semaphore:
                     return await self._crawl_single_url(url_data)
-            
+
             tasks = [crawl_url(url_data) for url_data in search_results]
-            crawl_results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
+            # Add timeout to prevent indefinite hanging
+            try:
+                crawl_results = await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=25.0,  # 25 seconds total for all crawls
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"Crawling timed out after 25 seconds for query: {query}")
+                crawl_results = []
+
             for result in crawl_results:
                 if isinstance(result, Exception):
                     logger.error(f"Crawl failed: {result}")
                 elif result:
                     documents.append(result)
-            
-            logger.info(f"Successfully crawled {len(documents)} documents for query: {query}")
+
+            logger.info(
+                f"Successfully crawled {len(documents)} documents for query: {query}"
+            )
             return documents
-            
+
         except Exception as e:
             logger.error(f"Search and crawl failed: {e}")
             return []
-    
+
     async def crawl_url(self, url: str) -> Optional[Dict[str, Any]]:
         """
         Crawl a single URL and extract content.
-        
+
         Args:
             url: URL to crawl
-            
+
         Returns:
             Document data or None if failed
         """
         return await self._crawl_single_url({"url": url})
-    
+
     async def _search(
-        self,
-        query: str,
-        seed_urls: List[str] = None,
-        max_results: int = 10
+        self, query: str, seed_urls: List[str] = None, max_results: int = 10
     ) -> List[Dict[str, Any]]:
         """Search for URLs using Firecrawl search API."""
         try:
             search_params = {
                 "query": query,
                 "limit": max_results,
-                "include_domains": self._extract_domains(seed_urls) if seed_urls else None
+                "include_domains": self._extract_domains(seed_urls)
+                if seed_urls
+                else None,
             }
-            
+
             # Remove None values
             search_params = {k: v for k, v in search_params.items() if v is not None}
-            
+
             response = await self.client.post(
-                urljoin(self.base_url, "/v1/search"),
-                json=search_params
+                urljoin(self.base_url, "/v1/search"), json=search_params
             )
             response.raise_for_status()
-            
+
             data = response.json()
             return data.get("data", [])
-            
+
         except httpx.HTTPStatusError as e:
             logger.error(f"Firecrawl search HTTP error: {e.response.status_code}")
             return []
         except Exception as e:
             logger.error(f"Firecrawl search failed: {e}")
             return []
-    
-    async def _crawl_single_url(self, url_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+
+    async def _crawl_single_url(
+        self, url_data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Crawl a single URL using Firecrawl."""
         url = url_data.get("url")
         if not url:
             return None
-            
+
         try:
             crawl_params = {
                 "url": url,
@@ -149,23 +162,22 @@ class FirecrawlClient:
                 "onlyMainContent": True,
                 "includeTags": ["title", "meta"],
                 "excludeTags": ["script", "style", "nav", "footer"],
-                "waitFor": 1000  # Wait for JavaScript
+                "waitFor": 1000,  # Wait for JavaScript
             }
-            
+
             response = await self.client.post(
-                urljoin(self.base_url, "/v1/scrape"),
-                json=crawl_params
+                urljoin(self.base_url, "/v1/scrape"), json=crawl_params
             )
             response.raise_for_status()
-            
+
             data = response.json()
-            
+
             if not data.get("success"):
                 logger.warning(f"Firecrawl crawl unsuccessful for {url}")
                 return None
-            
+
             content_data = data.get("data", {})
-            
+
             # Extract and structure the document
             document = {
                 "url": url,
@@ -176,18 +188,22 @@ class FirecrawlClient:
                 "published_at": self._extract_published_date(content_data),
                 "fetched_at": datetime.now().isoformat(),
                 "source": urlparse(url).netloc,
-                "content_hash": self._generate_content_hash(content_data.get("markdown", ""))
+                "content_hash": self._generate_content_hash(
+                    content_data.get("markdown", "")
+                ),
             }
-            
+
             return document
-            
+
         except httpx.HTTPStatusError as e:
-            logger.error(f"Firecrawl crawl HTTP error for {url}: {e.response.status_code}")
+            logger.error(
+                f"Firecrawl crawl HTTP error for {url}: {e.response.status_code}"
+            )
             return None
         except Exception as e:
             logger.error(f"Firecrawl crawl failed for {url}: {e}")
             return None
-    
+
     def _extract_domains(self, urls: List[str]) -> List[str]:
         """Extract domains from a list of URLs."""
         domains = []
@@ -199,11 +215,9 @@ class FirecrawlClient:
             except:
                 continue
         return domains
-    
+
     def _filter_by_freshness(
-        self, 
-        results: List[Dict[str, Any]], 
-        cutoff_date: datetime
+        self, results: List[Dict[str, Any]], cutoff_date: datetime
     ) -> List[Dict[str, Any]]:
         """Filter search results by publication date."""
         filtered = []
@@ -211,7 +225,10 @@ class FirecrawlClient:
             pub_date = self._extract_published_date(result)
             if pub_date:
                 try:
-                    if datetime.fromisoformat(pub_date.replace('Z', '+00:00')) >= cutoff_date:
+                    if (
+                        datetime.fromisoformat(pub_date.replace("Z", "+00:00"))
+                        >= cutoff_date
+                    ):
                         filtered.append(result)
                 except:
                     # If date parsing fails, include the result anyway
@@ -219,53 +236,50 @@ class FirecrawlClient:
             else:
                 # If no date available, include the result
                 filtered.append(result)
-        
+
         return filtered
-    
+
     def _extract_published_date(self, data: Dict[str, Any]) -> Optional[str]:
         """Extract published date from content data."""
         # Try various metadata fields for publication date
         metadata = data.get("metadata", {})
-        
+
         date_fields = [
             "publishedTime",
-            "article:published_time", 
+            "article:published_time",
             "datePublished",
             "pubdate",
-            "date"
+            "date",
         ]
-        
+
         for field in date_fields:
             if field in metadata and metadata[field]:
                 return metadata[field]
-                
+
         return None
-    
+
     def _generate_content_hash(self, content: str) -> str:
         """Generate a hash for content deduplication."""
         import hashlib
-        return hashlib.md5(content.encode('utf-8')).hexdigest()
-    
+
+        return hashlib.md5(content.encode("utf-8")).hexdigest()
+
     async def health_check(self) -> Dict[str, Any]:
         """Check if Firecrawl service is healthy."""
         try:
             response = await self.client.get(urljoin(self.base_url, "/health"))
             response.raise_for_status()
-            
-            return {
-                "status": "healthy",
-                "service": "firecrawl",
-                "url": self.base_url
-            }
-            
+
+            return {"status": "healthy", "service": "firecrawl", "url": self.base_url}
+
         except Exception as e:
             return {
                 "status": "unhealthy",
-                "service": "firecrawl", 
+                "service": "firecrawl",
                 "url": self.base_url,
-                "error": str(e)
+                "error": str(e),
             }
-    
+
     async def close(self):
         """Close the HTTP client."""
         await self.client.aclose()

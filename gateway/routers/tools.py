@@ -3,47 +3,47 @@ Tool calling router and handlers.
 Manages the crawl_and_refresh tool and orchestrates the RAG pipeline.
 """
 
-import json
-import uuid
 import asyncio
-from typing import Dict, Any, List, Optional
-import httpx
+import json
 import logging
+import uuid
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import httpx
 
 from ..utils.logging import log_tool_call, log_tool_result
 
 logger = logging.getLogger(__name__)
 
+
 class ToolHandler:
     """Handles tool function calls and orchestrates the RAG pipeline."""
-    
+
     def __init__(self):
         self.crawler_url = "http://crawler:8001"
         self.indexer_url = "http://indexer:8002"
-        self.timeout = 30.0
-        
+        self.timeout = 45.0  # Increased from 30s to allow for slower FireCrawl + Playwright fallback
+
     async def handle_tool_call(
-        self,
-        tool_call: Dict[str, Any],
-        request_id: str
+        self, tool_call: Dict[str, Any], request_id: str
     ) -> Dict[str, Any]:
         """
         Handle a tool function call and return the result.
-        
+
         Args:
             tool_call: Tool call from LLM response
             request_id: Request tracking ID
-            
+
         Returns:
             Tool result for LLM context
         """
         tool_name = tool_call["function"]["name"]
         arguments = json.loads(tool_call["function"]["arguments"])
-        
+
         log_tool_call(logger, request_id, tool_name, arguments)
         start_time = datetime.now()
-        
+
         try:
             if tool_name == "crawl_and_refresh":
                 result = await self._handle_crawl_and_refresh(arguments, request_id)
@@ -51,40 +51,40 @@ class ToolHandler:
             else:
                 result = {"error": f"Unknown tool: {tool_name}"}
                 success = False
-                
+
         except Exception as e:
             logger.error(f"Tool call failed: {e}")
             result = {"error": str(e)}
             success = False
-            
+
         # Log result
         duration_ms = (datetime.now() - start_time).total_seconds() * 1000
         result_size = len(json.dumps(result))
-        log_tool_result(logger, request_id, tool_name, success, duration_ms, result_size)
-        
+        log_tool_result(
+            logger, request_id, tool_name, success, duration_ms, result_size
+        )
+
         return {
             "tool_call_id": tool_call["id"],
             "role": "tool",
-            "content": json.dumps(result)
+            "content": json.dumps(result),
         }
-    
+
     async def _handle_crawl_and_refresh(
-        self,
-        arguments: Dict[str, Any],
-        request_id: str
+        self, arguments: Dict[str, Any], request_id: str
     ) -> Dict[str, Any]:
         """
         Handle the crawl_and_refresh tool call.
-        
+
         Pipeline:
         1. Crawl web content with Firecrawl/Playwright
         2. Index documents in vector database
         3. Retrieve relevant results with recency boost
-        
+
         Args:
             arguments: Tool arguments (query, seed_urls, etc.)
             request_id: Request tracking ID
-            
+
         Returns:
             Formatted tool result with sources
         """
@@ -92,44 +92,71 @@ class ToolHandler:
         seed_urls = arguments.get("seed_urls", [])
         freshness_days = arguments.get("freshness_days", 7)
         depth = arguments.get("depth", 1)
-        
+
         logger.info(f"Starting crawl_and_refresh for query: {query}")
-        
+
         # Step 1: Crawl web content
         crawl_result = await self._call_crawler(
             query=query,
-            seed_urls=seed_urls, 
+            seed_urls=seed_urls,
             freshness_days=freshness_days,
             depth=depth,
-            request_id=request_id
+            request_id=request_id,
         )
-        
+
         if not crawl_result.get("docs"):
             return {
                 "error": "No documents found during crawling",
                 "query": query,
-                "count": 0
+                "count": 0,
             }
-            
+
         docs = crawl_result["docs"]
         logger.info(f"Crawled {len(docs)} documents")
-        
-        # Step 2: Index documents  
+
+        # Step 2: Try to index documents, but continue if it fails
         index_result = await self._call_indexer_index(docs, request_id)
-        
-        if not index_result.get("indexed", 0):
-            logger.warning("Failed to index documents")
-            
-        # Step 3: Retrieve relevant results
+        logger.info(f"Index result: {index_result}")
+
+        if not index_result.get("indexed", 0) or index_result.get("error"):
+            logger.warning(
+                f"Failed to index documents (result: {index_result}) - using direct document results"
+            )
+            # Fallback: return crawled documents directly without vector search
+            return {
+                "count": len(docs),
+                "examples": [
+                    {
+                        "url": doc["url"],
+                        "title": doc.get("title", ""),
+                        "published_at": doc.get("published_at", ""),
+                    }
+                    for doc in docs[:3]  # Show first 3 as examples
+                ],
+                "hits": [
+                    {
+                        "url": doc["url"],
+                        "title": doc.get("title", ""),
+                        "content": doc.get("markdown", "")[:500] + "..."
+                        if len(doc.get("markdown", "")) > 500
+                        else doc.get("markdown", ""),
+                        "published_at": doc.get("published_at", ""),
+                        "score": 1.0,  # Fixed high relevance score for crawled content
+                    }
+                    for doc in docs
+                ],
+                "query": query,
+                "indexed": 0,
+                "fallback_mode": True,
+            }
+
+        # Step 3: Retrieve relevant results using vector search
         retrieve_result = await self._call_indexer_retrieve(
-            query=query,
-            k=8,
-            recency_boost_days=freshness_days,
-            request_id=request_id
+            query=query, k=8, recency_boost_days=freshness_days, request_id=request_id
         )
-        
+
         hits = retrieve_result.get("hits", [])
-        
+
         # Format result for LLM
         return {
             "count": len(hits),
@@ -137,22 +164,22 @@ class ToolHandler:
                 {
                     "url": hit["url"],
                     "title": hit.get("title", ""),
-                    "published_at": hit.get("published_at", "")
+                    "published_at": hit.get("published_at", ""),
                 }
                 for hit in hits[:3]  # Show first 3 as examples
             ],
             "hits": hits,
             "query": query,
-            "indexed": index_result.get("indexed", 0)
+            "indexed": index_result.get("indexed", 0),
         }
-    
+
     async def _call_crawler(
         self,
         query: str,
         seed_urls: List[str],
         freshness_days: int,
         depth: int,
-        request_id: str
+        request_id: str,
     ) -> Dict[str, Any]:
         """Call the crawler service to fetch web content."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -163,24 +190,22 @@ class ToolHandler:
                         "query": query,
                         "seed_urls": seed_urls,
                         "freshness_days": freshness_days,
-                        "depth": depth
+                        "depth": depth,
                     },
-                    headers={"X-Request-ID": request_id}
+                    headers={"X-Request-ID": request_id},
                 )
                 response.raise_for_status()
                 return response.json()
-                
+
             except httpx.RequestError as e:
                 logger.error(f"Crawler request failed: {e}")
                 return {"error": f"Crawler service unavailable: {e}"}
             except httpx.HTTPStatusError as e:
                 logger.error(f"Crawler HTTP error: {e.response.status_code}")
                 return {"error": f"Crawler error: {e.response.status_code}"}
-    
+
     async def _call_indexer_index(
-        self,
-        docs: List[Dict[str, Any]],
-        request_id: str
+        self, docs: List[Dict[str, Any]], request_id: str
     ) -> Dict[str, Any]:
         """Call the indexer service to index documents."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -188,21 +213,17 @@ class ToolHandler:
                 response = await client.post(
                     f"{self.indexer_url}/index",
                     json={"docs": docs},
-                    headers={"X-Request-ID": request_id}
+                    headers={"X-Request-ID": request_id},
                 )
                 response.raise_for_status()
                 return response.json()
-                
+
             except Exception as e:
                 logger.error(f"Indexing failed: {e}")
                 return {"error": f"Indexing failed: {e}"}
-    
+
     async def _call_indexer_retrieve(
-        self,
-        query: str,
-        k: int,
-        recency_boost_days: int,
-        request_id: str
+        self, query: str, k: int, recency_boost_days: int, request_id: str
     ) -> Dict[str, Any]:
         """Call the indexer service to retrieve relevant documents."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -212,19 +233,21 @@ class ToolHandler:
                     json={
                         "query": query,
                         "k": k,
-                        "recency_boost_days": recency_boost_days
+                        "recency_boost_days": recency_boost_days,
                     },
-                    headers={"X-Request-ID": request_id}
+                    headers={"X-Request-ID": request_id},
                 )
                 response.raise_for_status()
                 return response.json()
-                
+
             except Exception as e:
                 logger.error(f"Retrieval failed: {e}")
                 return {"error": f"Retrieval failed: {e}"}
 
+
 # Global tool handler
 _tool_handler = None
+
 
 def get_tool_handler() -> ToolHandler:
     """Get or create the global tool handler instance."""

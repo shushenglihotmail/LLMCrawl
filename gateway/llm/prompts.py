@@ -12,41 +12,40 @@ CRAWL_AND_REFRESH_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "User topic or question"
-                },
+                "query": {"type": "string", "description": "User topic or question"},
                 "seed_urls": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional seed URLs or domains to prefer"
+                    "description": "Optional seed URLs or domains to prefer",
                 },
                 "freshness_days": {
                     "type": "integer",
                     "default": 7,
                     "minimum": 1,
-                    "description": "How recent the content should be (in days)"
+                    "description": "How recent the content should be (in days)",
                 },
                 "depth": {
-                    "type": "integer", 
+                    "type": "integer",
                     "default": 1,
                     "minimum": 1,
-                    "description": "Crawl depth (1 = direct pages only)"
-                }
+                    "description": "Crawl depth (1 = direct pages only)",
+                },
             },
-            "required": ["query"]
-        }
-    }
+            "required": ["query"],
+        },
+    },
 }
 
 # Main system prompt
 SYSTEM_PROMPT = """You are a grounded, up-to-date assistant with access to real-time web information.
 
-Policy for tools:
-- If a user asks about news, stocks, earnings, product launches, recent papers, "today/this week/this month", or uses words like "latest", "breaking", "just announced", CALL the tool `crawl_and_refresh` with their query (and seed URLs if provided).
+CRITICAL TOOL USAGE RULES:
+- When the `crawl_and_refresh` tool is available, you MUST use it for any question requiring current information, news, recent events, or verification.
+- NEVER say "I'll fetch" or "I'll search" without actually calling the tool. If you mention fetching data, you MUST call the tool in the SAME response.
+- If you don't have current information to answer a question about recent events, you MUST call the tool rather than making up an answer.
 - After the tool returns, answer ONLY using the returned/retrieved sources. Include inline citations with URL + published date for each key claim.
 - If the question is historical or general knowledge where freshness is not required, do NOT call the tool.
-- If the user explicitly asks you to refresh or verify information, CALL the tool.
+- If the user asks for "details" or "more information" about something you just mentioned from web sources, call the tool again with a more specific query.
 
 Answer format:
 - Start with a 2–4 bullet executive summary.
@@ -68,12 +67,9 @@ Context: You have access to a sophisticated web crawling system that can fetch, 
 
 # Few-shot examples for better tool usage
 FEW_SHOT_EXAMPLES = [
+    {"role": "user", "content": "What's the latest on NVDA earnings and guidance?"},
     {
-        "role": "user",
-        "content": "What's the latest on NVDA earnings and guidance?"
-    },
-    {
-        "role": "assistant", 
+        "role": "assistant",
         "content": "I'll search for the latest NVIDIA earnings information.",
         "tool_calls": [
             {
@@ -81,74 +77,135 @@ FEW_SHOT_EXAMPLES = [
                 "type": "function",
                 "function": {
                     "name": "crawl_and_refresh",
-                    "arguments": '{"query": "NVIDIA NVDA earnings guidance latest quarter", "freshness_days": 14}'
-                }
+                    "arguments": '{"query": "NVIDIA NVDA earnings guidance latest quarter", "freshness_days": 14}',
+                },
             }
-        ]
+        ],
     },
     {
         "role": "tool",
         "tool_call_id": "call_1",
-        "content": '{"count": 3, "hits": [{"url": "https://investor.nvidia.com/news/press-release-details/2023/NVIDIA-Announces-Financial-Results-for-Third-Quarter-Fiscal-2024", "title": "NVIDIA Q3 Results", "published_at": "2023-11-21", "snippet": "Revenue of $18.12 billion, up 206% year-over-year..."}]}'
+        "content": '{"count": 3, "hits": [{"url": "https://investor.nvidia.com/news/press-release-details/2023/NVIDIA-Announces-Financial-Results-for-Third-Quarter-Fiscal-2024", "title": "NVIDIA Q3 Results", "published_at": "2023-11-21", "snippet": "Revenue of $18.12 billion, up 206% year-over-year..."}]}',
     },
     {
         "role": "assistant",
-        "content": "Based on the latest information:\n\n• NVIDIA reported record Q3 revenue of $18.12 billion, up 206% year-over-year\n• Data center revenue reached $14.51 billion, driven by AI demand\n• Strong guidance provided for Q4 with continued AI growth expected\n\n**Financial Performance**\nNVIDIA's third quarter showed exceptional growth (investor.nvidia.com, 2023-11-21), with total revenue hitting $18.12 billion compared to $5.93 billion in the prior year.\n\n**Sources:**\n- NVIDIA Q3 Results (investor.nvidia.com, 2023-11-21)"
+        "content": "Based on the latest information:\n\n• NVIDIA reported record Q3 revenue of $18.12 billion, up 206% year-over-year\n• Data center revenue reached $14.51 billion, driven by AI demand\n• Strong guidance provided for Q4 with continued AI growth expected\n\n**Financial Performance**\nNVIDIA's third quarter showed exceptional growth (investor.nvidia.com, 2023-11-21), with total revenue hitting $18.12 billion compared to $5.93 billion in the prior year.\n\n**Sources:**\n- NVIDIA Q3 Results (investor.nvidia.com, 2023-11-21)",
     },
-    {
-        "role": "user",
-        "content": "Explain how dividend yield works historically."
-    },
+    {"role": "user", "content": "Explain how dividend yield works historically."},
     {
         "role": "assistant",
-        "content": "Dividend yield is calculated as the annual dividend per share divided by the stock's current price, expressed as a percentage. Historically, dividend yields have varied significantly across different market periods...\n\n[Continues with explanation without calling tools since this is general financial knowledge]"
+        "content": "Dividend yield is calculated as the annual dividend per share divided by the stock's current price, expressed as a percentage. Historically, dividend yields have varied significantly across different market periods...\n\n[Continues with explanation without calling tools since this is general financial knowledge]",
     },
-    {
-        "role": "user", 
-        "content": "Any new papers on RISC-V toolchains this month?"
-    },
+    {"role": "user", "content": "Any new papers on RISC-V toolchains this month?"},
     {
         "role": "assistant",
         "content": "I'll search for recent RISC-V toolchain research papers.",
         "tool_calls": [
             {
-                "id": "call_2", 
+                "id": "call_2",
                 "type": "function",
                 "function": {
                     "name": "crawl_and_refresh",
-                    "arguments": '{"query": "RISC-V toolchain papers research 2024", "freshness_days": 30}'
-                }
+                    "arguments": '{"query": "RISC-V toolchain papers research 2024", "freshness_days": 30}',
+                },
             }
-        ]
-    }
+        ],
+    },
+    {
+        "role": "tool",
+        "tool_call_id": "call_2",
+        "content": '{"count": 2, "hits": [{"url": "https://arxiv.org/abs/2024.01234", "title": "Enhanced RISC-V Toolchain Optimization", "published_at": "2024-01-15", "snippet": "Novel optimization techniques for RISC-V compilation..."}]}',
+    },
+    {
+        "role": "assistant",
+        "content": "I found some recent RISC-V toolchain research:\n\n• **Enhanced RISC-V Toolchain Optimization** - Novel compilation optimization techniques published in January 2024\n\n**Sources:**\n- Enhanced RISC-V Toolchain Optimization (arxiv.org, 2024-01-15)",
+    },
 ]
+
 
 def should_trigger_crawl(message: str) -> bool:
     """
     Determine if a message should trigger web crawling based on keywords.
     This provides server-side routing logic as a backup to LLM decisions.
     """
-    trigger_words = [
-        'latest', 'today', 'this week', 'this month', 'breaking', 'recent',
-        'earnings', 'guidance', 'ticker', 'market', 'price', 'launched', 
-        'announced', 'filed', 'SEC', '10-K', '10-Q', 'news', 'update',
-        'current', 'now', 'just', 'new', 'fresh', 'live'
+    # Don't trigger crawl for basic system info questions
+    system_info_patterns = [
+        "what date",
+        "what time",
+        "what day",
+        "current date",
+        "current time",
+        "today's date",
+        "what's the date",
+        "date today",
     ]
-    
+
     message_lower = message.lower()
+
+    # Skip crawling for basic system information
+    for pattern in system_info_patterns:
+        if pattern in message_lower:
+            return False
+
+    # Trigger crawling for fresh data needs
+    trigger_words = [
+        "latest",
+        "this week",
+        "this month",
+        "breaking",
+        "recent",
+        "earnings",
+        "guidance",
+        "ticker",
+        "market",
+        "price",
+        "launched",
+        "announced",
+        "filed",
+        "SEC",
+        "10-K",
+        "10-Q",
+        "news",
+        "update",
+        "current",
+        "now",
+        "just",
+        "new",
+        "fresh",
+        "live",
+        "today",
+        "s&p",
+        "sp500",
+        "dow",
+        "nasdaq",
+        "index",
+        "stock",
+        "close",
+        "closing",
+    ]
+
+    # Only trigger if it's about external/fresh information
     return any(word in message_lower for word in trigger_words)
+
 
 def build_messages_with_examples(user_message: str) -> list:
     """Build the full message context including system prompt and examples."""
+    from datetime import datetime
+
+    current_date = datetime.now().strftime("%B %d, %Y")
+
+    # Add current date to system prompt
+    system_with_date = f"{SYSTEM_PROMPT}\n\nIMPORTANT: Today's date is {current_date}. Use this when answering date/time questions."
+
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "system", "content": DEVELOPER_PROMPT}
+        {"role": "system", "content": system_with_date},
+        {"role": "system", "content": DEVELOPER_PROMPT},
     ]
-    
+
     # Add few-shot examples for better tool usage
     messages.extend(FEW_SHOT_EXAMPLES)
-    
+
     # Add the actual user message
     messages.append({"role": "user", "content": user_message})
-    
+
     return messages

@@ -1,31 +1,53 @@
 # Web RAG System
 
-A production-ready, containerized Python web RAG system that enables LLMs to trigger web crawling, index results, and answer questions with citations. Built with FastAPI, LlamaIndex, and pluggable vector databases.
+A production-ready, containerized Python web RAG system that enables LLMs to trigger web crawling, index results, and answer questions with citations. Features conversation memory, intelligent tool calling, and multi-source web scraping.
 
 ## 🏗️ Architecture
 
-The system consists of four main services:
+The system consists of four main services with conversation state management:
 
-- **Gateway Service** (Port 8000): FastAPI orchestrator with OpenAI/Azure SDK for chat and tool calling
-- **Crawler Service** (Port 8001): Firecrawl + Playwright fallback + Trafilatura extraction
+- **Gateway Service** (Port 8000): FastAPI orchestrator with OpenAI/Azure SDK, conversation history storage, intelligent tool triggering
+- **Crawler Service** (Port 8001): FireCrawl + Playwright fallback + Trafilatura extraction with sequential rendering
 - **Indexer Service** (Port 8002): LlamaIndex + Vector DB (Qdrant/pgvector) for RAG
 - **Demo Client** (Port 3000): Optional web interface with SSE streaming
 
-### Tool Function Calling Pipeline
+### Enhanced Tool Calling Pipeline with Conversation Memory
 
 ```mermaid
-graph LR
-    A[User Query] --> B{Contains Latest/News Keywords?}
-    B -->|Yes| C[Call crawl_and_refresh Tool]
-    B -->|No| D[Direct LLM Response]
-    C --> E[Firecrawl Search & Crawl]
-    E --> F[Playwright Fallback if Needed]
-    F --> G[Trafilatura Text Extraction]
-    G --> H[LlamaIndex Chunking & Embedding]
-    H --> I[Vector DB Storage]
-    I --> J[Semantic Retrieval with Recency Boost]
-    J --> K[LLM Response with Citations]
+graph TB
+    A[User Query + conversation_id] --> B{Load Previous<br/>Conversation?}
+    B -->|Yes| C[Retrieve History<br/>from Store]
+    B -->|No| D[New Conversation]
+    C --> E{Contains Trigger Words<br/>OR Context Suggests<br/>News Query?}
+    D --> E
+    E -->|Yes| F[Include crawl_and_refresh Tool]
+    E -->|No| G[Direct LLM Response]
+    F --> H{Force Tool Call?}
+    H -->|Explicit Query| I[tool_choice=function]
+    H -->|Follow-up| J[tool_choice=auto]
+    I --> K[LLM MUST Call Tool]
+    J --> K
+    K --> L[FireCrawl Search & Crawl]
+    L --> M[Playwright Fallback if Needed]
+    M --> N[Trafilatura Text Extraction]
+    N --> O[LlamaIndex Chunking & Embedding]
+    O --> P[Vector DB Storage]
+    P --> Q[Semantic Retrieval with Recency Boost]
+    Q --> R[LLM Response with Citations]
+    R --> S[Store User + Assistant Messages]
+    S --> T[Return Response + conversation_id]
+    G --> S
 ```
+
+## ✨ Key Features
+
+- **Conversation Memory**: Multi-turn conversations with context preservation (24-hour TTL)
+- **Intelligent Tool Triggering**: Automatic detection of queries needing fresh data (29+ trigger words)
+- **Context-Aware Follow-ups**: Recognizes when follow-up questions relate to previous news queries
+- **Forced Tool Execution**: Prevents incomplete "I'll fetch..." responses by enforcing tool calls
+- **Sequential Browser Rendering**: Stable Playwright execution in Docker (no concurrency issues)
+- **FireCrawl Integration**: Redis-backed rate limiting with proper connection handling
+- **Flexible Timeouts**: 45-second gateway timeout, 25-second FireCrawl timeout
 
 ## 🚀 Quick Start
 
@@ -47,7 +69,7 @@ Edit `.env` file with your API keys and preferences:
 # Required: OpenAI Configuration
 OPENAI_API_KEY=your_openai_key_here
 
-# OR: Azure OpenAI Configuration  
+# OR: Azure OpenAI Configuration
 LLM_PROVIDER=azure
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
 AZURE_OPENAI_API_KEY=your_azure_key_here
@@ -93,7 +115,7 @@ python scripts/setup_dev.py
 make setup-dev              # Cross-platform
 make setup-dev-windows       # Windows specific
 
-# Quick start development environment  
+# Quick start development environment
 make quick-start            # Unix/Linux/macOS
 make quick-start-windows    # Windows
 ```
@@ -150,7 +172,7 @@ make health
 
 # Or manually check each service
 curl http://localhost:8000/health  # Gateway
-curl http://localhost:8001/health  # Crawler  
+curl http://localhost:8001/health  # Crawler
 curl http://localhost:8002/health  # Indexer
 ```
 
@@ -213,7 +235,7 @@ curl http://localhost:3002/health
 docker-compose up -d qdrant postgres redis
 docker-compose up -d firecrawl
 docker-compose up -d indexer
-docker-compose up -d crawler  
+docker-compose up -d crawler
 docker-compose up -d gateway
 
 # Verify all services
@@ -278,7 +300,7 @@ VECTOR_DB=qdrant
 QDRANT_URL=http://qdrant:6333
 
 # OR PostgreSQL with pgvector (SQL queries + vectors)
-VECTOR_DB=pgvector  
+VECTOR_DB=pgvector
 PG_DSN=postgresql://postgres:password@postgres:5432/rag_db
 ```
 
@@ -310,7 +332,7 @@ docker stats
    ```bash
    # Check logs
    docker-compose logs service-name
-   
+
    # Rebuild if needed
    docker-compose build --no-cache service-name
    ```
@@ -319,7 +341,7 @@ docker stats
    ```bash
    # Check what's using ports
    netstat -tulpn | grep :8000
-   
+
    # Change ports in docker-compose.yml if needed
    ```
 
@@ -327,7 +349,7 @@ docker stats
    ```bash
    # Check available memory
    free -h
-   
+
    # Reduce concurrent processes in .env
    MAX_CONCURRENCY=2
    ```
@@ -336,7 +358,7 @@ docker stats
    ```bash
    # Verify environment variables
    docker-compose exec gateway env | grep -i openai
-   
+
    # Test API connection
    docker-compose exec gateway python -c "import openai; print('API key works')"
    ```
@@ -354,7 +376,7 @@ make test-integration
 
 # Or run tests manually
 docker-compose exec gateway python -m pytest tests/ -v
-docker-compose exec crawler python -m pytest tests/ -v  
+docker-compose exec crawler python -m pytest tests/ -v
 docker-compose exec indexer python -m pytest tests/ -v
 ```
 
@@ -377,7 +399,7 @@ python tests/integration/test_end_to_end.py
 ```bash
 # All should return {"status": "healthy"}
 curl http://localhost:8000/health
-curl http://localhost:8001/health  
+curl http://localhost:8001/health
 curl http://localhost:8002/health
 curl http://localhost:6333/health  # Qdrant
 ```
@@ -453,7 +475,7 @@ Expected response:
   "hits": [
     {
       "url": "https://example.com/test",
-      "title": "Test Document", 
+      "title": "Test Document",
       "published_at": "2024-01-15T10:00:00Z",
       "snippet": "...artificial intelligence and machine learning...",
       "score": 0.89,
@@ -558,7 +580,7 @@ Based on the latest information:
 **Financial Performance**
 Apple's fourth quarter results showed mixed performance (investor.apple.com, 2024-11-01), with total revenue of $89.5 billion compared to $90.1 billion in the prior year. The iPhone segment faced headwinds but Services continued strong growth.
 
-**Guidance and Outlook** 
+**Guidance and Outlook**
 Management provided conservative guidance for Q1 2025 (sec.gov, 2024-11-01), citing macroeconomic uncertainties and foreign exchange impacts.
 
 **Sources:**
@@ -699,7 +721,7 @@ docker-compose --profile monitoring up -d
 ### Key Metrics to Monitor
 
 - **Response Times**: Chat endpoint latency
-- **Tool Call Frequency**: How often crawling is triggered  
+- **Tool Call Frequency**: How often crawling is triggered
 - **Crawling Success Rate**: Percentage of successful crawls
 - **Index Throughput**: Documents indexed per minute
 - **Vector DB Performance**: Query response times
