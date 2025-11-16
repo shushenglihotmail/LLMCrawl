@@ -124,9 +124,9 @@ class FirecrawlClient:
             search_params = {
                 "query": query,
                 "limit": max_results,
-                "include_domains": self._extract_domains(seed_urls)
-                if seed_urls
-                else None,
+                "include_domains": (
+                    self._extract_domains(seed_urls) if seed_urls else None
+                ),
             }
 
             # Remove None values
@@ -267,7 +267,8 @@ class FirecrawlClient:
     async def health_check(self) -> Dict[str, Any]:
         """Check if Firecrawl service is healthy."""
         try:
-            response = await self.client.get(urljoin(self.base_url, "/health"))
+            # FireCrawl doesn't have /health, use root endpoint instead
+            response = await self.client.get(self.base_url)
             response.raise_for_status()
 
             return {"status": "healthy", "service": "firecrawl", "url": self.base_url}

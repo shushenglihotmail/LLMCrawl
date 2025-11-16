@@ -4,7 +4,7 @@
 install-dev:
 	pip install -r requirements/dev.txt
 
-setup-dev: 
+setup-dev:
 	python scripts/setup_dev.py
 
 setup-dev-windows:
@@ -21,7 +21,7 @@ dev-up:
 	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 	@echo "Development environment is running!"
 	@echo "Gateway: http://localhost:8000"
-	@echo "Crawler: http://localhost:8001" 
+	@echo "Crawler: http://localhost:8001"
 	@echo "Indexer: http://localhost:8002"
 	@echo "Qdrant Dashboard: http://localhost:6333/dashboard"
 
@@ -80,10 +80,38 @@ db-reset:
 	docker-compose down -v
 	docker-compose up -d qdrant postgres redis
 
-# Monitoring
+# Monitoring and Metrics
+monitoring-up:
+	docker-compose --profile monitoring up -d
+	@echo "Monitoring stack started!"
+	@echo "Prometheus: http://localhost:9090"
+	@echo "Grafana: http://localhost:3001 (admin/admin)"
+	@echo "Qdrant Dashboard: http://localhost:6333/dashboard"
+
+monitoring-down:
+	docker-compose stop prometheus grafana
+
 metrics:
-	open http://localhost:9090  # Prometheus
-	open http://localhost:3000  # Grafana
+	@echo "Opening monitoring dashboards..."
+	@echo "Prometheus: http://localhost:9090"
+	@echo "Grafana: http://localhost:3001"
+
+metrics-gateway:
+	curl http://localhost:8000/metrics
+
+metrics-crawler:
+	curl http://localhost:8001/metrics
+
+metrics-indexer:
+	curl http://localhost:8002/metrics
+
+metrics-all:
+	@echo "=== Gateway Metrics ==="
+	@curl -s http://localhost:8000/metrics | grep "http_requests_total"
+	@echo "\n=== Crawler Metrics ==="
+	@curl -s http://localhost:8001/metrics | grep "http_requests_total"
+	@echo "\n=== Indexer Metrics ==="
+	@curl -s http://localhost:8002/metrics | grep "http_requests_total"
 
 # Cleanup
 clean:
@@ -94,9 +122,23 @@ clean:
 # Health checks
 health:
 	@echo "Checking service health..."
-	@curl -s http://localhost:8000/health | jq .
-	@curl -s http://localhost:8001/health | jq .
-	@curl -s http://localhost:8002/health | jq .
+	@echo "\n=== Gateway Health ==="
+	@curl -s http://localhost:8000/health
+	@echo "\n=== Crawler Health ==="
+	@curl -s http://localhost:8001/health
+	@echo "\n=== Indexer Health ==="
+	@curl -s http://localhost:8002/health
+	@echo "\n=== Qdrant Health ==="
+	@curl -s http://localhost:6333/health
+
+health-gateway:
+	curl http://localhost:8000/health | jq .
+
+health-crawler:
+	curl http://localhost:8001/health | jq .
+
+health-indexer:
+	curl http://localhost:8002/health | jq .
 
 # Example queries
 test-query:

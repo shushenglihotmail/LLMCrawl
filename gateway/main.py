@@ -6,22 +6,24 @@ Handles chat interactions, tool calling, and coordinates with crawler/indexer se
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from .routers import chat
-from .utils.logging import setup_logging, get_logger
+from .utils.logging import get_logger, setup_logging
 
 # Setup logging
 setup_logging()
 logger = get_logger(__name__)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management."""
     logger.info("Starting Gateway service")
-    
+
     # Startup
     try:
         # Initialize any startup tasks here
@@ -31,12 +33,13 @@ async def lifespan(app: FastAPI):
         # Cleanup
         logger.info("Shutting down Gateway service")
 
+
 # Create FastAPI app
 app = FastAPI(
     title="Web RAG Gateway",
     description="Gateway service for web crawling and RAG-based question answering",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Add middleware
@@ -49,12 +52,15 @@ app.add_middleware(
 )
 
 app.add_middleware(
-    TrustedHostMiddleware, 
-    allowed_hosts=["*"]  # Configure appropriately for production
+    TrustedHostMiddleware, allowed_hosts=["*"]  # Configure appropriately for production
 )
 
 # Include routers
 app.include_router(chat.router, prefix="/api/v1")
+
+# Setup Prometheus metrics
+Instrumentator().instrument(app).expose(app)
+
 
 @app.get("/")
 async def root():
@@ -66,28 +72,21 @@ async def root():
         "endpoints": {
             "chat": "/api/v1/chat",
             "health": "/api/v1/health",
-            "docs": "/docs"
-        }
+            "docs": "/docs",
+        },
     }
+
 
 @app.get("/health")
 async def health():
     """Service health check."""
-    return {
-        "status": "healthy",
-        "service": "gateway"
-    }
+    return {"status": "healthy", "service": "gateway"}
+
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     host = os.getenv("GATEWAY_HOST", "0.0.0.0")
     port = int(os.getenv("GATEWAY_PORT", 8000))
-    
-    uvicorn.run(
-        "main:app",
-        host=host,
-        port=port,
-        reload=True,
-        log_level="info"
-    )
+
+    uvicorn.run("main:app", host=host, port=port, reload=True, log_level="info")

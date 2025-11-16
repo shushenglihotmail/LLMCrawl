@@ -31,11 +31,8 @@ scrape_configs:
     scrape_interval: 60s
     metrics_path: '/metrics'
 
-  - job_name: 'firecrawl'
-    static_configs:
-      - targets: ['firecrawl:3002']
-    scrape_interval: 60s
-    metrics_path: '/metrics'
+  # FireCrawl doesn't expose Prometheus metrics
+  # Monitor via gateway/crawler health checks instead
 
 rule_files:
   # - "first_rules.yml"

@@ -248,6 +248,18 @@ docker-compose ps
 # Demo web client
 docker-compose --profile demo up -d demo-client
 
+# Monitoring stack (Prometheus + Grafana)
+docker-compose --profile monitoring up -d
+# Or use: make monitoring-up
+```
+
+**Monitoring Access:**
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3001 (admin/admin)
+- Qdrant Dashboard: http://localhost:6333/dashboard
+
+For detailed monitoring setup and usage, see [docs/MONITORING.md](docs/MONITORING.md).
+
 # Monitoring stack
 docker-compose --profile monitoring up -d prometheus grafana
 ```
@@ -306,15 +318,129 @@ PG_DSN=postgresql://postgres:password@postgres:5432/rag_db
 
 ### Health Checks and Monitoring
 
+#### Quick Health Checks
+
+**Using PowerShell Script (Windows - Recommended):**
+```powershell
+.\scripts\health-check.ps1
+```
+
+**Using Make Command (Linux/Mac):**
 ```bash
-# Check individual service health
-curl http://localhost:8000/health | jq .  # Gateway
-curl http://localhost:8001/health | jq .  # Crawler
-curl http://localhost:8002/health | jq .  # Indexer
+make health
 
-# Check database health
-curl http://localhost:6333/health | jq .  # Qdrant
+# Or check individual services
+make health-gateway
+make health-crawler
+make health-indexer
+```
 
+**Using curl Commands Directly:**
+```bash
+# Check all services
+curl http://localhost:8000/health  # Gateway
+curl http://localhost:8001/health  # Crawler
+curl http://localhost:8002/health  # Indexer
+curl http://localhost:6333/health  # Qdrant
+
+# For detailed JSON output (Windows PowerShell)
+curl http://localhost:8000/health | ConvertFrom-Json | ConvertTo-Json -Depth 10
+
+# For detailed JSON output (Linux/Mac with jq)
+curl http://localhost:8000/health | jq .
+```
+
+**Health Check Response Format:**
+```json
+{
+  "status": "healthy",
+  "service": "gateway",
+  "timestamp": "2025-11-15T10:30:00Z",
+  "components": {
+    "crawler": "healthy",
+    "indexer": "healthy",
+    "llm": "healthy"
+  }
+}
+```
+
+#### Prometheus Metrics Monitoring
+
+Start the monitoring stack:
+
+```bash
+# Start Prometheus and Grafana
+docker-compose --profile monitoring up -d
+
+# Or use Make command (Linux/Mac)
+make monitoring-up
+```
+
+**Access Monitoring Dashboards:**
+- **Prometheus**: http://localhost:9090 - Raw metrics and queries
+- **Grafana**: http://localhost:3001 - Visual dashboards (default login: admin/admin)
+- **Qdrant Dashboard**: http://localhost:6333/dashboard - Vector database stats
+
+**Check Metrics Endpoints:**
+
+**Using PowerShell Script (Windows - Recommended):**
+```powershell
+.\scripts\check-metrics.ps1
+```
+
+**Using Make Commands (Linux/Mac):**
+```bash
+make metrics-all        # Summary of all services
+make metrics-gateway    # Detailed gateway metrics
+make metrics-crawler    # Detailed crawler metrics
+make metrics-indexer    # Detailed indexer metrics
+```
+
+**Using curl Directly:**
+```bash
+# Gateway metrics
+curl http://localhost:8000/metrics
+
+# Crawler metrics
+curl http://localhost:8001/metrics
+
+# Indexer metrics
+curl http://localhost:8002/metrics
+```
+
+**For Complete Monitoring Guide:** See [docs/MONITORING.md](docs/MONITORING.md)
+
+**Key Metrics to Monitor:**
+
+```promql
+# Service availability (1 = up, 0 = down)
+up{job="gateway"}
+up{job="crawler"}
+up{job="indexer"}
+
+# Request rate (requests per second)
+rate(http_requests_total[5m])
+
+# Request latency (95th percentile)
+histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+
+# Error rate
+rate(http_requests_total{status=~"5.."}[5m])
+
+# Memory usage
+process_resident_memory_bytes
+```
+
+**Grafana Setup:**
+
+1. Open Grafana at http://localhost:3001
+2. Login with admin/admin
+3. Prometheus datasource is auto-configured
+4. Create dashboards with the queries above
+
+#### Service Logs
+
+```bash
 # View service logs
 docker-compose logs -f gateway
 docker-compose logs -f crawler

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
 
 # Import our crawler components
@@ -101,6 +102,9 @@ app.add_middleware(
 
 # Global clients
 firecrawl_client: Optional[FirecrawlClient] = None
+
+# Setup Prometheus metrics
+Instrumentator().instrument(app).expose(app)
 
 
 @app.post("/crawl", response_model=CrawlResponse)
