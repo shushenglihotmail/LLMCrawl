@@ -48,6 +48,7 @@ graph TB
 - **Sequential Browser Rendering**: Stable Playwright execution in Docker (no concurrency issues)
 - **FireCrawl Integration**: Redis-backed rate limiting with proper connection handling
 - **Flexible Timeouts**: 45-second gateway timeout, 25-second FireCrawl timeout
+- **Internal Site Authentication**: Support for headers, cookies, basic auth, and bearer tokens for crawling authenticated internal sites
 
 ## 🚀 Quick Start
 
@@ -83,7 +84,27 @@ FIRECRAWL_API_KEY=your_firecrawl_key_here
 # Crawling Configuration
 ALLOWED_DOMAINS=sec.gov,ft.com,wsj.com,nvidia.com,reuters.com,bloomberg.com
 RESPECT_ROBOTS=true
+
+# For Internal Sites (optional): See docs/AUTHENTICATION_QUICKSTART.md
+# FIRECRAWL_AUTH_TYPE=headers  # or cookies, basic, bearer
+# FIRECRAWL_AUTH_HEADERS={"X-API-Key": "your-key"}
 ```
+
+### 3. Authentication for Internal Sites (Optional)
+
+To crawl internal sites requiring authentication:
+
+```bash
+# Quick setup - add to .env:
+FIRECRAWL_AUTH_TYPE=headers
+FIRECRAWL_AUTH_HEADERS={"X-API-Key": "your-key"}
+
+# OR use cookies:
+FIRECRAWL_AUTH_TYPE=cookies
+FIRECRAWL_AUTH_COOKIES={"session_id": "abc123"}
+```
+
+📚 **See full authentication guide**: [`docs/AUTHENTICATION_QUICKSTART.md`](docs/AUTHENTICATION_QUICKSTART.md)
 
 ## 🛠️ Development Environment
 
@@ -962,6 +983,11 @@ llmcrawl/
 ├── docker/          # Docker configurations
 ├── monitoring/      # Prometheus/Grafana configs
 └── docs/            # Additional documentation
+    ├── AUTHENTICATION.md           # Full authentication guide
+    ├── AUTHENTICATION_QUICKSTART.md # 5-minute setup guide
+    ├── CRAWLING_LIMITATIONS.md     # News site extraction issues
+    ├── MONITORING.md               # Health checks and metrics
+    └── TESTING_INDEXING.md         # Testing guide
 ```
 
 ## 🎯 Roadmap

@@ -24,6 +24,14 @@ class FirecrawlClient:
         self.timeout = int(os.getenv("REQUEST_TIMEOUT_MS", "20000")) / 1000
         self.max_concurrency = int(os.getenv("MAX_CONCURRENCY", "4"))
 
+        # Authentication configuration for internal sites
+        self.auth_type = os.getenv("FIRECRAWL_AUTH_TYPE", "none")
+        self.auth_headers = self._parse_json_env("FIRECRAWL_AUTH_HEADERS", {})
+        self.auth_cookies = self._parse_json_env("FIRECRAWL_AUTH_COOKIES", {})
+        self.auth_username = os.getenv("FIRECRAWL_AUTH_USERNAME", "")
+        self.auth_password = os.getenv("FIRECRAWL_AUTH_PASSWORD", "")
+        self.auth_token = os.getenv("FIRECRAWL_AUTH_TOKEN", "")
+
         # Setup HTTP client with authentication
         headers = {}
         if self.api_key:
@@ -35,7 +43,10 @@ class FirecrawlClient:
             limits=httpx.Limits(max_connections=self.max_concurrency),
         )
 
-        logger.info(f"Initialized Firecrawl client: {self.base_url}")
+        logger.info(
+            f"Initialized Firecrawl client: {self.base_url} "
+            f"(auth_type: {self.auth_type})"
+        )
 
     async def search_and_crawl(
         self,
@@ -165,6 +176,13 @@ class FirecrawlClient:
                 "waitFor": 1000,  # Wait for JavaScript
             }
 
+            # Add authentication based on configured type
+            auth_config = self._get_auth_config()
+            if auth_config.get("headers"):
+                crawl_params["headers"] = auth_config["headers"]
+            if auth_config.get("cookies"):
+                crawl_params["cookies"] = auth_config["cookies"]
+
             response = await self.client.post(
                 urljoin(self.base_url, "/v1/scrape"), json=crawl_params
             )
@@ -212,7 +230,7 @@ class FirecrawlClient:
                 domain = urlparse(url).netloc
                 if domain and domain not in domains:
                     domains.append(domain)
-            except:
+            except Exception:
                 continue
         return domains
 
@@ -230,7 +248,7 @@ class FirecrawlClient:
                         >= cutoff_date
                     ):
                         filtered.append(result)
-                except:
+                except Exception:
                     # If date parsing fails, include the result anyway
                     filtered.append(result)
             else:
@@ -263,6 +281,58 @@ class FirecrawlClient:
         import hashlib
 
         return hashlib.md5(content.encode("utf-8")).hexdigest()
+
+    def _parse_json_env(self, key: str, default: dict) -> dict:
+        """Parse JSON from environment variable."""
+        import json
+
+        value = os.getenv(key, "")
+        if not value:
+            return default
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid JSON in environment variable {key}")
+            return default
+
+    def _get_auth_config(self) -> Dict[str, Any]:
+        """
+        Get authentication configuration based on auth type.
+
+        Returns:
+            Dict with 'headers' and/or 'cookies' for authentication
+        """
+        config = {"headers": {}, "cookies": {}}
+
+        if self.auth_type == "headers":
+            # Custom headers authentication
+            if self.auth_headers:
+                config["headers"].update(self.auth_headers)
+                logger.debug("Using custom headers authentication")
+
+        elif self.auth_type == "cookies":
+            # Cookie-based authentication
+            if self.auth_cookies:
+                config["cookies"].update(self.auth_cookies)
+                logger.debug("Using cookie-based authentication")
+
+        elif self.auth_type == "basic":
+            # Basic authentication
+            if self.auth_username and self.auth_password:
+                import base64
+
+                credentials = f"{self.auth_username}:{self.auth_password}"
+                encoded = base64.b64encode(credentials.encode()).decode()
+                config["headers"]["Authorization"] = f"Basic {encoded}"
+                logger.debug("Using basic authentication")
+
+        elif self.auth_type == "bearer":
+            # Bearer token authentication
+            if self.auth_token:
+                config["headers"]["Authorization"] = f"Bearer {self.auth_token}"
+                logger.debug("Using bearer token authentication")
+
+        return config
 
     async def health_check(self) -> Dict[str, Any]:
         """Check if Firecrawl service is healthy."""
