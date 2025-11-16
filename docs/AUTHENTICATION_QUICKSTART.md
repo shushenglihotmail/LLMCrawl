@@ -1,150 +1,394 @@
-# Quick Start: Internal Site Authentication
+# Authentication Quick Start
 
-## 5-Minute Setup Guide
+Choose your authentication method based on your needs:
 
-### Step 1: Choose Your Authentication Method
+## 🎯 Quick Decision Guide
 
-Identify which method your internal site uses:
+| Your Situation | Use This Method |
+|----------------|-----------------|
+| **SSO / MFA / Complex Login** | [Interactive Browser Auth](#1-interactive-browser-auth-easiest) |
+| **SharePoint / Azure AD** | [Interactive Browser](#1-interactive-browser-auth-easiest) or [Azure AD OAuth](#2-azure-ad-oauth-programmatic) |
+| **API Token / Key** | [Bearer Token](#3-bearer-token-simple) |
+| **Basic Username/Password** | [Basic Auth](#4-basic-authentication-legacy) |
+| **Custom Headers** | [Header Auth](#5-header-authentication-custom) |
 
-- **API Key/Custom Headers** → Use `headers` method
-- **Session Cookies** → Use `cookies` method
-- **Username/Password** → Use `basic` method
-- **JWT/OAuth Token** → Use `bearer` method
+---
 
-### Step 2: Get Credentials
+## 1. Interactive Browser Auth (Easiest)
 
-#### For Headers Method:
-```bash
-# Test with curl first
-curl -H "X-API-Key: your-key" https://internal-site.com/api
-```
-
-#### For Cookies Method:
-1. Login to site in browser
-2. Open DevTools (F12) → Application → Cookies
-3. Copy cookie values (session_id, auth_token, etc.)
-
-#### For Basic Auth:
-```bash
-# Test with curl
-curl -u username:password https://internal-site.com
-```
-
-#### For Bearer Token:
-```bash
-# Test with curl
-curl -H "Authorization: Bearer your-token" https://internal-site.com
-```
-
-### Step 3: Update `.env` File
-
-Edit `c:\src\github\LLMCrawl\.env`:
-
-#### Example 1: API Key Authentication
-```bash
-FIRECRAWL_AUTH_TYPE=headers
-FIRECRAWL_AUTH_HEADERS={"X-API-Key": "abc123xyz"}
-```
-
-#### Example 2: Session Cookies
-```bash
-FIRECRAWL_AUTH_TYPE=cookies
-FIRECRAWL_AUTH_COOKIES={"session_id": "abc123", "csrf_token": "xyz789"}
-```
-
-#### Example 3: Basic Auth
-```bash
-FIRECRAWL_AUTH_TYPE=basic
-FIRECRAWL_AUTH_USERNAME=admin
-FIRECRAWL_AUTH_PASSWORD=secure_password
-```
-
-#### Example 4: Bearer Token
-```bash
-FIRECRAWL_AUTH_TYPE=bearer
-FIRECRAWL_AUTH_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
-
-### Step 4: Add Domain to Allowed List
-
-```bash
-# Add your internal domain
-ALLOWED_DOMAINS=internal-site.com,confluence.company.com,sec.gov,reuters.com
-```
-
-### Step 5: Restart Services
+**Best for:** Any site with SSO, MFA, or complex login flows
 
 ```powershell
+# Step 1: Log in via browser
+.\scripts\auth.ps1 login https://internal-site.com
+
+# Step 2: Apply credentials
+.\scripts\auth.ps1 apply internal-site_com
+
+# Step 3: Restart and test
 docker-compose restart crawler
 ```
 
-### Step 6: Test
+**Advantages:**
+- ✅ Works with ANY authentication system
+- ✅ Handles MFA automatically
+- ✅ No manual configuration
+- ✅ Real browser = real authentication
 
-```powershell
-# Test crawling your internal site
-$body = @{
-    message = "What's on https://internal-site.com/docs?"
-    force_refresh = $true
-    seed_urls = @("https://internal-site.com/docs")
-} | ConvertTo-Json
+**When to use:**
+- Microsoft 365 / SharePoint
+- Okta / Auth0 SSO
+- Multi-factor authentication
+- SAML / OAuth flows
+- Don't know auth details
 
-Invoke-RestMethod -Uri "http://localhost:8000/api/v1/chat" `
-                  -Method Post `
-                  -ContentType "application/json" `
-                  -Body $body
-```
+📖 [Full Interactive Auth Guide](INTERACTIVE_AUTH.md)
 
-### Step 7: Verify
+---
 
-Check logs for authentication:
-```powershell
-docker-compose logs crawler | Select-String "auth"
-```
+## 2. Azure AD OAuth (Programmatic)
 
-Look for:
-- ✅ "Using [type] authentication"
-- ✅ "Successfully crawled X documents"
-- ❌ "401" or "403" errors mean authentication failed
+**Best for:** Automated/scheduled crawls of Azure AD protected resources
 
-## Common Examples
+### Step 1: Choose Your Authentication Method
 
-### Corporate Confluence
+### Setup
+
+1. Register app in Azure AD portal
+2. Grant permissions (Sites.Read.All, Files.Read.All)
+3. Create client secret
+4. Add to `.env`:
+
 ```bash
-FIRECRAWL_AUTH_TYPE=cookies
-FIRECRAWL_AUTH_COOKIES={"JSESSIONID": "ABC123", "atlassian.xsrf.token": "xyz"}
-ALLOWED_DOMAINS=confluence.company.com
+FIRECRAWL_AUTH_TYPE=azure_ad
+AZURE_TENANT_ID=your-tenant-id
+AZURE_CLIENT_ID=your-client-id
+AZURE_CLIENT_SECRET=your-client-secret
+AZURE_SCOPE=https://graph.microsoft.com/.default
 ```
 
-### Internal API
-```bash
-FIRECRAWL_AUTH_TYPE=headers
-FIRECRAWL_AUTH_HEADERS={"X-API-Key": "your-key", "X-Tenant": "company"}
-ALLOWED_DOMAINS=api.internal.company.com
-```
+5. Restart: `docker-compose restart crawler`
 
-### Staging Environment
-```bash
-FIRECRAWL_AUTH_TYPE=basic
-FIRECRAWL_AUTH_USERNAME=staging_user
-FIRECRAWL_AUTH_PASSWORD=staging_pass
-ALLOWED_DOMAINS=staging.company.com
-```
+**Advantages:**
+- ✅ Fully automated (no human intervention)
+- ✅ Tokens auto-refresh
+- ✅ Best for scheduled jobs
+- ✅ Audit trail in Azure AD
 
-### GitHub Enterprise
+**When to use:**
+- Scheduled/automated crawls
+- Service account scenarios
+- Need audit logs
+- SharePoint API access
+
+📖 [Azure AD Setup Guide](AZURE_AD_SETUP.md) | [Detailed Guide](AZURE_AD_AUTH.md)
+
+---
+
+## 3. Bearer Token (Simple)
+
+**Best for:** APIs with static bearer tokens
+
 ```bash
 FIRECRAWL_AUTH_TYPE=bearer
-FIRECRAWL_AUTH_TOKEN=ghp_xxxxxxxxxxxx
-ALLOWED_DOMAINS=github.company.com
+FIRECRAWL_AUTH_BEARER_TOKEN=your-api-token-here
 ```
 
-## Troubleshooting
+**When to use:**
+- API keys from admin panel
+- Long-lived access tokens
+- Static credentials
 
-### Still getting 401/403 errors?
+---
 
-1. **Test outside FireCrawl first:**
-   ```bash
-   curl -H "Authorization: Bearer token" https://internal-site.com
+## 4. Basic Authentication (Legacy)
+
+**Best for:** Older systems with username/password
+
+```bash
+FIRECRAWL_AUTH_TYPE=basic
+FIRECRAWL_AUTH_USERNAME=myuser
+FIRECRAWL_AUTH_PASSWORD=mypassword
+```
+
+**When to use:**
+- Legacy systems
+- Internal tools
+- Simple auth requirements
+
+---
+
+## 5. Header Authentication (Custom)
+
+**Best for:** Custom authentication schemes
+
+```bash
+FIRECRAWL_AUTH_TYPE=headers
+FIRECRAWL_AUTH_HEADERS={"X-API-Key": "abc123", "X-User-ID": "user@company.com"}
+```
+
+**When to use:**
+- Custom headers required
+- Non-standard auth
+- Multiple headers needed
+
+---
+
+## 6. Cookie Authentication (Manual)
+
+**Best for:** When you already have cookies
+
+```bash
+FIRECRAWL_AUTH_TYPE=cookies
+FIRECRAWL_AUTH_COOKIES={"sessionid": "abc123", "token": "xyz789"}
+```
+
+**When to use:**
+- Extracted cookies manually
+- Testing specific sessions
+- Short-term testing
+
+**Note:** Use [Interactive Auth](#1-interactive-browser-auth-easiest) instead - it captures cookies automatically!
+
+---
+
+## Comparison Table
+
+| Method | Ease of Use | MFA Support | Auto Refresh | Best For |
+|--------|-------------|-------------|--------------|----------|
+| **Interactive Browser** | ⭐⭐⭐⭐⭐ Very Easy | ✅ Yes | ❌ No (re-login) | Any complex auth |
+| **Azure AD OAuth** | ⭐⭐⭐ Moderate | ✅ Yes | ✅ Yes | Scheduled jobs |
+| **Bearer Token** | ⭐⭐⭐⭐ Easy | ❌ No | ❌ No | API tokens |
+| **Basic Auth** | ⭐⭐⭐⭐⭐ Very Easy | ❌ No | N/A | Legacy systems |
+| **Headers** | ⭐⭐⭐ Moderate | ❌ No | ❌ No | Custom auth |
+| **Cookies** | ⭐⭐ Hard | ❌ No | ❌ No | Manual testing |
+
+---
+
+## Real-World Examples
+
+### SharePoint Online
+
+**Option A: Interactive (Easiest)**
+```powershell
+.\scripts\auth.ps1 login https://company.sharepoint.com
+.\scripts\auth.ps1 apply company_sharepoint_com
+docker-compose restart crawler
+```
+
+**Option B: Azure AD (Automated)**
+```bash
+FIRECRAWL_AUTH_TYPE=azure_ad
+AZURE_TENANT_ID=xxxxx
+AZURE_CLIENT_ID=xxxxx
+AZURE_CLIENT_SECRET=xxxxx
+AZURE_SCOPE=https://graph.microsoft.com/.default
+```
+
+### Internal Wiki with SSO
+
+**Use Interactive:**
+```powershell
+.\scripts\auth.ps1 login https://wiki.company.com
+.\scripts\auth.ps1 apply wiki_company_com
+docker-compose restart crawler
+```
+
+### REST API with Key
+
+**Use Bearer:**
+```bash
+FIRECRAWL_AUTH_TYPE=bearer
+FIRECRAWL_AUTH_BEARER_TOKEN=sk-abc123xyz789
+```
+
+### Legacy Intranet
+
+**Use Basic:**
+```bash
+FIRECRAWL_AUTH_TYPE=basic
+FIRECRAWL_AUTH_USERNAME=admin
+FIRECRAWL_AUTH_PASSWORD=password123
+```
+
+---
+
+## Testing Authentication
+
+### Test Interactive Auth
+
+```powershell
+# After applying credentials
+.\scripts\test-internal-auth.ps1 https://protected-site.com
+```
+
+### Test Azure AD
+
+```powershell
+.\scripts\test-azure-ad.ps1
+```
+
+### Check Logs
+
+```powershell
+# View auth status
+docker-compose logs crawler | Select-String "auth"
+
+# Check for failures
+docker-compose logs crawler | Select-String "401|403"
+```
+
+---
+
+## Common Issues
+
+### Authentication Fails
+
+**Problem:** 401 or 403 errors
+
+**Solutions:**
+1. **Expired credentials** → Re-authenticate
+   ```powershell
+   .\scripts\auth.ps1 login https://site.com
+   .\scripts\auth.ps1 apply site_com
+   docker-compose restart crawler
    ```
+
+2. **Wrong auth type** → Check `.env` for `FIRECRAWL_AUTH_TYPE`
+
+3. **Missing permissions** → Check Azure AD app permissions
+
+### Interactive Auth Browser Doesn't Open
+
+**Problem:** Playwright not installed
+
+**Solution:**
+```powershell
+pip install playwright
+playwright install chromium
+```
+
+### Azure AD Token Errors
+
+**Problem:** "AADSTS" errors
+
+**Solutions:**
+- Check tenant ID, client ID, secret
+- Verify app permissions in Azure portal
+- Ensure admin consent granted
+- See [Azure AD Troubleshooting](AZURE_AD_AUTH.md#troubleshooting)
+
+### Credentials Expire Quickly
+
+**Problem:** Need to re-auth frequently
+
+**Solutions:**
+- **Interactive:** Normal - re-auth when needed
+- **Azure AD:** Should auto-refresh - check logs
+- **Tokens:** Request longer-lived tokens from admin
+
+---
+
+## Migration Guide
+
+### From Manual Cookies → Interactive Auth
+
+**Before:**
+```bash
+# Manual cookie extraction
+FIRECRAWL_AUTH_TYPE=cookies
+FIRECRAWL_AUTH_COOKIES={"FedAuth": "...", "rtFa": "..."}
+```
+
+**After:**
+```powershell
+# Automatic capture
+.\scripts\auth.ps1 login https://site.com
+.\scripts\auth.ps1 apply site_com
+```
+
+### From Basic Auth → Azure AD
+
+**Before:**
+```bash
+FIRECRAWL_AUTH_TYPE=basic
+FIRECRAWL_AUTH_USERNAME=user@company.com
+FIRECRAWL_AUTH_PASSWORD=password123
+```
+
+**After:**
+```bash
+FIRECRAWL_AUTH_TYPE=azure_ad
+AZURE_TENANT_ID=your-tenant-id
+AZURE_CLIENT_ID=your-client-id
+AZURE_CLIENT_SECRET=your-secret
+AZURE_SCOPE=https://graph.microsoft.com/.default
+```
+
+---
+
+## Security Best Practices
+
+### ✅ Do's
+
+1. **Use service accounts** for automated crawls
+2. **Grant minimum permissions** in Azure AD
+3. **Rotate secrets** regularly
+4. **Monitor auth logs** for suspicious activity
+5. **Use Interactive Auth** for testing (not production)
+6. **Use Azure AD** for production (auto-refresh)
+
+### ❌ Don'ts
+
+1. **Don't commit** `.env` or `.auth/` files
+2. **Don't share** credentials between environments
+3. **Don't use personal accounts** for service access
+4. **Don't hardcode** secrets in code
+5. **Don't skip** MFA when available
+
+---
+
+## Quick Commands Reference
+
+```powershell
+# Interactive Authentication
+.\scripts\auth.ps1 login <url>              # Authenticate
+.\scripts\auth.ps1 apply <profile>          # Apply credentials
+.\scripts\auth.ps1 list                     # List profiles
+.\scripts\auth.ps1 delete <profile>         # Delete profile
+
+# Testing
+.\scripts\test-internal-auth.ps1 <url>      # Test auth
+.\scripts\test-azure-ad.ps1                 # Test Azure AD
+
+# Debugging
+docker-compose logs crawler | Select-String "auth"
+docker-compose logs crawler | Select-String "401|403"
+
+# Restart
+docker-compose restart crawler
+```
+
+---
+
+## Next Steps
+
+1. **Choose your method** from the guide above
+2. **Follow the instructions** for your chosen method
+3. **Test authentication** with test scripts
+4. **Monitor logs** for issues
+
+## Further Reading
+
+- [Interactive Authentication Guide](INTERACTIVE_AUTH.md)
+- [Azure AD Setup](AZURE_AD_SETUP.md)
+- [Azure AD Detailed Guide](AZURE_AD_AUTH.md)
+- [Main README](../README.md)
+
+---
+
+**Most users should start with Interactive Browser Auth** - it's the easiest and works with everything! 🚀
+
 
 2. **Check JSON formatting:**
    ```bash

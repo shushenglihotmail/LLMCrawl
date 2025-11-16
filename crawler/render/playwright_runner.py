@@ -4,6 +4,7 @@ Provides fallback rendering when Firecrawl fails or for SPA content.
 """
 
 import asyncio
+import json
 import logging
 import os
 from datetime import datetime
@@ -29,6 +30,13 @@ class PlaywrightRenderer:
         self.user_agent = os.getenv("USER_AGENT", "WebRAG/1.0")
         self.max_concurrency = int(os.getenv("MAX_CONCURRENCY", "4"))
 
+        # Cookie-based authentication configuration
+        self.auth_type = os.getenv("FIRECRAWL_AUTH_TYPE", "none")
+        self.auth_cookies = self._parse_json_env("FIRECRAWL_AUTH_COOKIES", {})
+        self.auth_storage_state = self._parse_json_env(
+            "FIRECRAWL_AUTH_STORAGE_STATE", None
+        )
+
         self._browser = None
         self._playwright = None
         self._semaphore = asyncio.Semaphore(self.max_concurrency)
@@ -38,6 +46,27 @@ class PlaywrightRenderer:
             logger.warning(
                 "Playwright not installed - JavaScript rendering unavailable"
             )
+
+        if self.auth_type == "cookies":
+            if self.auth_storage_state:
+                storage_cookies = len(self.auth_storage_state.get("cookies", []))
+                logger.info(
+                    f"Playwright renderer configured with storage_state authentication ({storage_cookies} cookies)"
+                )
+            elif self.auth_cookies:
+                logger.info(
+                    f"Playwright renderer configured with cookie authentication ({len(self.auth_cookies)} cookies)"
+                )
+
+    def _parse_json_env(self, key: str, default: Any) -> Any:
+        """Parse JSON from environment variable."""
+        value = os.getenv(key)
+        if value:
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse {key} as JSON")
+        return default
 
     async def search_google(self, query: str, max_results: int = 5) -> List[str]:
         """
@@ -186,23 +215,97 @@ class PlaywrightRenderer:
                 await self._ensure_browser()
                 logger.info(f"Browser ensured for {url}")
 
-                context = await self._browser.new_context(
-                    user_agent=self.user_agent, viewport={"width": 1920, "height": 1080}
-                )
+                # Prepare context options
+                context_options = {
+                    "user_agent": self.user_agent,
+                    "viewport": {"width": 1920, "height": 1080},
+                }
+
+                # If we have storage_state, use it to restore entire browser session
+                # This includes cookies across all domains (for SSO scenarios)
+                if self.auth_type == "cookies" and self.auth_storage_state:
+                    context_options["storage_state"] = self.auth_storage_state
+                    logger.info(
+                        f"Creating context with storage_state ({len(self.auth_storage_state.get('cookies', []))} cookies)"
+                    )
+
+                context = await self._browser.new_context(**context_options)
                 logger.info(f"Context created for {url}")
+
+                # Legacy: Add authentication cookies if configured (old format)
+                # This is kept for backward compatibility but storage_state is preferred
+                if (
+                    self.auth_type == "cookies"
+                    and self.auth_cookies
+                    and not self.auth_storage_state
+                ):
+                    parsed_url = urlparse(url)
+                    cookies_for_playwright = []
+
+                    # Support both formats:
+                    # 1. List of full cookie objects (new format with all attributes)
+                    # 2. Dict of name:value pairs (old format for backward compatibility)
+                    if isinstance(self.auth_cookies, list):
+                        # New format: Full cookie objects with all attributes
+                        for cookie_obj in self.auth_cookies:
+                            # Use the cookie as-is if it has all required fields
+                            if "name" in cookie_obj and "value" in cookie_obj:
+                                playwright_cookie = {
+                                    "name": cookie_obj["name"],
+                                    "value": cookie_obj["value"],
+                                    "domain": cookie_obj.get(
+                                        "domain", parsed_url.netloc
+                                    ),
+                                    "path": cookie_obj.get("path", "/"),
+                                }
+
+                                # Add optional attributes if present
+                                if (
+                                    "expires" in cookie_obj
+                                    and cookie_obj["expires"] != -1
+                                ):
+                                    playwright_cookie["expires"] = cookie_obj["expires"]
+                                if "httpOnly" in cookie_obj:
+                                    playwright_cookie["httpOnly"] = cookie_obj[
+                                        "httpOnly"
+                                    ]
+                                if "secure" in cookie_obj:
+                                    playwright_cookie["secure"] = cookie_obj["secure"]
+                                if "sameSite" in cookie_obj and cookie_obj["sameSite"]:
+                                    playwright_cookie["sameSite"] = cookie_obj[
+                                        "sameSite"
+                                    ]
+
+                                cookies_for_playwright.append(playwright_cookie)
+                    elif isinstance(self.auth_cookies, dict):
+                        # Old format: Simple name:value dict (backward compatibility)
+                        for name, value in self.auth_cookies.items():
+                            cookie = {
+                                "name": name,
+                                "value": value,
+                                "domain": parsed_url.netloc,
+                                "path": "/",
+                            }
+                            cookies_for_playwright.append(cookie)
+
+                    if cookies_for_playwright:
+                        await context.add_cookies(cookies_for_playwright)
+                        logger.info(
+                            f"Added {len(cookies_for_playwright)} authentication cookies for {parsed_url.netloc}"
+                        )
 
                 page = await context.new_page()
                 logger.info(f"Page created for {url}")
 
                 # Set up page with reasonable defaults
-                await page.set_extra_http_headers(
-                    {
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                        "Accept-Language": "en-US,en;q=0.5",
-                        "Accept-Encoding": "gzip, deflate",
-                        "Connection": "keep-alive",
-                    }
-                )
+                extra_headers = {
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.5",
+                    "Accept-Encoding": "gzip, deflate",
+                    "Connection": "keep-alive",
+                }
+
+                await page.set_extra_http_headers(extra_headers)
 
                 # Navigate to page
                 response = await page.goto(
@@ -210,9 +313,27 @@ class PlaywrightRenderer:
                 )
 
                 if not response or response.status >= 400:
-                    logger.error(
-                        f"Failed to load page {url}: status {response.status if response else 'no response'}"
-                    )
+                    # Log authentication issues with more details
+                    status = response.status if response else "no response"
+                    logger.error(f"Failed to load page {url}: status {status}")
+                    if response and response.status == 401:
+                        # Get www-authenticate header if present
+                        auth_header = response.headers.get("www-authenticate", "")
+                        if auth_header:
+                            logger.error(f"WWW-Authenticate header: {auth_header}")
+                        # Check if we got redirected
+                        if response.url != url:
+                            logger.error(f"Redirected from {url} to {response.url}")
+                        # Get the HTML to see what the auth page looks like
+                        try:
+                            html = await page.content()
+                            if "login" in html.lower() or "sign in" in html.lower():
+                                logger.error(
+                                    "Page contains login/sign-in elements - auth failed"
+                                )
+                            logger.debug(f"401 response HTML preview: {html[:500]}")
+                        except Exception as e:
+                            logger.error(f"Could not read 401 page content: {e}")
                     return None
 
                 # Wait for JavaScript to execute and content to load

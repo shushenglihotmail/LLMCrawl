@@ -32,6 +32,11 @@ ENV/
 .env*
 !.env.example
 
+# Authentication credentials - NEVER COMMIT
+.auth/
+*.auth.json
+*_auth.json
+
 # Keep only these VS Code files in git:
 .vscode/*
 !.vscode/settings.json

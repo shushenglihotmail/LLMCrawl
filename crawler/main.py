@@ -356,6 +356,87 @@ async def health_check():
         }
 
 
+@app.get("/auth/status")
+async def auth_status():
+    """Check authentication status for configured sites."""
+    import httpx
+
+    auth_type = os.getenv("FIRECRAWL_AUTH_TYPE", "none")
+
+    if auth_type == "none":
+        return {"status": "disabled", "message": "Authentication not configured"}
+
+    # Test a known authenticated URL if configured
+    test_url = os.getenv("AUTH_TEST_URL")
+    if not test_url:
+        return {
+            "status": "configured",
+            "auth_type": auth_type,
+            "message": "Authentication configured but no test URL set (AUTH_TEST_URL)",
+        }
+
+    try:
+        # Get auth config
+        auth_config = await firecrawl_client._get_auth_config()
+
+        # Test the URL
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                test_url,
+                cookies=auth_config.get("cookies", {}),
+                headers={
+                    **auth_config.get("headers", {}),
+                    "User-Agent": "WebRAG/1.0 Auth-Check",
+                },
+                timeout=10.0,
+                follow_redirects=True,
+            )
+
+            if response.status_code == 200:
+                # Check for login indicators
+                content = response.text.lower()
+                if "sign in" in content or "login" in content:
+                    return {
+                        "status": "expired",
+                        "auth_type": auth_type,
+                        "test_url": test_url,
+                        "message": "Authentication appears to be expired (login page detected)",
+                        "action_required": "Run: python tools/refresh_auth.py --name www_osgwiki_com --force",
+                    }
+                else:
+                    return {
+                        "status": "valid",
+                        "auth_type": auth_type,
+                        "test_url": test_url,
+                        "message": "Authentication is valid",
+                    }
+            elif response.status_code == 401:
+                return {
+                    "status": "expired",
+                    "auth_type": auth_type,
+                    "test_url": test_url,
+                    "status_code": 401,
+                    "message": "Authentication expired (401 Unauthorized)",
+                    "action_required": "Run: python tools/refresh_auth.py --name www_osgwiki_com --force",
+                }
+            else:
+                return {
+                    "status": "unknown",
+                    "auth_type": auth_type,
+                    "test_url": test_url,
+                    "status_code": response.status_code,
+                    "message": f"Unexpected status code: {response.status_code}",
+                }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "auth_type": auth_type,
+            "error": str(e),
+            "message": "Failed to check authentication status",
+        }
+
+
 @app.get("/")
 async def root():
     """Root endpoint with service information."""
@@ -368,6 +449,7 @@ async def root():
             "render": "/render",
             "extract": "/extract",
             "health": "/health",
+            "auth_status": "/auth/status",
             "docs": "/docs",
         },
     }

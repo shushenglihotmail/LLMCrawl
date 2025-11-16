@@ -37,7 +37,9 @@ Write-Host ""
 Write-Host "2. Testing crawl request..." -ForegroundColor Yellow
 
 $body = @{
-    urls = @($Url)
+    query = if ($Query) { $Query } else { "Retrieve content from $Url" }
+    seed_urls = @($Url)
+    max_results = 5
 } | ConvertTo-Json
 
 Write-Host "   Request body: $body" -ForegroundColor Gray
@@ -48,7 +50,7 @@ try {
                                 -Method Post `
                                 -ContentType "application/json" `
                                 -Body $body `
-                                -TimeoutSec 30
+                                -TimeoutSec 60
 
     Write-Host "   ✓ Crawl completed" -ForegroundColor Green
     Write-Host "   Documents returned: $($result.documents.Count)" -ForegroundColor Cyan

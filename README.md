@@ -90,25 +90,29 @@ RESPECT_ROBOTS=true
 # FIRECRAWL_AUTH_HEADERS={"X-API-Key": "your-key"}
 ```
 
-### 3. Authentication for Internal Sites (Optional)
+### 3. Authentication for Microsoft Internal Sites (Optional)
 
-To crawl internal sites requiring authentication:
+For Microsoft internal sites (e.g., OSGWiki) requiring SSO authentication:
 
-```bash
-# Quick setup - add to .env:
-FIRECRAWL_AUTH_TYPE=headers
-FIRECRAWL_AUTH_HEADERS={"X-API-Key": "your-key"}
+**🎯 Cookie-Based Authentication (Microsoft SSO)**
+```powershell
+# 1. Capture authentication from browser (on managed device)
+python tools/msauth/interactive_auth.py https://www.osgwiki.com/wiki/Main_Page --name www_osgwiki_com
 
-# OR use cookies:
-FIRECRAWL_AUTH_TYPE=cookies
-FIRECRAWL_AUTH_COOKIES={"session_id": "abc123"}
+# 2. Apply to configuration
+.\tools\msauth\scripts\apply_auth.ps1
+
+# 3. Restart crawler
+docker-compose restart crawler
+
+# 4. Test
+python tools/msauth/test_auth.py
 ```
 
-📚 **See full authentication guide**: [`docs/AUTHENTICATION_QUICKSTART.md`](docs/AUTHENTICATION_QUICKSTART.md)
-
-## 🛠️ Development Environment
-
-For development work, use the automated setup scripts located in the `scripts/` folder:
+📚 **Authentication Documentation**:
+- **Quick Start**: [`tools/msauth/README.md`](tools/msauth/README.md) ⭐ **Start Here**
+- **Full Setup Guide**: [`tools/msauth/docs/AUTHENTICATION.md`](tools/msauth/docs/AUTHENTICATION.md)
+- **Session Refresh**: [`tools/msauth/docs/AUTH_REFRESH_GUIDE.md`](tools/msauth/docs/AUTH_REFRESH_GUIDE.md)
 
 ### Quick Setup (Recommended)
 
@@ -985,6 +989,7 @@ llmcrawl/
 └── docs/            # Additional documentation
     ├── AUTHENTICATION.md           # Full authentication guide
     ├── AUTHENTICATION_QUICKSTART.md # 5-minute setup guide
+    ├── AZURE_AD_AUTH.md            # Microsoft AAD/Entra ID guide
     ├── CRAWLING_LIMITATIONS.md     # News site extraction issues
     ├── MONITORING.md               # Health checks and metrics
     └── TESTING_INDEXING.md         # Testing guide
