@@ -4,10 +4,10 @@
 param(
     [Parameter(Mandatory=$true)]
     [string]$ProfileName,
-    
+
     [Parameter(Mandatory=$true)]
     [string]$CookieValue,
-    
+
     [string]$Domain = "www.osgwiki.com"
 )
 
