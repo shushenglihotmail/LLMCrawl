@@ -176,10 +176,11 @@ class InteractiveAuth:
             print("   4. ⚠️  VERIFY you see the actual wiki page content")
             print()
             print("💡 The page will redirect multiple times - this is NORMAL!")
-            print("💡 Keep the browser open - it should NOT auto-close")
+            print("💡 Keep the browser window visible - DON'T close or minimize it!")
             print()
             print("=" * 60)
             print("⏸️  When you can see the wiki content, press ENTER here")
+            print("⚠️  DO NOT CLOSE THE BROWSER - it will auto-close after capture!")
             print("=" * 60)
             print()
 
@@ -196,36 +197,107 @@ class InteractiveAuth:
             except KeyboardInterrupt:
                 print("\n✋ Ctrl+C pressed. Capturing credentials...")
 
-            # Check current URL from the active page
-            try:
-                # Get the last active page (might have changed due to redirects)
-                pages = context.pages
-                if pages:
-                    page = pages[-1]  # Use the most recent page
-                    current_url = page.url
-                    print(f"📍 Final page: {current_url}")
+            # Capture cookies IMMEDIATELY before anything else
+            print("💾 Capturing cookies from browser context NOW...")
+            cdp_cookies_immediate = await context.cookies()
+            print(f"📦 Retrieved {len(cdp_cookies_immediate)} cookies immediately")
 
-                    # If we're not on the target domain, warn user
+            # Also try getting cookies for the specific URL
+            print(f"💾 Trying to get cookies for URL: {url}")
+            cdp_cookies_for_url = await context.cookies(url)
+            print(f"📦 Retrieved {len(cdp_cookies_for_url)} cookies for specific URL")
+
+            # Debug: Print ALL cookie names right away
+            print("\n🔍 Immediate cookie capture - all names:")
+            for c in cdp_cookies_immediate:
+                if "osgwiki" in c.get("domain", ""):
+                    print(
+                        f"   ✅ {c.get('name')}: {c.get('domain')} (httpOnly={c.get('httpOnly', False)}, path={c.get('path', '/')})"
+                    )
+
+            print("\n🔍 URL-specific cookie capture - all names:")
+            for c in cdp_cookies_for_url:
+                if "osgwiki" in c.get("domain", ""):
+                    print(
+                        f"   ✅ {c.get('name')}: {c.get('domain')} (httpOnly={c.get('httpOnly', False)}, path={c.get('path', '/')})"
+                    )
+
+            # Use the URL-specific cookies as they might be more complete
+            if len(cdp_cookies_for_url) > len(cdp_cookies_immediate):
+                print(
+                    f"\n📌 Using URL-specific cookies ({len(cdp_cookies_for_url)} cookies)"
+                )
+                cdp_cookies_immediate = cdp_cookies_for_url
+            print()
+
+            # Give browser a moment to sync all cookies (but we already have them)
+            print("⏳ Waiting for cookies to sync...")
+            await asyncio.sleep(2)
+
+            # Check current URL and navigate to target if needed
+            try:
+                # Use the page object we already have (don't rely on context.pages)
+                if not page.is_closed():
+                    current_url = page.url
+                    print(f"📍 Current page: {current_url}")
+
+                    # Check cookies BEFORE navigation
+                    cookies_before = await context.cookies()
+                    osgwiki_cookies_before = [
+                        c for c in cookies_before if "osgwiki" in c.get("domain", "")
+                    ]
+                    print(
+                        f"🍪 Cookies for osgwiki before navigation: {len(osgwiki_cookies_before)}"
+                    )
+                    for c in osgwiki_cookies_before:
+                        print(f"   - {c.get('name')}: {c.get('domain')}")
+
+                    # If we're not on the target domain, navigate there to get auth cookies
                     target_domain = urlparse(url).netloc
                     current_domain = urlparse(current_url).netloc
                     if target_domain not in current_domain:
-                        print(
-                            f"⚠️  WARNING: You are on {current_domain}, not {target_domain}"
-                        )
-                        print(
-                            f"⚠️  Make sure you completed login and viewed the protected content!"
-                        )
-                else:
-                    print("⚠️  No pages found in context")
-            except Exception:
-                print("📍 Browser was closed, proceeding with capture...")
+                        print(f"🔄 Navigating back to {url} to capture auth cookies...")
+                        await page.goto(url, wait_until="networkidle", timeout=30000)
+                        await asyncio.sleep(3)  # Give cookies more time to be set
+                        print(f"✅ Successfully navigated to {page.url}")
 
-            # Capture entire storage state (includes cookies across all domains)
+                        # Check cookies AFTER navigation
+                        cookies_after = await context.cookies()
+                        osgwiki_cookies_after = [
+                            c for c in cookies_after if "osgwiki" in c.get("domain", "")
+                        ]
+                        print(
+                            f"🍪 Cookies for osgwiki after navigation: {len(osgwiki_cookies_after)}"
+                        )
+                        for c in osgwiki_cookies_after:
+                            print(f"   - {c.get('name')}: {c.get('domain')}")
+                    else:
+                        print(f"✅ Already on target domain: {current_url}")
+                else:
+                    print("⚠️  Page was closed")
+            except Exception as e:
+                print(f"⚠️  Navigation error: {e}, proceeding with capture...")
+
+            # Use the cookies we captured immediately (before page closed)
+            print("💾 Using immediately-captured cookies (before page closed)...")
+            cdp_cookies = cdp_cookies_immediate
+            print(f"📦 Using {len(cdp_cookies)} cookies from immediate capture")
+
+            # Also capture storage state (for compatibility)
             print(
                 "💾 Capturing storage state (cookies, localStorage, sessionStorage)..."
             )
             storage_state = await context.storage_state()
-            cookies = storage_state.get("cookies", [])
+            storage_cookies = storage_state.get("cookies", [])
+
+            # Merge cookies - prefer CDP cookies as they're more complete
+            cookie_map = {(c.get("name"), c.get("domain")): c for c in storage_cookies}
+            for c in cdp_cookies:
+                key = (c.get("name"), c.get("domain"))
+                cookie_map[key] = c  # CDP cookies override storage_state cookies
+
+            cookies = list(cookie_map.values())
+            storage_state["cookies"] = cookies
             print(f"📦 Captured {len(cookies)} cookies")
 
             # Show distribution of cookies by domain
@@ -548,19 +620,19 @@ async def main():
         epilog="""
 Examples:
   # Authenticate to a site
-  python tools/interactive_auth.py https://internal-site.com
+  python tools/msauth/interactive_auth.py https://internal-site.com
 
   # Authenticate with custom profile name
-  python tools/interactive_auth.py --name sharepoint https://company.sharepoint.com
+  python tools/msauth/interactive_auth.py --name sharepoint https://company.sharepoint.com
 
   # Apply saved credentials to .env
-  python tools/interactive_auth.py --apply sharepoint
+  python tools/msauth/interactive_auth.py --apply sharepoint
 
   # List saved profiles
-  python tools/interactive_auth.py --list
+  python tools/msauth/interactive_auth.py --list
 
   # Delete a profile
-  python tools/interactive_auth.py --delete sharepoint
+  python tools/msauth/interactive_auth.py --delete sharepoint
         """,
     )
 
@@ -632,7 +704,7 @@ Examples:
         print("\n📋 Next steps:")
         print(f"   1. Apply to .env:")
         print(
-            f"      python tools/interactive_auth.py "
+            f"      python tools/msauth/interactive_auth.py "
             f"--apply {args.name or urlparse(args.url).netloc.replace('.', '_')}"
         )
         print(f"   2. Restart crawler:")

@@ -26,7 +26,11 @@ class ToolHandler:
         self.timeout = 45.0  # Increased from 30s to allow for slower FireCrawl + Playwright fallback
 
     async def handle_tool_call(
-        self, tool_call: Dict[str, Any], request_id: str
+        self,
+        tool_call: Dict[str, Any],
+        request_id: str,
+        seed_urls: Optional[List[str]] = None,
+        depth: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Handle a tool function call and return the result.
@@ -34,12 +38,22 @@ class ToolHandler:
         Args:
             tool_call: Tool call from LLM response
             request_id: Request tracking ID
+            seed_urls: Optional seed URLs to override tool arguments
+            depth: Optional crawl depth to override tool arguments
 
         Returns:
             Tool result for LLM context
         """
         tool_name = tool_call["function"]["name"]
         arguments = json.loads(tool_call["function"]["arguments"])
+
+        # Override arguments with user-provided seed_urls and depth
+        if seed_urls:
+            arguments["seed_urls"] = seed_urls
+            logger.info(f"Overriding seed_urls with user-provided: {seed_urls}")
+        if depth is not None:
+            arguments["depth"] = depth
+            logger.info(f"Overriding depth with user-provided: {depth}")
 
         log_tool_call(logger, request_id, tool_name, arguments)
         start_time = datetime.now()
@@ -137,9 +151,11 @@ class ToolHandler:
                     {
                         "url": doc["url"],
                         "title": doc.get("title", ""),
-                        "content": doc.get("markdown", "")[:500] + "..."
-                        if len(doc.get("markdown", "")) > 500
-                        else doc.get("markdown", ""),
+                        "content": (
+                            doc.get("markdown", "")[:500] + "..."
+                            if len(doc.get("markdown", "")) > 500
+                            else doc.get("markdown", "")
+                        ),
                         "published_at": doc.get("published_at", ""),
                         "score": 1.0,  # Fixed high relevance score for crawled content
                     }

@@ -90,29 +90,36 @@ RESPECT_ROBOTS=true
 # FIRECRAWL_AUTH_HEADERS={"X-API-Key": "your-key"}
 ```
 
-### 3. Authentication for Microsoft Internal Sites (Optional)
+### 3. Authentication for Internal Sites (Optional)
 
-For Microsoft internal sites (e.g., OSGWiki) requiring SSO authentication:
+For internal sites requiring SSO authentication (e.g., Microsoft OSGWiki):
 
-**🎯 Cookie-Based Authentication (Microsoft SSO)**
+**🎯 Quick Setup**
 ```powershell
-# 1. Capture authentication from browser (on managed device)
-python tools/msauth/interactive_auth.py https://www.osgwiki.com/wiki/Main_Page --name www_osgwiki_com
+# See detailed guide: docs/AUTHENTICATION_SETUP.md
 
-# 2. Apply to configuration
-.\tools\msauth\scripts\apply_auth.ps1
-
-# 3. Restart crawler
+# For standard OAuth sites (automated):
+.\venv\Scripts\python.exe tools\msauth\interactive_auth.py https://internal-site.com --name mysite
+.\venv\Scripts\python.exe tools\msauth\interactive_auth.py --apply mysite
 docker-compose restart crawler
 
-# 4. Test
-python tools/msauth/test_auth.py
+# For Azure App Service Easy Auth sites (manual cookie required):
+# 1. Run auth capture
+.\venv\Scripts\python.exe tools\msauth\interactive_auth.py https://www.osgwiki.com/wiki/Main_Page --name www_osgwiki_com
+# 2. Get AppServiceAuthSession cookie from browser:
+#    F12 > Network tab > Click any www.osgwiki.com request > Cookies section
+#    (Or: Application tab > Cookies > www.osgwiki.com)
+# 3. Add cookie manually
+.\tools\msauth\scripts\add_cookie_manual.ps1 -ProfileName www_osgwiki_com -CookieValue "YOUR_COOKIE_VALUE"
+# 4. Apply and restart
+.\venv\Scripts\python.exe tools\msauth\interactive_auth.py --apply www_osgwiki_com
+docker-compose restart crawler
 ```
 
 📚 **Authentication Documentation**:
-- **Quick Start**: [`tools/msauth/README.md`](tools/msauth/README.md) ⭐ **Start Here**
-- **Full Setup Guide**: [`tools/msauth/docs/AUTHENTICATION.md`](tools/msauth/docs/AUTHENTICATION.md)
-- **Session Refresh**: [`tools/msauth/docs/AUTH_REFRESH_GUIDE.md`](tools/msauth/docs/AUTH_REFRESH_GUIDE.md)
+- **⭐ Setup Guide**: [`docs/AUTHENTICATION_SETUP.md`](docs/AUTHENTICATION_SETUP.md) - **Start Here**
+- **Quick Reference**: [`tools/msauth/README.md`](tools/msauth/README.md)
+- **Advanced Guide**: [`tools/msauth/docs/AUTHENTICATION.md`](tools/msauth/docs/AUTHENTICATION.md)
 
 ### Quick Setup (Recommended)
 

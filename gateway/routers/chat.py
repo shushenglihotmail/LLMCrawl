@@ -38,6 +38,10 @@ class ChatRequest(BaseModel):
     force_refresh: bool = Field(
         False, description="Force web crawling even for general questions"
     )
+    seed_urls: Optional[List[str]] = Field(
+        None, description="Seed URLs to crawl for context"
+    )
+    depth: int = Field(1, description="Crawl depth for seed URLs")
     max_tokens: int = Field(2000, description="Maximum response tokens")
     temperature: float = Field(0.1, description="Sampling temperature")
 
@@ -122,9 +126,12 @@ async def chat_endpoint(request: ChatRequest, req: Request):
         # Include crawl tool if:
         # 1. Current query suggests need for fresh info
         # 2. User forces refresh
-        # 3. Previous conversation mentioned news/events (context suggests continuation)
+        # 3. User provided seed URLs (always crawl when specific URLs are given)
+        # 4. Previous conversation mentioned news/events (context suggests continuation)
         should_include_tools = (
-            should_trigger_crawl(request.message) or request.force_refresh
+            should_trigger_crawl(request.message)
+            or request.force_refresh
+            or (request.seed_urls and len(request.seed_urls) > 0)
         )
 
         # Check if previous conversation context suggests this is a follow-up to a news query
@@ -157,15 +164,24 @@ async def chat_endpoint(request: ChatRequest, req: Request):
 
         if should_include_tools:
             tools = [CRAWL_AND_REFRESH_TOOL]
-            # Only force tool for explicit fresh data queries, not follow-ups
-            if should_trigger_crawl(request.message):
+            # Force tool if:
+            # - Query explicitly needs fresh data, OR
+            # - User provided seed URLs (they want to crawl those specific URLs)
+            if should_trigger_crawl(request.message) or (
+                request.seed_urls and len(request.seed_urls) > 0
+            ):
                 tool_choice = {
                     "type": "function",
                     "function": {"name": "crawl_and_refresh"},
                 }
-                logger.info(
-                    f"Including crawl tool (forced) for query: {request.message[:100]}..."
-                )
+                if request.seed_urls:
+                    logger.info(
+                        f"Including crawl tool (forced) for seed_urls: {request.seed_urls}"
+                    )
+                else:
+                    logger.info(
+                        f"Including crawl tool (forced) for query: {request.message[:100]}..."
+                    )
             else:
                 # For follow-ups, make tools available but let LLM decide
                 tool_choice = "auto"
@@ -259,7 +275,9 @@ async def _complete_chat_response(
         for tool_call in response["tool_calls"]:
             all_tool_calls.append(tool_call)
 
-            tool_result = await tool_handler.handle_tool_call(tool_call, request_id)
+            tool_result = await tool_handler.handle_tool_call(
+                tool_call, request_id, request.seed_urls, request.depth
+            )
             messages.append(tool_result)
 
             # Don't store tool results in conversation history
