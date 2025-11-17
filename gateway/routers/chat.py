@@ -141,7 +141,8 @@ async def chat_endpoint(request: ChatRequest, req: Request):
             )
             logger.info(
                 f"Message structure: {len(system_and_examples)} "
-                f"system+examples + {len(previous_messages)} history messages"
+                f"system+examples + {len(previous_messages)} "
+                f"history messages"
             )
         else:
             # New conversation - use base_messages as-is

@@ -4,7 +4,6 @@ File reader with security validation.
 
 import os
 from pathlib import Path
-from typing import Optional
 
 import aiofiles
 
