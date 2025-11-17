@@ -14,6 +14,7 @@ services:
       - ENVIRONMENT=development
       - LOG_LEVEL=DEBUG
       - RELOAD=true
+      - MCP_SERVER_URL=http://web-rag-mcp-server:8003
     networks:
       - webrag-network
     depends_on:
@@ -98,6 +99,30 @@ services:
       - redis
     restart: unless-stopped
 
+  # MCP Server for local file operations
+  mcp-server:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.mcp_server
+    container_name: web-rag-mcp-server
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./mcp_server:/app/mcp_server:rw
+      - C:/os:/data/files  # Mount local C:\os folder
+      - mcp_vector_db:/data/mcp_vector_db
+    environment:
+      - MCP_ROOT_FOLDER=/data/files
+      - MCP_VECTOR_DB_PATH=/data/mcp_vector_db
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+    networks:
+      - webrag-network
+    restart: unless-stopped
+
 networks:
   webrag-network:
     external: true
+
+volumes:
+  mcp_vector_db:

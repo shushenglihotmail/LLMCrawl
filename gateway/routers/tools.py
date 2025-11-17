@@ -3,10 +3,9 @@ Tool calling router and handlers.
 Manages the crawl_and_refresh tool and orchestrates the RAG pipeline.
 """
 
-import asyncio
 import json
 import logging
-import uuid
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -23,7 +22,16 @@ class ToolHandler:
     def __init__(self):
         self.crawler_url = "http://crawler:8001"
         self.indexer_url = "http://indexer:8002"
-        self.timeout = 45.0  # Increased from 30s to allow for slower FireCrawl + Playwright fallback
+        self.mcp_server_url = os.getenv("MCP_SERVER_URL", "http://mcp-server:8003")
+        # Increased from 30s to allow for slower FireCrawl
+        # + Playwright fallback
+        self.timeout = 45.0
+        self.mcp_tools = [
+            "read_local_file",
+            "list_files",
+            "search_file_content",
+            "index_files",
+        ]
 
     async def handle_tool_call(
         self,
@@ -61,6 +69,9 @@ class ToolHandler:
         try:
             if tool_name == "crawl_and_refresh":
                 result = await self._handle_crawl_and_refresh(arguments, request_id)
+                success = True
+            elif tool_name in self.mcp_tools:
+                result = await self._handle_mcp_tool(tool_name, arguments, request_id)
                 success = True
             else:
                 result = {"error": f"Unknown tool: {tool_name}"}
@@ -134,7 +145,8 @@ class ToolHandler:
 
         if not index_result.get("indexed", 0) or index_result.get("error"):
             logger.warning(
-                f"Failed to index documents (result: {index_result}) - using direct document results"
+                f"Failed to index documents (result: {index_result}) - "
+                f"using direct document results"
             )
             # Fallback: return crawled documents directly without vector search
             return {
@@ -259,6 +271,42 @@ class ToolHandler:
             except Exception as e:
                 logger.error(f"Retrieval failed: {e}")
                 return {"error": f"Retrieval failed: {e}"}
+
+    async def _handle_mcp_tool(
+        self, tool_name: str, arguments: Dict[str, Any], request_id: str
+    ) -> Dict[str, Any]:
+        """
+        Handle MCP server tool calls for local file operations.
+
+        Args:
+            tool_name: Name of the MCP tool
+            arguments: Tool arguments
+            request_id: Request tracking ID
+
+        Returns:
+            Tool result
+        """
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                response = await client.post(
+                    f"{self.mcp_server_url}/invoke",
+                    json={"tool_name": tool_name, "arguments": arguments},
+                    headers={"X-Request-ID": request_id},
+                )
+                response.raise_for_status()
+                result = response.json()
+
+                if not result.get("success"):
+                    return {"error": result.get("error", "MCP tool execution failed")}
+
+                return result.get("result", {})
+
+            except httpx.RequestError as e:
+                logger.error(f"MCP server request failed: {e}")
+                return {"error": f"MCP server unavailable: {e}"}
+            except httpx.HTTPStatusError as e:
+                logger.error(f"MCP server HTTP error: {e.response.status_code}")
+                return {"error": f"MCP server error: {e.response.status_code}"}
 
 
 # Global tool handler

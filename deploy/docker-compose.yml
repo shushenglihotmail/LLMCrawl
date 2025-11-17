@@ -87,6 +87,7 @@ services:
       - GATEWAY_PORT=8000
       - CRAWLER_URL=http://crawler:8001
       - INDEXER_URL=http://indexer:8002
+      - MCP_SERVER_URL=http://mcp-server:8003
     env_file:
       - .env
     volumes:
@@ -96,6 +97,7 @@ services:
     depends_on:
       - crawler
       - indexer
+      - mcp-server
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -156,6 +158,32 @@ services:
       - postgres
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # MCP Server for local file operations
+  mcp-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.mcp_server
+    container_name: web-rag-mcp-server
+    ports:
+      - "8003:8003"
+    environment:
+      - MCP_ROOT_FOLDER=/data/files
+      - MCP_VECTOR_DB_PATH=/data/mcp_vector_db
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - C:/os:/data/files  # Mount local C:\os folder
+      - mcp_vector_db:/data/mcp_vector_db
+    networks:
+      - webrag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -223,6 +251,7 @@ volumes:
   redis_data:
   prometheus_data:
   grafana_data:
+  mcp_vector_db:
 
 networks:
   webrag-network:

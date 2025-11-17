@@ -3,12 +3,13 @@ Chat router with streaming support and tool calling integration.
 Main endpoint for conversational interactions with the RAG system.
 """
 
-import asyncio
 import json
+import os
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -25,6 +26,31 @@ from ..utils.logging import get_logger, log_request, log_response
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+# Cache for MCP tools (fetched once at startup)
+_mcp_tools_cache: Optional[List[Dict[str, Any]]] = None
+
+
+async def get_mcp_tools() -> List[Dict[str, Any]]:
+    """Fetch MCP tools from the MCP server."""
+    global _mcp_tools_cache
+
+    if _mcp_tools_cache is not None:
+        return _mcp_tools_cache
+
+    mcp_server_url = os.getenv("MCP_SERVER_URL", "http://mcp-server:8003")
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{mcp_server_url}/tools")
+            response.raise_for_status()
+            data = response.json()
+            _mcp_tools_cache = data.get("tools", [])
+            logger.info(f"Loaded {len(_mcp_tools_cache)} MCP tools")
+            return _mcp_tools_cache
+    except Exception as e:
+        logger.warning(f"Failed to load MCP tools: {e}")
+        return []
 
 
 class ChatRequest(BaseModel):
@@ -90,7 +116,8 @@ async def chat_endpoint(request: ChatRequest, req: Request):
         if request.conversation_id:
             history = conversation_store.get_messages(request.conversation_id)
             logger.info(
-                f"Loaded {len(history)} previous messages for conversation {request.conversation_id}"
+                f"Loaded {len(history)} previous messages for "
+                f"conversation {request.conversation_id}"
             )
             previous_messages = history
 
@@ -99,9 +126,12 @@ async def chat_endpoint(request: ChatRequest, req: Request):
 
         # If we have previous conversation history, insert it after system prompt + examples
         if previous_messages:
-            # base_messages structure: [system, example1_user, example1_assistant, example2_user, example2_assistant, current_user]
+            # base_messages structure: [system, example1_user,
+            # example1_assistant, example2_user, example2_assistant,
+            # current_user]
             # We want: [system, examples..., history..., current_user]
-            # Remove the current user message from base_messages (it's the last one)
+            # Remove the current user message from base_messages
+            # (it's the last one)
             system_and_examples = base_messages[:-1]
             # Combine: system + examples + history + new user message
             messages = (
@@ -110,7 +140,8 @@ async def chat_endpoint(request: ChatRequest, req: Request):
                 + [{"role": "user", "content": request.message}]
             )
             logger.info(
-                f"Message structure: {len(system_and_examples)} system+examples + {len(previous_messages)} history messages"
+                f"Message structure: {len(system_and_examples)} "
+                f"system+examples + {len(previous_messages)} history messages"
             )
         else:
             # New conversation - use base_messages as-is
@@ -123,19 +154,23 @@ async def chat_endpoint(request: ChatRequest, req: Request):
         tools = None
         tool_choice = "auto"
 
+        # Always load MCP tools for local file operations
+        mcp_tools = await get_mcp_tools()
+
         # Include crawl tool if:
         # 1. Current query suggests need for fresh info
         # 2. User forces refresh
         # 3. User provided seed URLs (always crawl when specific URLs are given)
         # 4. Previous conversation mentioned news/events (context suggests continuation)
-        should_include_tools = (
+        should_include_crawl_tool = (
             should_trigger_crawl(request.message)
             or request.force_refresh
             or (request.seed_urls and len(request.seed_urls) > 0)
         )
 
-        # Check if previous conversation context suggests this is a follow-up to a news query
-        if not should_include_tools and previous_messages:
+        # Check if previous conversation context suggests this is a
+        # follow-up to a news query
+        if not should_include_crawl_tool and previous_messages:
             # Look at recent messages for news/event keywords
             recent_context = " ".join(
                 [
@@ -144,7 +179,8 @@ async def chat_endpoint(request: ChatRequest, req: Request):
                     if isinstance(msg.get("content"), str)
                 ]
             ).lower()
-            # If recent context mentioned news/events, keep tools available for follow-ups
+            # If recent context mentioned news/events, keep tools
+            # available for follow-ups
             if any(
                 word in recent_context
                 for word in [
@@ -157,18 +193,29 @@ async def chat_endpoint(request: ChatRequest, req: Request):
                     "coverage",
                 ]
             ):
-                should_include_tools = True
+                should_include_crawl_tool = True
                 logger.info(
-                    f"Including tools based on conversation context about news/events"
+                    "Including crawl tool based on conversation "
+                    "context about news/events"
                 )
 
-        if should_include_tools:
-            tools = [CRAWL_AND_REFRESH_TOOL]
-            # Force tool if:
+        # Build tools list
+        if should_include_crawl_tool or mcp_tools:
+            tools = []
+
+            # Add crawl tool if needed
+            if should_include_crawl_tool:
+                tools.append(CRAWL_AND_REFRESH_TOOL)
+
+            # Always add MCP tools for local file operations
+            tools.extend(mcp_tools)
+
+            # Force crawl tool if:
             # - Query explicitly needs fresh data, OR
             # - User provided seed URLs (they want to crawl those specific URLs)
-            if should_trigger_crawl(request.message) or (
-                request.seed_urls and len(request.seed_urls) > 0
+            if should_include_crawl_tool and (
+                should_trigger_crawl(request.message)
+                or (request.seed_urls and len(request.seed_urls) > 0)
             ):
                 tool_choice = {
                     "type": "function",
@@ -176,16 +223,18 @@ async def chat_endpoint(request: ChatRequest, req: Request):
                 }
                 if request.seed_urls:
                     logger.info(
-                        f"Including crawl tool (forced) for seed_urls: {request.seed_urls}"
+                        f"Including crawl tool (forced) for seed_urls: "
+                        f"{request.seed_urls}"
                     )
                 else:
                     logger.info(
-                        f"Including crawl tool (forced) for query: {request.message[:100]}..."
+                        f"Including crawl tool (forced) for query: "
+                        f"{request.message[:100]}..."
                     )
             else:
-                # For follow-ups, make tools available but let LLM decide
+                # Let LLM decide which tool to use (or none)
                 tool_choice = "auto"
-                logger.info(f"Including crawl tool (auto) based on context")
+                logger.info(f"Tools available: {len(tools)} tools, LLM will choose")
 
         if request.stream:
             return StreamingResponse(
@@ -254,7 +303,8 @@ async def _complete_chat_response(
         f"First LLM response has tool_calls: {bool(response.get('tool_calls'))}"
     )
     logger.info(
-        f"First LLM response content: {response.get('content', '')[:200] if response.get('content') else 'None'}"
+        f"First LLM response content: "
+        f"{response.get('content', '')[:200] if response.get('content') else 'None'}"
     )
 
     # Handle tool calls if present
@@ -287,12 +337,14 @@ async def _complete_chat_response(
                 result_data = json.loads(tool_result["content"])
                 if "hits" in result_data:
                     sources.extend(result_data["hits"])
-            except:
+            except Exception:
                 pass
 
-        # Second LLM call with tool results (without tools to prevent additional calls)
+        # Second LLM call with tool results
+        # (without tools to prevent additional calls)
         logger.info(
-            f"Making second LLM call with {len(messages)} messages including tool results"
+            f"Making second LLM call with {len(messages)} messages "
+            f"including tool results"
         )
         final_response = await llm_client.chat_completion(
             messages=messages,
@@ -347,7 +399,7 @@ async def _stream_chat_response(
             stream=True,
         )
 
-        tool_calls = []
+        # tool_calls: List[Dict[str, Any]] = []
         collected_content = ""
 
         async for chunk in stream:

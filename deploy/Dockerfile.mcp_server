@@ -1,0 +1,24 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements/mcp_server.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy MCP server code
+COPY mcp_server/ /app/mcp_server/
+
+# Create data directories
+RUN mkdir -p /data/files /data/mcp_vector_db
+
+# Environment variables
+ENV MCP_ROOT_FOLDER=/data/files
+ENV MCP_VECTOR_DB_PATH=/data/mcp_vector_db
+ENV PYTHONUNBUFFERED=1
+
+# Expose port
+EXPOSE 8003
+
+# Run server
+CMD ["python", "-m", "mcp_server.main"]

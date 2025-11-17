@@ -4,12 +4,40 @@ A production-ready, containerized Python web RAG system that enables LLMs to tri
 
 ## 🏗️ Architecture
 
-The system consists of four main services with conversation state management:
+The system consists of five main services with conversation state management:
 
 - **Gateway Service** (Port 8000): FastAPI orchestrator with OpenAI/Azure SDK, conversation history storage, intelligent tool triggering
 - **Crawler Service** (Port 8001): FireCrawl + Playwright fallback + Trafilatura extraction with sequential rendering
 - **Indexer Service** (Port 8002): LlamaIndex + Vector DB (Qdrant/pgvector) for RAG
+- **MCP Server** (Port 8003): Local file operations with indexing and semantic search
 - **Demo Client** (Port 3000): Optional web interface with SSE streaming
+
+📖 **See detailed architecture documentation**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
+### System Overview
+
+```mermaid
+graph TB
+    Client[Client Application] --> Gateway[Gateway Service :8000]
+    Gateway --> LLM[OpenAI/Azure LLM]
+    Gateway --> Crawler[Crawler Service :8001]
+    Gateway --> Indexer[Indexer Service :8002]
+    Gateway --> MCP[MCP Server :8003]
+
+    Crawler --> FireCrawl[FireCrawl + Playwright]
+    Crawler --> Redis[(Redis Cache)]
+
+    Indexer --> VectorDB[(Qdrant/pgvector)]
+
+    MCP --> LocalFiles[Local Files<br/>Mounted Volume]
+    MCP --> MCPIndex[(Optional Index<br/>for Semantic Search)]
+
+    style Gateway fill:#4A90E2
+    style Crawler fill:#50C878
+    style Indexer fill:#E28743
+    style MCP fill:#9B59B6
+    style Client fill:#95A5A6
+```
 
 ### Enhanced Tool Calling Pipeline with Conversation Memory
 
@@ -20,27 +48,43 @@ graph TB
     B -->|No| D[New Conversation]
     C --> E{Contains Trigger Words<br/>OR Context Suggests<br/>News Query?}
     D --> E
-    E -->|Yes| F[Include crawl_and_refresh Tool]
+    E -->|Yes Web Query| F[Include crawl_and_refresh Tool]
+    E -->|Yes File Query| F2[Include MCP Tools]
     E -->|No| G[Direct LLM Response]
     F --> H{Force Tool Call?}
+    F2 --> H2{LLM Decides}
     H -->|Explicit Query| I[tool_choice=function]
     H -->|Follow-up| J[tool_choice=auto]
+    H2 --> J2[Crawl OR MCP Tools]
     I --> K[LLM MUST Call Tool]
     J --> K
-    K --> L[FireCrawl Search & Crawl]
-    L --> M[Playwright Fallback if Needed]
-    M --> N[Trafilatura Text Extraction]
-    N --> O[LlamaIndex Chunking & Embedding]
-    O --> P[Vector DB Storage]
-    P --> Q[Semantic Retrieval with Recency Boost]
-    Q --> R[LLM Response with Citations]
-    R --> S[Store User + Assistant Messages]
-    S --> T[Return Response + conversation_id]
-    G --> S
+    J2 --> K
+    K --> L{Which Tool?}
+    L -->|Web Crawl| M[FireCrawl Search & Crawl]
+    L -->|File Read| N[MCP: read_local_file]
+    L -->|File List| O[MCP: list_files]
+    L -->|File Search| P[MCP: search_file_content]
+    M --> Q[Playwright Fallback if Needed]
+    Q --> R[Trafilatura Text Extraction]
+    R --> S[LlamaIndex Chunking & Embedding]
+    S --> T[Vector DB Storage]
+    T --> U[Semantic Retrieval with Recency Boost]
+    N --> V[Read File Content]
+    O --> W[List Directory]
+    P --> X[Semantic File Search]
+    V --> Y[Return to LLM]
+    W --> Y
+    X --> Y
+    U --> Y
+    Y --> Z[LLM Response with Citations]
+    Z --> AA[Store User + Assistant Messages]
+    AA --> AB[Return Response + conversation_id]
+    G --> AA
 ```
 
 ## ✨ Key Features
 
+### Web RAG Capabilities
 - **Conversation Memory**: Multi-turn conversations with context preservation (24-hour TTL)
 - **Intelligent Tool Triggering**: Automatic detection of queries needing fresh data (29+ trigger words)
 - **Context-Aware Follow-ups**: Recognizes when follow-up questions relate to previous news queries
@@ -49,6 +93,19 @@ graph TB
 - **FireCrawl Integration**: Redis-backed rate limiting with proper connection handling
 - **Flexible Timeouts**: 45-second gateway timeout, 25-second FireCrawl timeout
 - **Internal Site Authentication**: Support for headers, cookies, basic auth, and bearer tokens for crawling authenticated internal sites
+
+### Local File Operations (MCP Server)
+- **Secure File Access**: Read local files with path validation and security checks
+- **Directory Operations**: List files and directories with structured results
+- **Semantic Search**: Index and search file content by meaning (not just keywords)
+- **Optional Embeddings**: Works without OpenAI API key for basic operations (read/list)
+- **Volume Mounting**: Configure any local folder as root for file operations
+- **Integrated Tool Calling**: LLM automatically chooses between web crawl and file operations
+
+📖 **MCP Server Documentation**:
+- **Quick Start**: [mcp_server/QUICKSTART.md](mcp_server/QUICKSTART.md) - Get started in 5 minutes
+- **Full Documentation**: [mcp_server/README.md](mcp_server/README.md) - Comprehensive guide
+- **Architecture**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design and data flows
 
 ## 🚀 Quick Start
 
@@ -85,10 +142,31 @@ FIRECRAWL_API_KEY=your_firecrawl_key_here
 ALLOWED_DOMAINS=sec.gov,ft.com,wsj.com,nvidia.com,reuters.com,bloomberg.com
 RESPECT_ROBOTS=true
 
+# MCP Server Configuration (Local File Operations)
+MCP_ROOT_FOLDER=/data/files  # Inside container (mounted from host)
+MCP_SERVER_URL=http://mcp-server:8003  # Service name in Docker network
+
 # For Internal Sites (optional): See docs/AUTHENTICATION_QUICKSTART.md
 # FIRECRAWL_AUTH_TYPE=headers  # or cookies, basic, bearer
 # FIRECRAWL_AUTH_HEADERS={"X-API-Key": "your-key"}
 ```
+
+**MCP Server Volume Mounting:**
+
+To specify which local folder the MCP server can access, edit `docker-compose.yml`:
+
+```yaml
+services:
+  mcp-server:
+    volumes:
+      # Windows example:
+      - C:/your/local/folder:/data/files
+
+      # Linux/Mac example:
+      # - /home/user/documents:/data/files
+```
+
+The mounted folder becomes the "root" for all MCP file operations. Users cannot access files outside this folder.
 
 ### 3. Authentication for Internal Sites (Optional)
 
@@ -206,15 +284,43 @@ make health
 curl http://localhost:8000/health  # Gateway
 curl http://localhost:8001/health  # Crawler
 curl http://localhost:8002/health  # Indexer
+curl http://localhost:8003/health  # MCP Server
 ```
 
 ### 5. Test the System
 
+**Test Web RAG (Web Crawling):**
 ```bash
-# Test end-to-end functionality
 curl -X POST http://localhost:8000/api/v1/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What are the latest NVIDIA earnings?"}'
+```
+
+**Test MCP Server (Local File Operations):**
+```bash
+# List files in root directory
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "List files in the root folder"}'
+
+# Read a specific file
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Read the README.md file"}'
+```
+
+**Test MCP Server Directly:**
+```bash
+# Check MCP server health
+curl http://localhost:8003/health
+
+# List available tools
+curl http://localhost:8003/tools
+
+# List files (direct API)
+curl -X POST http://localhost:8003/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"tool_name": "list_files", "arguments": {"folder_path": "."}}'
 ```
 
 ## 📋 Detailed Deployment Guide
@@ -268,11 +374,43 @@ docker-compose up -d qdrant postgres redis
 docker-compose up -d firecrawl
 docker-compose up -d indexer
 docker-compose up -d crawler
+docker-compose up -d mcp-server  # Local file operations
 docker-compose up -d gateway
 
 # Verify all services
 docker-compose ps
 ```
+
+**MCP Server Configuration:**
+
+The MCP server requires a mounted volume to access local files. Edit `docker-compose.yml`:
+
+```yaml
+services:
+  mcp-server:
+    image: llmcrawl-mcp-server
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.mcp-server
+    ports:
+      - "8003:8003"
+    volumes:
+      # Mount your local folder here:
+      - C:/your/local/folder:/data/files  # Windows
+      # - /path/to/your/folder:/data/files  # Linux/Mac
+    environment:
+      - MCP_ROOT_FOLDER=/data/files
+      - OPENAI_API_KEY=${OPENAI_API_KEY}  # Optional, for semantic search
+    networks:
+      - webrag-network
+```
+
+**Volume Mount Examples:**
+- Windows: `C:/Users/YourName/Documents:/data/files`
+- Linux: `/home/username/projects:/data/files`
+- Mac: `/Users/username/Documents:/data/files`
+
+The mounted folder becomes the "root" - users cannot access files outside it.
 
 #### 4. Optional Services
 
@@ -521,6 +659,54 @@ docker stats
    docker-compose exec gateway python -c "import openai; print('API key works')"
    ```
 
+5. **MCP Server Issues**
+
+   **Problem: Gateway can't reach MCP server**
+   ```bash
+   # Check MCP server is running
+   docker ps | grep mcp-server
+
+   # Check network connectivity
+   docker-compose exec gateway curl http://mcp-server:8003/health
+
+   # If using development setup, ensure correct network
+   docker network connect webrag-network web-rag-mcp-server
+   ```
+
+   **Problem: "Path not found" or "Access denied"**
+   ```bash
+   # Verify volume is mounted correctly
+   docker-compose exec mcp-server ls -la /data/files
+
+   # Check MCP_ROOT_FOLDER environment variable
+   docker-compose exec mcp-server env | grep MCP_ROOT_FOLDER
+
+   # Windows: Ensure Docker has access to the drive in Docker Desktop settings
+   # Docker Desktop > Settings > Resources > File Sharing
+   ```
+
+   **Problem: Semantic search not working**
+   ```bash
+   # Check if OpenAI API key is set (optional for basic operations)
+   docker-compose exec mcp-server env | grep OPENAI_API_KEY
+
+   # Note: read_local_file and list_files work WITHOUT API key
+   # Only index_files and search_file_content require embeddings
+   ```
+
+   **Problem: Different container names in dev vs prod**
+   ```bash
+   # Development uses: web-rag-mcp-server (from docker-compose.dev.yml)
+   # Production uses: mcp-server (from deploy/docker-compose.yml)
+
+   # Check which is running
+   docker ps --format "{{.Names}}: {{.Image}}" | grep mcp
+
+   # Gateway reads from MCP_SERVER_URL environment variable
+   # Dev: http://web-rag-mcp-server:8003
+   # Prod: http://mcp-server:8003
+   ```
+
 ## 🧪 End-to-End Testing
 
 ### Automated Test Suite
@@ -556,9 +742,10 @@ python tests/integration/test_end_to_end.py
 #### Test 1: Service Health Checks
 ```bash
 # All should return {"status": "healthy"}
-curl http://localhost:8000/health
-curl http://localhost:8001/health
-curl http://localhost:8002/health
+curl http://localhost:8000/health  # Gateway
+curl http://localhost:8001/health  # Crawler
+curl http://localhost:8002/health  # Indexer
+curl http://localhost:8003/health  # MCP Server
 curl http://localhost:6333/health  # Qdrant
 ```
 
@@ -990,10 +1177,15 @@ llmcrawl/
 │   ├── unit/        # Unit tests
 │   ├── integration/ # Integration tests
 │   └── load/        # Load testing
+├── mcp_server/      # Model Context Protocol server for local files
+│   ├── file_reader.py   # Secure file operations
+│   ├── file_indexer.py  # Semantic search with LlamaIndex
+│   └── main.py          # MCP server application entry point
 ├── demo/            # Web demo interface
 ├── docker/          # Docker configurations
 ├── monitoring/      # Prometheus/Grafana configs
 └── docs/            # Additional documentation
+    ├── ARCHITECTURE.md             # System architecture and design
     ├── AUTHENTICATION.md           # Full authentication guide
     ├── AUTHENTICATION_QUICKSTART.md # 5-minute setup guide
     ├── AZURE_AD_AUTH.md            # Microsoft AAD/Entra ID guide
@@ -1001,6 +1193,29 @@ llmcrawl/
     ├── MONITORING.md               # Health checks and metrics
     └── TESTING_INDEXING.md         # Testing guide
 ```
+
+## 📖 Documentation
+
+### Core Documentation
+- **[Visual Overview](docs/VISUAL_OVERVIEW.md)** - Quick visual guide with diagrams and cheatsheet ⭐
+- **[Architecture Overview](docs/ARCHITECTURE.md)** - System design, data flows, and component interactions
+- **[Deployment Guide](docs/DEPLOYMENT.md)** - Complete deployment instructions for dev and production
+- **[Development Guide](DEVELOPMENT.md)** - Setting up development environment
+- **[Monitoring Guide](docs/MONITORING.md)** - Observability, metrics, and dashboards
+
+### MCP Server (Local File Operations)
+- **[Quick Start](mcp_server/QUICKSTART.md)** - Get started with file operations in 5 minutes
+- **[Full MCP Documentation](mcp_server/README.md)** - Complete guide with API reference
+- **[API Examples](mcp_server/README.md#api-reference)** - Direct API usage examples
+
+### Authentication & Crawling
+- **[Authentication Setup](docs/AUTHENTICATION_SETUP.md)** - Crawl authenticated internal sites
+- **[Quick Auth Guide](docs/AUTHENTICATION_QUICKSTART.md)** - 5-minute auth setup
+- **[Azure AD Auth](docs/AZURE_AD_AUTH.md)** - Microsoft SSO authentication
+- **[Crawling Limitations](docs/CRAWLING_LIMITATIONS.md)** - Known issues with news sites
+
+### Testing
+- **[Testing Guide](docs/TESTING_INDEXING.md)** - Unit and integration tests
 
 ## 🎯 Roadmap
 
