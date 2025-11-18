@@ -555,7 +555,7 @@ class InteractiveAuth:
         print(
             f"   1. Restart crawler: docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler"
         )
-        print(f"   2. Test: .\\scripts\\test-internal-auth.ps1 {auth_data['url']}")
+        print(f"   2. Test: .\\scripts\\check-auth-status.ps1 {auth_data['url']}")
 
         return True
 
@@ -700,21 +700,56 @@ Examples:
             headless=args.headless,
         )
 
+        profile_name = args.name or urlparse(args.url).netloc.replace(".", "_")
+
         print("\n" + "=" * 60)
-        print("🎉 Authentication captured successfully!")
+        print("🎉 Login cookies captured!")
         print("=" * 60)
-        print("\n📋 Next steps:")
-        print(f"   1. Apply to .env:")
-        print(
-            f"      .\\venv\\Scripts\\python.exe tools\\msauth\\interactive_auth.py "
-            f"--apply {args.name or urlparse(args.url).netloc.replace('.', '_')}"
-        )
-        print(f"   2. Restart crawler:")
-        print(
-            f"      docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler"
-        )
-        print(f"   3. Test crawling:")
-        print(f"      .\\scripts\\test-internal-auth.ps1 {args.url}")
+
+        # Check if AppServiceAuthSession cookie was captured
+        import json
+
+        auth_file = Path(args.auth_dir) / f"{profile_name}.json"
+        has_app_service_cookie = False
+        if auth_file.exists():
+            with open(auth_file) as f:
+                auth_data = json.load(f)
+                has_app_service_cookie = any(
+                    c.get("name") == "AppServiceAuthSession"
+                    for c in auth_data.get("cookies", [])
+                )
+
+        if has_app_service_cookie:
+            print("\n✅ AppServiceAuthSession cookie captured!")
+            print("\n📋 Next steps - Copy/Paste these commands:")
+            print(f"\n# Step 1: Apply cookies to .env")
+            print(
+                f".\\venv\\Scripts\\python.exe tools\\msauth\\interactive_auth.py --apply {profile_name}"
+            )
+            print(f"\n# Step 2: Restart crawler")
+            print(
+                f"docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler"
+            )
+            print(f"\n# Step 3: Test crawling")
+            print(f".\\scripts\\check-auth-status.ps1 {args.url}")
+        else:
+            print(
+                "\n⚠️  AppServiceAuthSession cookie NOT captured (Azure App Service auth)"
+            )
+            print("\n📋 Next steps - Use manual method:")
+            print(f"\n# Step 1: Add AppServiceAuthSession cookie manually")
+            print(f".\\tools\\msauth\\scripts\\add_cookie_manual.ps1")
+            print("\n   The script will guide you to:")
+            print("   - Open browser DevTools (F12) → Application → Cookies")
+            print(f"   - Navigate to: {args.url}")
+            print("   - Copy AppServiceAuthSession cookie value")
+            print("   - Paste when prompted")
+            print(f"\n# Step 2: Restart crawler")
+            print(
+                f"docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler"
+            )
+            print(f"\n# Step 3: Test crawling")
+            print(f".\\scripts\\check-auth-status.ps1 {args.url}")
 
     except KeyboardInterrupt:
         print("\n\n✋ Authentication cancelled by user")

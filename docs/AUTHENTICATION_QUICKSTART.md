@@ -16,33 +16,50 @@ Choose your authentication method based on your needs:
 
 ## 1. Interactive Browser Auth (Easiest)
 
-**Best for:** Any site with SSO, MFA, or complex login flows
+**Best for:** Any site with SSO, MFA, or complex login flows (including Azure App Service Easy Auth)
+
+### For Azure App Service Easy Auth (e.g., osgwiki.com):
 
 ```powershell
-# Step 1: Log in via browser
-.\scripts\auth.ps1 login https://internal-site.com
+# All-in-one interactive workflow
+.\tools\msauth\scripts\add_cookie_manual.ps1
+```
 
-# Step 2: Apply credentials
-.\scripts\auth.ps1 apply internal-site_com
+The script will:
+1. Show available profiles or create new one
+2. Guide you to get the AppServiceAuthSession cookie from browser
+3. Automatically apply to `.env`
+4. Prompt to restart crawler
+5. Run authentication test
 
-# Step 3: Restart and test
-docker-compose restart crawler
+### For standard OAuth/SSO sites:
+
+```powershell
+# Step 1: Capture auth via browser
+.\venv\Scripts\python.exe tools\msauth\interactive_auth.py https://internal-site.com
+
+# Step 2: Restart crawler
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d crawler
+
+# Step 3: Verify
+.\scripts\check-auth-status.ps1 https://internal-site.com
 ```
 
 **Advantages:**
 - ✅ Works with ANY authentication system
 - ✅ Handles MFA automatically
+- ✅ Interactive prompts guide you
+- ✅ Automatic validation
 - ✅ No manual configuration
 - ✅ Real browser = real authentication
 
 **When to use:**
 - Microsoft 365 / SharePoint
+- Azure App Service Easy Auth
 - Okta / Auth0 SSO
 - Multi-factor authentication
 - SAML / OAuth flows
 - Don't know auth details
-
-📖 [Full Interactive Auth Guide](INTERACTIVE_AUTH.md)
 
 ---
 

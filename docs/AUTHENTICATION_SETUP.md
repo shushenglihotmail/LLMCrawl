@@ -2,11 +2,34 @@
 
 This guide explains how to set up authentication for crawling internal Microsoft sites like osgwiki.com that use Azure App Service Easy Auth.
 
+## Quick Start
+
+**For Azure App Service Easy Auth sites (like osgwiki.com):**
+
+```powershell
+# Step 1: Capture login cookies
+.\venv\Scripts\python.exe tools\msauth\interactive_auth.py https://www.osgwiki.com/wiki/Main_Page
+
+# Step 2: Add AppServiceAuthSession cookie (follow prompts)
+.\tools\msauth\scripts\add_cookie_manual.ps1
+
+# Step 3: Press Enter when prompted to restart crawler
+
+# Step 4: Verify authentication
+.\scripts\check-auth-status.ps1 https://www.osgwiki.com/wiki/Main_Page
+```
+
+The scripts are now fully interactive and will guide you through each step!
+
+---
+
 ## Overview
 
 The authentication process has two methods:
 1. **Automated capture** - Works for most sites
 2. **Manual cookie addition** - Required for Azure App Service Easy Auth sites (like osgwiki.com)
+
+Azure App Service Easy Auth requires a two-step process because the `AppServiceAuthSession` cookie is only set after successfully accessing the protected site.
 
 ## Method 1: Automated Capture (Standard Sites)
 
@@ -25,70 +48,153 @@ This will:
 
 ## Method 2: Manual Cookie Addition (Azure App Service Easy Auth)
 
-For sites like www.osgwiki.com where automated capture doesn't work:
+For sites like www.osgwiki.com where automated capture doesn't fully work:
+
+### Quick Method (Interactive)
+
+```powershell
+# Run the interactive script
+.\tools\msauth\scripts\add_cookie_manual.ps1
+```
+
+This will:
+1. Show available auth profiles
+2. Guide you to get the cookie from browser
+3. Automatically apply to `.env`
+4. Prompt you to restart crawler
+5. Run authentication test
+
+### Step-by-Step Method
+
+If you prefer to understand each step:
 
 ### Step 1: Run Initial Auth Capture
 
 ```powershell
-cd C:\src\github\LLMCrawl
-.\venv\Scripts\python.exe tools\msauth\interactive_auth.py https://www.osgwiki.com/wiki/Main_Page --name www_osgwiki_com --timeout 300
+.\venv\Scripts\python.exe tools\msauth\interactive_auth.py https://www.osgwiki.com/wiki/Main_Page
 ```
 
-This will capture most cookies but **NOT** the `AppServiceAuthSession` cookie.
+This captures login cookies but **NOT** the `AppServiceAuthSession` cookie (set only after accessing the site).
 
 ### Step 2: Get AppServiceAuthSession Cookie from Browser
 
-1. **Keep the browser open** after completing login and seeing the wiki content
-2. Press `F12` to open Developer Tools
-3. Go to the **Network** tab
-4. Click on any request to `www.osgwiki.com` in the list (or refresh the page to see requests)
-5. In the right panel, find the **Cookies** section (may need to scroll down)
-6. Look in the **Request Cookies** for `AppServiceAuthSession`
-7. **Copy the entire Value** (it's a long string starting with something like `eyJ0eX...`)
+**IMPORTANT: Do this quickly - the cookie expires fast!**
 
-**Alternative method (Application tab):**
-- Go to **Application** tab (or **Storage** in Firefox)
-- Expand **Cookies** in the left sidebar
-- Click on `https://www.osgwiki.com`
-- Find `AppServiceAuthSession` and copy the Value
+1. **Navigate to** https://www.osgwiki.com/wiki/Main_Page in your browser
+2. **Verify** you can see the wiki content (not a login page)
+3. Press `F12` to open Developer Tools
+4. Go to **Application** tab → **Cookies** → `https://www.osgwiki.com`
+5. Find `AppServiceAuthSession` cookie
+6. **Double-click** the Value column and copy (Ctrl+C)
+7. **Immediately** proceed to Step 3
 
-### Step 3: Add Cookie Using Helper Script
+**Alternative (Network tab):**
+- Go to **Network** tab
+- Refresh the page
+- Click any request to `www.osgwiki.com`
+- Find **Request Cookies** section
+- Copy `AppServiceAuthSession` value
 
-```powershell
-cd C:\src\github\LLMCrawl
-.\tools\msauth\scripts\add_cookie_manual.ps1 -ProfileName www_osgwiki_com -CookieValue "PASTE_COOKIE_VALUE_HERE"
-```
-
-Replace `PASTE_COOKIE_VALUE_HERE` with the cookie value you copied.
-
-**Example:**
-```powershell
-.\tools\msauth\scripts\add_cookie_manual.ps1 -ProfileName www_osgwiki_com -CookieValue "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6Ij..."
-```
-
-### Step 4: Apply to Environment
+### Step 3: Add Cookie Interactively
 
 ```powershell
-.\venv\Scripts\python.exe tools\msauth\interactive_auth.py --apply www_osgwiki_com
+.\tools\msauth\scripts\add_cookie_manual.ps1
 ```
 
-### Step 5: Restart Crawler
+- Select profile #1 (www_osgwiki_com)
+- Paste the cookie value when prompted
+- Press Enter to restart crawler
+- Press Enter to test authentication
+
+**Or specify directly:**
+```powershell
+.\tools\msauth\scripts\add_cookie_manual.ps1 www_osgwiki_com "YOUR_COOKIE_VALUE"
+```
+
+The script automatically:
+- ✅ Adds cookie to both required locations
+- ✅ Applies to `.env` file
+- ✅ Prompts to restart crawler
+- ✅ Runs authentication test
+
+### Verification
+
+Test authentication with the diagnostic script:
 
 ```powershell
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler
+.\scripts\check-auth-status.ps1 https://www.osgwiki.com/wiki/Main_Page
 ```
 
-**Note:** Use the full compose command with both files to ensure services stay on the same network.
+This will:
+- ✅ Check auth file age
+- ✅ Test actual crawling
+- ✅ Show detailed error messages if auth fails
+- ✅ Provide next-step commands
 
-### Step 6: Verify It Works
+**Expected output:**
+```
+✓ Auth working - content retrieved
+Title: Main Page
+Content length: 482 chars
+Source: playwright+trafilatura
+```
 
-Test with curl:
+### Troubleshooting
+
+**Still getting 401 errors?**
+
+1. **Cookie expired** - Azure App Service cookies expire quickly (10-30 minutes)
+   ```powershell
+   # Get fresh cookie and re-run
+   .\tools\msauth\scripts\add_cookie_manual.ps1
+   ```
+
+2. **Crawler not reloading .env** - Need to recreate container, not just restart
+   ```powershell
+   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d crawler
+   ```
+
+3. **Check what crawler sees:**
+   ```powershell
+   docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs --tail=20 crawler | Select-String "storage_state|401"
+   ```
+
+4. **Wrong cookie count** - Should match your `.auth` file
+   - Look for "configured with storage_state authentication (XX cookies)"
+   - If count is wrong, recreate container (step 2)
+
+### Cookie Refresh Schedule
+
+Azure App Service cookies expire frequently. Set up regular refresh:
+
+**Option 1: Manual Refresh When Needed**
 ```powershell
-$body = @{query='test'; seed_urls=@('https://www.osgwiki.com/wiki/Main_Page'); depth=1} | ConvertTo-Json
-curl -X POST http://localhost:8001/crawl -H 'Content-Type: application/json' -d $body
+# Check status daily or when crawls fail
+.\scripts\check-auth-status.ps1 https://www.osgwiki.com/wiki/Main_Page
+
+# If expired, refresh
+.\tools\msauth\scripts\add_cookie_manual.ps1
 ```
 
-Or test with HiChat webclient:
+**Option 2: Automated Refresh (Future)**
+See `tools\msauth\scripts\schedule_refresh.ps1` for scheduled refresh setup.
+
+---
+
+## Testing After Setup
+
+### Quick Test with curl:
+```powershell
+$body = @{
+    query='test'
+    seed_urls=@('https://www.osgwiki.com/wiki/Main_Page')
+    max_results=1
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri http://localhost:8001/crawl -Method Post -ContentType 'application/json' -Body $body | ConvertTo-Json
+```
+
+### Test with HiChat Webclient:
 ```powershell
 cd C:\src\github\HiChat
 .\bin\hichat-webclient.exe --port 3005
