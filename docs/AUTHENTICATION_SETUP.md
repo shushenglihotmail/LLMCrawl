@@ -75,8 +75,10 @@ Replace `PASTE_COOKIE_VALUE_HERE` with the cookie value you copied.
 ### Step 5: Restart Crawler
 
 ```powershell
-docker-compose restart crawler
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler
 ```
+
+**Note:** Use the full compose command with both files to ensure services stay on the same network.
 
 ### Step 6: Verify It Works
 

@@ -552,7 +552,9 @@ class InteractiveAuth:
 
         print(f"✅ Updated {env_file}")
         print(f"\n📋 Next steps:")
-        print(f"   1. Restart crawler: docker-compose restart crawler")
+        print(
+            f"   1. Restart crawler: docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler"
+        )
         print(f"   2. Test: .\\scripts\\test-internal-auth.ps1 {auth_data['url']}")
 
         return True
@@ -704,11 +706,13 @@ Examples:
         print("\n📋 Next steps:")
         print(f"   1. Apply to .env:")
         print(
-            f"      python tools/msauth/interactive_auth.py "
+            f"      .\\venv\\Scripts\\python.exe tools\\msauth\\interactive_auth.py "
             f"--apply {args.name or urlparse(args.url).netloc.replace('.', '_')}"
         )
         print(f"   2. Restart crawler:")
-        print(f"      docker-compose restart crawler")
+        print(
+            f"      docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler"
+        )
         print(f"   3. Test crawling:")
         print(f"      .\\scripts\\test-internal-auth.ps1 {args.url}")
 

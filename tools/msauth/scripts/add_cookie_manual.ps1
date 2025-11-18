@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Paths
-$authDir = Join-Path $PSScriptRoot "..\..\.auth"
+$authDir = Join-Path $PSScriptRoot "..\..\..\.auth"
 $authFile = Join-Path $authDir "$ProfileName.json"
 
 # Check if auth file exists
@@ -66,8 +66,8 @@ Write-Host "  Total cookies: $($auth.cookies.Count)"
 Write-Host ""
 Write-Host "📋 Next steps:" -ForegroundColor Cyan
 Write-Host "  1. Apply to .env:" -ForegroundColor White
-Write-Host "     python tools\msauth\interactive_auth.py --apply $ProfileName" -ForegroundColor Yellow
+Write-Host "     .\venv\Scripts\python.exe tools\msauth\interactive_auth.py --apply $ProfileName" -ForegroundColor Yellow
 Write-Host "  2. Restart crawler:" -ForegroundColor White
-Write-Host "     docker-compose restart crawler" -ForegroundColor Yellow
+Write-Host "     docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler" -ForegroundColor Yellow
 Write-Host "  3. Test:" -ForegroundColor White
 Write-Host "     curl -X POST http://localhost:8001/crawl -H 'Content-Type: application/json' -d '{`"query`":`"test`",`"seed_urls`":[`"https://$Domain/wiki/Main_Page`"],`"depth`":1}'" -ForegroundColor Yellow
