@@ -308,8 +308,14 @@ async def _complete_chat_response(
         f"{response.get('content', '')[:200] if response.get('content') else 'None'}"
     )
 
-    # Handle tool calls if present
-    if response.get("tool_calls"):
+    # Handle tool calls if present - support multiple rounds
+    max_tool_rounds = int(os.getenv("MAX_TOOL_ROUNDS", "5"))
+    tool_round = 0
+
+    while response.get("tool_calls") and tool_round < max_tool_rounds:
+        tool_round += 1
+        logger.info(f"Tool round {tool_round}/{max_tool_rounds}")
+
         # Add assistant message with tool calls to conversation
         # Azure may return content=None when tool_choice is forced
         content_val = response.get("content") or ""
@@ -320,8 +326,6 @@ async def _complete_chat_response(
         }
         messages.append(assistant_message)
 
-        # Don't store intermediate tool call message - only store final response
-
         # Execute tool calls
         for tool_call in response["tool_calls"]:
             all_tool_calls.append(tool_call)
@@ -331,8 +335,6 @@ async def _complete_chat_response(
             )
             messages.append(tool_result)
 
-            # Don't store tool results in conversation history
-
             # Extract sources from tool result
             try:
                 result_data = json.loads(tool_result["content"])
@@ -341,23 +343,31 @@ async def _complete_chat_response(
             except Exception:
                 pass
 
-        # Second LLM call with tool results
-        # (without tools to prevent additional calls)
+        # Next LLM call with tool results
+        # Continue providing tools so LLM can make additional calls if needed
         logger.info(
-            f"Making second LLM call with {len(messages)} messages "
-            f"including tool results"
+            f"Making LLM call with {len(messages)} messages "
+            f"including tool results (round {tool_round})"
         )
-        final_response = await llm_client.chat_completion(
+        response = await llm_client.chat_completion(
             messages=messages,
+            tools=tools,  # Keep tools available for next round
+            tool_choice="auto",  # Let LLM decide if more tools needed
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             stream=False,
         )
 
-        final_content = final_response.get("content", "")
-        logger.info(f"Final LLM response length: {len(final_content)}")
-    else:
-        final_content = response.get("content", "")
+        # Check if LLM wants to call more tools or is done
+        if not response.get("tool_calls"):
+            logger.info(f"LLM finished after {tool_round} tool rounds")
+            break
+
+    if tool_round >= max_tool_rounds and response.get("tool_calls"):
+        logger.warning(f"Reached max tool rounds ({max_tool_rounds}), stopping")
+
+    # Get final content from last response
+    final_content = response.get("content", "")
 
     # Store assistant's response in conversation history
     conversation_store = get_conversation_store()
