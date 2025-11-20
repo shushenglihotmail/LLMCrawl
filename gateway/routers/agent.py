@@ -7,10 +7,12 @@ Provides:
 3. POST /agent/execute - Execute workflow with filled template
 """
 
+import fnmatch
 import logging
 import os
-from typing import Union
+from typing import List, Union
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
@@ -30,6 +32,77 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 
 # Initialize agent (singleton)
 _agent = None
+
+
+async def _expand_paths(
+    agent: CodeIntelligenceAgent, path_list: List[str]
+) -> List[str]:
+    """
+    Expand path list to actual file paths using conventions:
+    - 'file.cpp' = direct file
+    - '*.cpp' or 'x*.json' = wildcard pattern
+    - 'folder/' or 'folder\\' = folder (non-recursive)
+    - 'folder/**' = folder (recursive)
+    """
+    expanded_files = []
+
+    for path in path_list:
+        # Normalize backslashes to forward slashes (Windows paths)
+        path_normalized = path.replace("\\", "/")
+
+        # Check for recursive folder pattern
+        if path_normalized.endswith("/**"):
+            folder = path_normalized[:-3]
+            files = await _list_folder_files(agent, folder, recursive=True)
+            expanded_files.extend(files)
+        # Check for folder (ends with slash)
+        elif path_normalized.endswith("/"):
+            folder = path_normalized[:-1]
+            files = await _list_folder_files(agent, folder, recursive=False)
+            expanded_files.extend(files)
+        # Check for wildcard pattern
+        elif "*" in path_normalized:
+            parts = path_normalized.split("/")
+            pattern = parts[-1]  # e.g., "*.cpp"
+            folder = "/".join(parts[:-1]) if len(parts) > 1 else "."
+
+            # List folder
+            files = await _list_folder_files(agent, folder, False)
+
+            # Filter by pattern
+            matching = [f for f in files if fnmatch.fnmatch(f.split("/")[-1], pattern)]
+            expanded_files.extend(matching)
+        else:
+            # Direct file path
+            expanded_files.append(path_normalized)
+
+    return expanded_files
+
+
+async def _list_folder_files(
+    agent: CodeIntelligenceAgent, folder_path: str, recursive: bool
+) -> List[str]:
+    """List files in a folder via MCP server."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{agent.mcp_url}/invoke",
+                json={
+                    "tool_name": "list_files",
+                    "arguments": {"folder_path": folder_path, "recursive": recursive},
+                },
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            if result.get("success"):
+                files_data = result["result"].get("files", [])
+                # Extract just the paths
+                return [f["path"] for f in files_data if f.get("type") == "file"]
+            return []
+    except Exception as e:
+        logger.error(f"Failed to list folder {folder_path}: {e}")
+        return []
 
 
 def get_agent() -> CodeIntelligenceAgent:
@@ -136,45 +209,70 @@ async def execute_workflow(
     """
 
     logger.info(f"Executing {request.workflow} workflow")
-    logger.info(f"Target files: {len(request.target_files)}")
+    logger.info(f"Target paths: {len(request.target_paths)}")
     logger.info(f"Educational files: {len(request.educational_files or [])}")
     logger.info(f"Web crawl URLs: {len(request.web_crawl_urls or [])}")
 
     try:
         agent = get_agent()
 
-        # Prepare parameters
-        target_files = request.target_files
-        reference_files = request.educational_files or []
+        # Expand target_paths to actual file list
+        target_files = await _expand_paths(agent, request.target_paths)
 
-        # Determine web research strategy
-        if request.web_crawl_urls:
-            # User provided specific URLs to crawl
-            web_research = True
-            # TODO: Pass seed_urls to agent for targeted crawling
-            logger.info(f"Will crawl: {request.web_crawl_urls}")
+        # Check file count limit
+        max_files = int(os.getenv("MAX_FILES_PER_REQUEST", "50"))
+        if len(target_files) > max_files:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Too many files: {len(target_files)} files expanded. "
+                    f"Maximum: {max_files}. Use more specific wildcards."
+                ),
+            )
+
+        # Expand educational_files if provided
+        reference_files = []
+        if request.educational_files:
+            reference_files = await _expand_paths(agent, request.educational_files)
+
+        seed_urls = request.web_crawl_urls or []
+
+        logger.info(f"Expanded to {len(target_files)} target files")
+        if reference_files:
+            logger.info(f"Expanded to {len(reference_files)} reference files")
+
+        if seed_urls:
+            logger.info(f"Will crawl {len(seed_urls)} URLs")
         else:
-            # No URLs provided, skip web crawling
-            web_research = False
-            logger.info("Skipping web research (no URLs provided)")
+            logger.info("No web crawling (no URLs provided)")
 
         # Execute workflow
         result = await agent.execute_workflow(
             workflow=request.workflow,
             target_files=target_files,
             request=request.request,
+            model=request.model,
             reference_files=reference_files,
-            web_research=web_research,
-            planning_model=request.planning_model,
-            execution_model=request.execution_model,
+            seed_urls=seed_urls,
         )
 
         # Check for errors
         if "error" in result:
-            logger.error(f"Workflow execution failed: {result['error']}")
-            raise HTTPException(
-                status_code=500, detail=f"Workflow execution failed: {result['error']}"
-            )
+            error_msg = result["error"]
+            logger.error(f"Workflow execution failed: {error_msg}")
+
+            # Detect rate limit errors and return 429
+            status_code = 500
+            if (
+                "rate limit" in error_msg.lower()
+                or "429" in error_msg
+                or "RateLimitReached" in error_msg
+            ):
+                status_code = 429
+            elif "token" in error_msg.lower() and "exceed" in error_msg.lower():
+                status_code = 429
+
+            raise HTTPException(status_code=status_code, detail=error_msg)
 
         logger.info(f"Workflow completed: {result.get('context_used', {})}")
 
@@ -183,10 +281,21 @@ async def execute_workflow(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error executing workflow: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Workflow execution failed: {str(e)}"
-        )
+        error_msg = str(e)
+        logger.error(f"Unexpected error executing workflow: {error_msg}", exc_info=True)
+
+        # Detect rate limit errors
+        status_code = 500
+        if (
+            "rate limit" in error_msg.lower()
+            or "429" in error_msg
+            or "RateLimitReached" in error_msg
+        ):
+            status_code = 429
+        elif "token" in error_msg.lower() and "exceed" in error_msg.lower():
+            status_code = 429
+
+        raise HTTPException(status_code=status_code, detail=error_msg)
 
 
 @router.post("/execute-with-urls")

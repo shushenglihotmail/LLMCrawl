@@ -13,6 +13,23 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
+class PathItem(BaseModel):
+    """Represents a file path (with wildcards) or folder path."""
+
+    path: str = Field(
+        ...,
+        description="File path (supports wildcards like *.cpp, x*.json) or folder path",
+    )
+    is_folder: bool = Field(
+        default=False,
+        description="True if path is a folder, False if file/wildcard pattern",
+    )
+    include_subfolders: bool = Field(
+        default=False,
+        description="If is_folder=True, whether to include subfolders recursively",
+    )
+
+
 class WorkflowTemplate(BaseModel):
     """Base template for workflow execution."""
 
@@ -41,15 +58,17 @@ class UnderstandWorkflowRequest(BaseModel):
 
     workflow: Literal["understand"] = "understand"
 
-    # Required: Files to analyze
-    target_files: List[str] = Field(
+    # Required: Files/folders to analyze
+    target_paths: List[str] = Field(
         ...,
-        description="List of file paths to analyze. Can use wildcards like /src/**/*.cpp",
+        description="Paths to analyze. Use conventions: 'file.cpp'=file, 'folder\\'=folder, 'folder\\**'=recursive, '*.cpp'=wildcard",
         min_items=1,
         examples=[
             [
-                "/data/files/src/onecore/vm/compute/dll/ComputeServiceModule.cpp",
-                "/data/files/src/onecore/vm/compute/dll/ComputeService.h",
+                "src/service/main.cpp",
+                "src/utils/*.py",
+                "src/models/",
+                "src/core/**",
             ]
         ],
     )
@@ -61,11 +80,24 @@ class UnderstandWorkflowRequest(BaseModel):
         examples=["Explain how the service initializes", "Document the API design"],
     )
 
+    # Required: Model to use (from client selection)
+    model: str = Field(
+        ...,
+        description="LLM model to use for analysis",
+        examples=["gpt-4o", "gpt-5-chat", "claude-sonnet-4-5"],
+    )
+
     # Optional: Educational/instruction files
     educational_files: Optional[List[str]] = Field(
         default=None,
-        description="Optional instruction files with tips for analysis",
-        examples=[["/docs/ARCHITECTURE.md", "/docs/CODING_PATTERNS.md"]],
+        description="Optional instruction files or folders. Use same path conventions",
+        examples=[
+            [
+                "docs/ARCHITECTURE.md",
+                "examples/",
+                "templates/**",
+            ]
+        ],
     )
 
     # Optional: Web crawl targets
@@ -73,14 +105,6 @@ class UnderstandWorkflowRequest(BaseModel):
         default=None,
         description="Optional URLs to crawl for additional context",
         examples=[["https://docs.microsoft.com/windows/win32/services/"]],
-    )
-
-    # Optional: Model configuration
-    planning_model: str = Field(
-        default="gpt-4o-mini", description="Model for planning (cheap/fast)"
-    )
-    execution_model: str = Field(
-        default="gpt-4o", description="Model for analysis (main)"
     )
 
 
@@ -100,9 +124,11 @@ class InspectWorkflowRequest(BaseModel):
 
     workflow: Literal["inspect"] = "inspect"
 
-    # Required: Files to inspect
-    target_files: List[str] = Field(
-        ..., description="List of file paths to inspect", min_items=1
+    # Required: Files/folders to inspect
+    target_paths: List[PathItem] = Field(
+        ...,
+        description="Files (with wildcards like *.cpp) or folders to inspect",
+        min_items=1,
     )
 
     # Required: What to look for
@@ -116,11 +142,27 @@ class InspectWorkflowRequest(BaseModel):
         ],
     )
 
+    # Required: Model to use (from client selection)
+    model: str = Field(
+        ...,
+        description="LLM model to use for analysis",
+        examples=["gpt-4o", "gpt-5-chat", "claude-sonnet-4-5"],
+    )
+
     # Optional: Guidelines/checklists
-    educational_files: Optional[List[str]] = Field(
+    educational_files: Optional[List[PathItem]] = Field(
         default=None,
         description="Optional security guidelines, coding standards, checklists",
-        examples=[["/docs/SECURITY_GUIDELINES.md", "/docs/CODING_STANDARDS.md"]],
+        examples=[
+            [
+                {"path": "docs/SECURITY_GUIDELINES.md", "is_folder": False},
+                {
+                    "path": "docs/standards",
+                    "is_folder": True,
+                    "include_subfolders": False,
+                },
+            ]
+        ],
     )
 
     # Optional: Web resources (CVE databases, OWASP, etc.)
@@ -129,9 +171,6 @@ class InspectWorkflowRequest(BaseModel):
         description="Optional security resources to reference",
         examples=[["https://cwe.mitre.org/", "https://owasp.org/"]],
     )
-
-    planning_model: str = Field(default="gpt-4o-mini")
-    execution_model: str = Field(default="gpt-4o")
 
 
 class GenerateWorkflowRequest(BaseModel):
@@ -154,9 +193,10 @@ class GenerateWorkflowRequest(BaseModel):
 
     workflow: Literal["generate"] = "generate"
 
-    # Optional for generate: No target files needed
-    target_files: List[str] = Field(
-        default_factory=list, description="Usually empty for generation workflow"
+    # Optional for generate: Existing files for reference/context
+    target_paths: List[PathItem] = Field(
+        default_factory=list,
+        description="Existing files or folders to use as reference/context",
     )
 
     # Required: What to generate
@@ -169,16 +209,26 @@ class GenerateWorkflowRequest(BaseModel):
         ],
     )
 
+    # Required: Model to use (from client selection)
+    model: str = Field(
+        ...,
+        description="LLM model to use for generation",
+        examples=["gpt-4o", "gpt-5-chat", "claude-sonnet-4-5"],
+    )
+
     # Required: Template/example files to learn from
-    educational_files: List[str] = Field(
+    educational_files: List[PathItem] = Field(
         ...,
         description="Template files, examples, and style guides to follow",
         min_items=1,
         examples=[
             [
-                "/templates/service_template.cpp",
-                "/templates/service_template.h",
-                "/docs/CODING_STANDARDS.md",
+                {"path": "templates/service_template.cpp", "is_folder": False},
+                {
+                    "path": "examples/services",
+                    "is_folder": True,
+                    "include_subfolders": True,
+                },
             ]
         ],
     )
@@ -188,9 +238,6 @@ class GenerateWorkflowRequest(BaseModel):
         default=None,
         description="Usually not needed for generation (examples are sufficient)",
     )
-
-    planning_model: str = Field(default="gpt-4o-mini")
-    execution_model: str = Field(default="gpt-4o")
 
 
 # Template definitions for GET /templates

@@ -94,6 +94,19 @@ graph TB
 - **Flexible Timeouts**: 45-second gateway timeout, 25-second FireCrawl timeout
 - **Internal Site Authentication**: Support for headers, cookies, basic auth, and bearer tokens for crawling authenticated internal sites
 
+### Code Intelligence Agent
+- **Multi-Workflow Support**: Understand & Document, Inspect & Analyze, Generate from Examples
+- **Flexible Path Input**: Simple conventions for files, folders, wildcards, and recursive paths
+  - Direct file: `src/file.cpp`
+  - Wildcard: `src/*.cpp` or `x*.json`
+  - Folder: `src/folder/` (non-recursive)
+  - Recursive: `src/folder/**` (all subfolders)
+- **Model Selection**: Choose different models per request (GPT-4, Claude, etc.)
+- **Cost Protection**: Configurable limits for max files (default: 50) and tokens (default: 100k)
+- **Rate Limit Handling**: Proper HTTP 429 status codes with detailed Azure error messages
+- **Educational References**: Include example files to guide code generation
+- **Web Documentation**: Optionally crawl documentation URLs for context
+
 ### Local File Operations (MCP Server)
 - **Secure File Access**: Read local files with path validation and security checks
 - **Directory Operations**: List files and directories with structured results
@@ -138,9 +151,13 @@ VECTOR_DB=qdrant  # or pgvector
 # Optional: Firecrawl API Key (for better crawling)
 FIRECRAWL_API_KEY=your_firecrawl_key_here
 
-# Crawling Configuration
+# Web Crawling Configuration
 ALLOWED_DOMAINS=sec.gov,ft.com,wsj.com,nvidia.com,reuters.com,bloomberg.com
 RESPECT_ROBOTS=true
+
+# Code Intelligence Agent Limits
+MAX_FILES_PER_REQUEST=50      # Maximum files to analyze in one request
+MAX_INPUT_TOKENS=100000       # Maximum input tokens (~75k words)
 
 # MCP Server Configuration (Local File Operations)
 MCP_ROOT_FOLDER=/data/files  # Inside container (mounted from host)
@@ -206,8 +223,17 @@ docker-compose restart crawler
 # Complete setup
 .\scripts\setup_dev.ps1
 
-# Quick start (after setup)
-.\scripts\start_dev.ps1
+# Start services
+.\scripts\start-services.ps1
+
+# Check status
+.\scripts\service-status.ps1
+
+# Stop services
+.\scripts\stop-services.ps1
+
+# Restart after .env changes
+.\scripts\restart-services.ps1
 ```
 
 **Unix/Linux/macOS:**

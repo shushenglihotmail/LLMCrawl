@@ -10,6 +10,8 @@ services:
     volumes:
       - ./gateway:/app/gateway:rw
       - ./requirements:/app/requirements:ro
+    env_file:
+      - .env
     environment:
       - ENVIRONMENT=development
       - LOG_LEVEL=DEBUG

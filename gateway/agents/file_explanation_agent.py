@@ -15,8 +15,8 @@ This agent orchestrates data gathering WITHOUT multiple LLM rounds:
 Cost: 1-2 LLM calls (vs 5+ with dynamic tool calling)
 """
 
-import json
 import logging
+import os
 from typing import Any, Dict, List, Literal, Optional
 
 import httpx
@@ -24,6 +24,11 @@ import httpx
 logger = logging.getLogger(__name__)
 
 WorkflowType = Literal["understand", "inspect", "generate"]
+
+
+def estimate_tokens(text: str) -> int:
+    """Estimate token count (rough approximation: 1 token ≈ 4 characters)."""
+    return len(text) // 4
 
 
 class CodeIntelligenceAgent:
@@ -46,10 +51,9 @@ class CodeIntelligenceAgent:
         workflow: WorkflowType,
         target_files: List[str],
         request: str,
+        model: str,
         reference_files: Optional[List[str]] = None,
-        web_research: bool = True,
-        planning_model: str = "gpt-4o-mini",
-        execution_model: str = "gpt-4o",
+        seed_urls: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Execute a code intelligence workflow.
@@ -58,28 +62,92 @@ class CodeIntelligenceAgent:
             workflow: Type of workflow ("understand", "inspect", "generate")
             target_files: Primary files to operate on
             request: User's specific request/instruction
+            model: LLM model to use (from client selection)
             reference_files: Optional reference files (guides, templates, examples)
-            web_research: Whether to fetch web documentation
-            planning_model: Cheap model for planning
-            execution_model: Main model for execution
+            seed_urls: Optional URLs to crawl for additional context
 
         Returns:
             Result with content and sources
         """
         logger.info(f"Starting {workflow} workflow for {len(target_files)} files")
+        logger.info(f"Using model: {model}")
 
         try:
-            # Step 1: Read target files
+            # Step 1: Read target files (expand folders to files if needed)
             target_contents = []
             for file_path in target_files:
-                content = await self._read_file(file_path)
-                if content:
-                    target_contents.append({"file": file_path, "content": content})
+                # Check if it's a folder - if so, list files in it
+                if not file_path or "/" not in file_path and "\\" not in file_path:
+                    # Could be folder without path separator
+                    files_in_folder = await self._list_files(file_path)
+                    if files_in_folder:
+                        logger.info(
+                            f"Folder detected: {file_path}, found {len(files_in_folder)} files"
+                        )
+                        for file_info in files_in_folder[
+                            :10
+                        ]:  # Limit to first 10 files
+                            content = await self._read_file(file_info["path"])
+                            if content:
+                                target_contents.append(
+                                    {"file": file_info["path"], "content": content}
+                                )
+                    else:
+                        # Try as file
+                        content = await self._read_file(file_path)
+                        if content:
+                            target_contents.append(
+                                {"file": file_path, "content": content}
+                            )
+                        else:
+                            logger.warning(f"Could not read file: {file_path}")
                 else:
-                    logger.warning(f"Could not read file: {file_path}")
+                    # Has path separator, treat as file
+                    content = await self._read_file(file_path)
+                    if content:
+                        target_contents.append({"file": file_path, "content": content})
+                    else:
+                        # Maybe it's a folder path?
+                        files_in_folder = await self._list_files(file_path)
+                        if files_in_folder:
+                            logger.info(
+                                f"Folder detected: {file_path}, found {len(files_in_folder)} files"
+                            )
+                            for file_info in files_in_folder[
+                                :10
+                            ]:  # Limit to first 10 files
+                                content = await self._read_file(file_info["path"])
+                                if content:
+                                    target_contents.append(
+                                        {"file": file_info["path"], "content": content}
+                                    )
+                        else:
+                            logger.warning(
+                                f"Could not read file or list folder: {file_path}"
+                            )
 
             if not target_contents:
                 return {"error": "Could not read any target files"}
+
+            # Estimate total input tokens
+            total_chars = sum(len(tc["content"]) for tc in target_contents)
+            estimated_tokens = estimate_tokens(
+                "".join([tc["content"] for tc in target_contents])
+            )
+
+            # Check token limit
+            max_tokens = int(os.getenv("MAX_INPUT_TOKENS", "100000"))
+            if estimated_tokens > max_tokens:
+                return {
+                    "error": f"Input too large: ~{estimated_tokens:,} tokens estimated. "
+                    f"Maximum allowed: {max_tokens:,} tokens. "
+                    f"Please reduce the number of files or use smaller files. "
+                    f"Current: {len(target_contents)} files with {total_chars:,} characters."
+                }
+
+            logger.info(
+                f"Processing {len(target_contents)} files with ~{estimated_tokens:,} tokens"
+            )
 
             # Step 2: Read reference files (guides, templates, examples)
             reference_contents = []
@@ -91,19 +159,13 @@ class CodeIntelligenceAgent:
                             {"file": ref_file, "content": content}
                         )
 
-            # Step 3: Gather web context (if enabled)
+            # Step 3: Gather web context (if seed URLs provided)
             web_context = ""
             sources = []
 
-            if web_research:
-                # Use lightweight LLM to plan research
-                research_plan = await self._plan_research(
-                    workflow, target_contents, planning_model
-                )
-
-                if research_plan.get("search_queries"):
-                    # Crawl and retrieve relevant web content
-                    web_context, sources = await self._gather_web_context(research_plan)
+            if seed_urls:
+                # Crawl provided URLs and retrieve relevant content
+                web_context, sources = await self._gather_web_context(seed_urls)
 
             # Step 4: Build workflow-specific prompt
             prompt = self._build_workflow_prompt(
@@ -129,7 +191,7 @@ class CodeIntelligenceAgent:
 
             response = await self.llm_client.chat_completion(
                 messages=[{"role": "user", "content": prompt}],
-                model=execution_model,
+                model=model,
                 temperature=temperature,
                 max_tokens=4000,
             )
@@ -172,90 +234,28 @@ class CodeIntelligenceAgent:
                 logger.error(f"Failed to read file {file_path}: {e}")
                 return None
 
-    async def _plan_research(
-        self, workflow: WorkflowType, target_contents: List[Dict], model: str
-    ) -> Dict[str, Any]:
+    async def _gather_web_context(self, seed_urls: List[str]) -> tuple[str, List[Dict]]:
         """
-        Use lightweight LLM to plan web research.
+        Crawl web content and retrieve relevant chunks via vector search.
 
-        Returns dict with:
-        - search_queries: List of search terms
-        - seed_urls: Suggested documentation URLs
-        """
-        # Build context summary for planning
-        files_summary = "\n".join(
-            [f"- {tc['file']}: {tc['content'][:200]}..." for tc in target_contents[:3]]
-        )
-
-        workflow_context = {
-            "understand": "understanding and documenting these files",
-            "inspect": "finding issues, bugs, or improvements in these files",
-            "generate": "learning patterns to generate similar code",
-        }
-
-        planning_prompt = f"""
-You are a research planner. Given a code analysis task, determine what web
-documentation would help.
-
-Workflow: {workflow}
-Purpose: {workflow_context.get(workflow, "analyzing")}
-
-Files:
-{files_summary}
-
-Return JSON with:
-{{
-    "search_queries": ["query1", "query2"],  // 2-3 relevant search terms
-    "seed_urls": ["https://...", ...]        // Relevant documentation URLs
-}}
-
-Focus on official documentation, best practices, and relevant guides.
-"""
-
-        try:
-            response = await self.llm_client.chat_completion(
-                messages=[{"role": "user", "content": planning_prompt}],
-                model=model,
-                temperature=0.3,
-                max_tokens=300,
-            )
-
-            # Parse JSON from response
-            plan = json.loads(response["content"])
-            logger.info(f"Research plan: {plan}")
-            return plan
-
-        except Exception as e:
-            logger.error(f"Research planning failed: {e}")
-            return {"search_queries": [], "seed_urls": []}
-
-    async def _gather_web_context(
-        self, research_plan: Dict[str, Any]
-    ) -> tuple[str, List[Dict]]:
-        """
-        Crawl web content and retrieve relevant chunks.
+        Args:
+            seed_urls: URLs to crawl
 
         Returns:
             (combined_text, sources)
         """
-        search_queries = research_plan.get("search_queries", [])
-        seed_urls = research_plan.get("seed_urls", [])
-
-        if not search_queries and not seed_urls:
+        if not seed_urls:
             return "", []
 
-        # Crawl seed URLs
-        docs = []
-        if seed_urls:
-            docs = await self._crawl_urls(seed_urls)
+        # Crawl provided URLs
+        docs = await self._crawl_urls(seed_urls)
 
         # If we got docs, index them and retrieve relevant chunks
         if docs:
             await self._index_docs(docs)
 
-            # Use first search query to retrieve relevant chunks
-            query = search_queries[0] if search_queries else "overview"
-            hits = await self._retrieve_docs(query, k=5)
+            # Vector search with generic query - execution model will filter semantically
+            hits = await self._retrieve_docs("documentation overview", k=5)
 
             # Build context from hits
             web_text = "\n\n".join(

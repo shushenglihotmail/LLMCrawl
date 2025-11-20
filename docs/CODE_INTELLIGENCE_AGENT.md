@@ -1,6 +1,189 @@
-# Code Intelligence Agent - Solution Summary
+# Code Intelligence Agent
 
-## Your Requirements → Implementation Mapping
+The Code Intelligence Agent provides AI-powered code understanding, analysis, and generation workflows with flexible path input and cost protection.
+
+## Overview
+
+Three specialized workflows for different code tasks:
+- **Understand & Document**: Analyze and explain code
+- **Inspect & Analyze**: Find bugs and vulnerabilities
+- **Generate from Examples**: Create new code following patterns
+
+## Quick Start
+
+### API Endpoint
+
+```
+POST /agent/execute
+```
+
+### Simple Example
+
+```json
+{
+  "workflow": "understand",
+  "target_paths": ["src/app.py", "src/config.py"],
+  "request": "Explain how this application starts up",
+  "model": "gpt-4"
+}
+```
+
+## Path Conventions (New in v2.0)
+
+Simple string-based path specification with pattern matching:
+
+| Pattern | Type | Example | Description |
+|---------|------|---------|-------------|
+| `file.txt` | Direct file | `src/app.py` | Single specific file |
+| `*.ext` | Wildcard | `src/*.cpp` | All matching files in folder |
+| `folder/` | Folder | `src/utils/` | All files in folder (non-recursive) |
+| `folder/**` | Recursive | `src/**` | All files including subfolders |
+
+**Examples:**
+```json
+{
+  "target_paths": [
+    "src/main.py",           // Single file
+    "tests/*.py",            // Wildcard: all Python test files
+    "lib/",                  // Folder: all files in lib/ (non-recursive)
+    "src/models/**"          // Recursive: all files under models/
+  ]
+}
+```
+
+## Cost Protection
+
+Built-in limits prevent excessive LLM costs:
+
+```bash
+# Environment variables in .env
+MAX_FILES_PER_REQUEST=50      # File count limit (default: 50)
+MAX_INPUT_TOKENS=100000       # Token limit (default: 100k)
+```
+
+**Error Responses:**
+
+```json
+// Too many files
+{
+  "detail": "Too many files: 150 files expanded. Maximum: 50. Use more specific wildcards."
+}
+
+// Too many tokens
+{
+  "detail": "Input too large: ~150,000 tokens. Maximum: 100,000. Reduce file count."
+}
+
+// Rate limit
+{
+  "detail": "⏱️ Rate Limit: Exceeded token rate limit. Retry after 60 seconds."
+}
+```
+
+## Workflows
+
+### 1. Understand & Document
+
+**Purpose:** Analyze code and generate documentation
+
+```json
+{
+  "workflow": "understand",
+  "target_paths": ["src/api/", "src/models/*.py"],
+  "request": "Generate API documentation with examples",
+  "model": "gpt-4",
+  "educational_files": ["docs/api-guide.md"],
+  "web_crawl_urls": ["https://fastapi.tiangolo.com"]
+}
+```
+
+### 2. Inspect & Analyze
+
+**Purpose:** Find bugs, security issues, code smells
+
+```json
+{
+  "workflow": "inspect",
+  "target_paths": ["src/**/*.py"],
+  "request": "Find security vulnerabilities",
+  "model": "claude-sonnet-4"
+}
+```
+
+### 3. Generate from Examples
+
+**Purpose:** Create new code following existing patterns
+
+```json
+{
+  "workflow": "generate",
+  "target_paths": [],
+  "request": "Create a User model following existing patterns",
+  "educational_files": [
+    "src/models/Post.py",
+    "src/models/Comment.py"
+  ],
+  "model": "gpt-4"
+}
+```
+
+## Model Selection
+
+Choose different models per request:
+
+```json
+{
+  "model": "gpt-4",           // Best for complex tasks
+  "model": "gpt-3.5-turbo",   // Faster, cheaper
+  "model": "claude-sonnet-4"  // Strong at code review
+}
+```
+
+Model selection now properly tracked in Azure AI Foundry usage metrics.
+
+## Configuration
+
+### Update Limits
+
+Edit `.env`:
+```bash
+MAX_FILES_PER_REQUEST=80
+MAX_INPUT_TOKENS=150000
+```
+
+**Restart services to apply:**
+```powershell
+.\scripts\restart-services.ps1
+```
+
+## Error Handling
+
+### HTTP Status Codes
+
+- **200**: Success
+- **400**: Bad request (too many files/tokens)
+- **429**: Rate limit exceeded (proper Azure error with retry-after)
+- **500**: Internal error
+
+### Rate Limit Response
+
+Now returns proper HTTP 429 with detailed Azure message:
+
+```json
+{
+  "detail": "Your requests to gpt-5-chat have exceeded the token rate limit for your AIServices S0 pricing tier. Retry after 60 seconds. Visit: https://aka.ms/oai/quotaincrease"
+}
+```
+
+## Best Practices
+
+1. **Start Small**: Test with 5-10 files first
+2. **Use Specific Paths**: `src/api/` not `src/**`
+3. **Watch Token Usage**: ~4 chars = 1 token
+4. **Choose Right Model**: GPT-4 for complex, GPT-3.5 for simple
+5. **Include Examples**: 1-3 educational files for generation
+
+## Your Requirements → Implementation
 
 ### Requirement 1: Understand File Content
 > "Summarize and give explanation or document about target files. The summary could cover a group of files."
@@ -191,6 +374,26 @@ Round 1: User → Agent: "Explain ComputeServiceModule.cpp"
 Total: 1-2 LLM calls × $0.01 = $0.01-0.02 per request
 Savings: 67-83% cost reduction
 ```
+
+---
+
+## Configuration
+
+The agent uses the same model that the user selects in the client UI dropdown. There is no separate agent-specific model configuration.
+
+**How It Works:**
+- User selects a model from the dropdown (e.g., "gpt-5-chat", "claude-sonnet-4-5")
+- That model is used for both:
+  - Regular chat conversations
+  - Code Intelligence Agent workflows (understand/inspect/generate)
+- The selected model is automatically passed to the agent
+
+**Web Crawling:**
+- If you provide `web_crawl_urls`: Agent crawls those URLs, indexes content in vector DB
+- Vector search retrieves top ~8 most relevant chunks
+- Selected model analyzes target files + web context together
+
+**Note:** The old `AGENT_EXECUTION_MODEL` environment variable is no longer used.
 
 ---
 
