@@ -92,8 +92,8 @@ class LLMClient:
                     error_data = (
                         e.response.json() if hasattr(e.response, "json") else {}
                     )
-                    if 'error' in error_data:
-                        error_msg = error_data['error'].get('message', error_msg)
+                    if "error" in error_data:
+                        error_msg = error_data["error"].get("message", error_msg)
                 except Exception:
                     pass
             # Re-raise with preserved message
