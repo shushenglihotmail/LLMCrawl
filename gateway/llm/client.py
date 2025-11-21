@@ -119,7 +119,13 @@ class LLMClient:
             # Route to appropriate client based on provider type
             if provider_type == "anthropic":
                 return await self._anthropic_chat_completion(
-                    deployment_name, messages, temperature, max_tokens, stream
+                    deployment_name,
+                    messages,
+                    tools,
+                    tool_choice,
+                    temperature,
+                    max_tokens,
+                    stream,
                 )
             else:
                 return await self._openai_chat_completion(
@@ -182,11 +188,13 @@ class LLMClient:
         self,
         model: str,
         messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]],
+        tool_choice: str,
         temperature: float,
         max_tokens: int,
         stream: bool,
     ) -> Dict[str, Any]:
-        """Handle Anthropic chat completion via direct HTTP."""
+        """Handle Anthropic chat completion via direct HTTP with tool support."""
         if not self.anthropic_endpoint:
             raise Exception(
                 "Anthropic endpoint not configured. Check AZURE_ANTHROPIC_ENDPOINT configuration."
@@ -201,9 +209,32 @@ class LLMClient:
             if role == "system":
                 system_message = msg["content"]
             elif role in ["user", "assistant"]:
-                # Only include user and assistant messages
-                anthropic_messages.append({"role": role, "content": msg["content"]})
-            # Skip "tool" role messages as Anthropic doesn't support them
+                # Handle tool_calls in assistant messages
+                if role == "assistant" and msg.get("tool_calls"):
+                    # Anthropic format: content blocks with tool_use
+                    content_blocks = []
+                    if msg.get("content"):
+                        content_blocks.append({"type": "text", "text": msg["content"]})
+                    for tool_call in msg["tool_calls"]:
+                        content_blocks.append({
+                            "type": "tool_use",
+                            "id": tool_call["id"],
+                            "name": tool_call["function"]["name"],
+                            "input": json.loads(tool_call["function"]["arguments"]),
+                        })
+                    anthropic_messages.append({"role": "assistant", "content": content_blocks})
+                else:
+                    anthropic_messages.append({"role": role, "content": msg["content"]})
+            elif role == "tool":
+                # Convert tool result to Anthropic format
+                anthropic_messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": msg.get("tool_call_id"),
+                        "content": msg["content"],
+                    }]
+                })
 
         # Prepare request payload
         payload = {
@@ -215,6 +246,30 @@ class LLMClient:
 
         if system_message:
             payload["system"] = system_message
+
+        # Add tools if provided (convert OpenAI format to Anthropic format)
+        if tools:
+            anthropic_tools = []
+            for tool in tools:
+                anthropic_tool = {
+                    "name": tool["function"]["name"],
+                    "description": tool["function"]["description"],
+                    "input_schema": tool["function"]["parameters"],
+                }
+                anthropic_tools.append(anthropic_tool)
+            payload["tools"] = anthropic_tools
+
+            # Convert tool_choice
+            if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+                # Force specific tool
+                payload["tool_choice"] = {
+                    "type": "tool",
+                    "name": tool_choice["function"]["name"],
+                }
+            elif tool_choice == "auto":
+                payload["tool_choice"] = {"type": "auto"}
+            elif tool_choice == "none":
+                payload["tool_choice"] = {"type": "none"}
 
         headers = {
             "x-api-key": self.anthropic_api_key,
@@ -235,16 +290,33 @@ class LLMClient:
 
             # Convert Anthropic response to OpenAI format
             content = ""
+            tool_calls = []
+            
             if data.get("content"):
                 for block in data["content"]:
                     if block.get("type") == "text":
                         content += block.get("text", "")
+                    elif block.get("type") == "tool_use":
+                        # Convert Anthropic tool_use to OpenAI tool_call format
+                        tool_calls.append({
+                            "id": block["id"],
+                            "type": "function",
+                            "function": {
+                                "name": block["name"],
+                                "arguments": json.dumps(block["input"]),
+                            },
+                        })
 
-            return {
+            result = {
                 "content": content,
                 "role": "assistant",
                 "finish_reason": data.get("stop_reason"),
             }
+            
+            if tool_calls:
+                result["tool_calls"] = tool_calls
+
+            return result
 
         except httpx.HTTPStatusError as e:
             error_detail = e.response.text
