@@ -161,25 +161,45 @@ class CodeIntelligenceAgent:
                             {"file": ref_file, "content": content}
                         )
 
-            # Step 3: Gather web context (if enabled and seed URLs provided)
+            # Step 3: Gather web context based on allow_web_search and seed_urls
+            # Logic:
+            # 1. allow_web_search=False, no seed_urls -> no crawling
+            # 2. allow_web_search=True, no seed_urls -> crawl public internet (auto-generate query from request)
+            # 3. allow_web_search=False, seed_urls provided -> crawl only seed URLs
+            # 4. allow_web_search=True, seed_urls provided -> crawl seed URLs with priority, can also crawl public internet
             web_context = ""
             sources = []
 
-            if allow_web_search and seed_urls:
-                # Crawl provided seed URLs with priority
-                logger.info(
-                    f"Web search enabled. Crawling {len(seed_urls)} seed URLs with priority"
-                )
+            if seed_urls:
+                # Seed URLs provided - crawl them regardless of allow_web_search flag
+                # (seed URLs are explicit user intent, so always honor them)
+                logger.info(f"Crawling {len(seed_urls)} seed URLs with priority")
                 web_context, sources = await self._gather_web_context(seed_urls)
-            elif seed_urls and not allow_web_search:
+
+                if allow_web_search:
+                    logger.info(
+                        "Web search also allowed - seed URLs crawled with priority, public internet crawling available if needed"
+                    )
+                else:
+                    logger.info(
+                        "Web search disabled - only seed URLs will be crawled (no public internet)"
+                    )
+            elif allow_web_search:
+                # No seed URLs but web search allowed - use crawler's search with request text
                 logger.info(
-                    f"Seed URLs provided but web search disabled. Skipping web crawl."
+                    "Web search enabled with no seed URLs - using request text as search query"
                 )
-            elif allow_web_search and not seed_urls:
+                # Use crawler's search API directly (no seed URLs, just search query)
+                web_context, sources = await self._search_web(request)
+                if sources:
+                    logger.info(f"Web search found {len(sources)} results")
+                else:
+                    logger.warning("Web search returned no results")
+            else:
+                # No seed URLs and web search disabled - no crawling at all
                 logger.info(
-                    "Web search enabled but no seed URLs provided. Skipping web crawl."
+                    "Web search disabled and no seed URLs provided - no web crawling"
                 )
-                # TODO: In future, could add automatic search query generation from request
 
             # Step 4: Build workflow-specific prompt
             prompt = self._build_workflow_prompt(
@@ -248,6 +268,39 @@ class CodeIntelligenceAgent:
                 logger.error(f"Failed to read file {file_path}: {e}")
                 return None
 
+    async def _search_web(self, query: str) -> tuple[str, List[Dict]]:
+        """
+        Search the web using crawler's search API (no seed URLs).
+
+        Args:
+            query: The user's request text as search query
+
+        Returns:
+            (combined_text, sources)
+        """
+        # Call crawler with search query only (no seed URLs)
+        docs = await self._crawl_with_query(query)
+
+        # If we got docs, index them and retrieve relevant chunks
+        if docs:
+            await self._index_docs(docs)
+
+            # Vector search with the query
+            hits = await self._retrieve_docs(query, k=5)
+
+            # Build context from hits
+            web_text = "\n\n".join(
+                [f"Source: {hit['url']}\n{hit['content']}" for hit in hits]
+            )
+
+            sources = [
+                {"url": hit["url"], "title": hit.get("title", "")} for hit in hits
+            ]
+
+            return web_text, sources
+
+        return "", []
+
     async def _gather_web_context(self, seed_urls: List[str]) -> tuple[str, List[Dict]]:
         """
         Crawl web content and retrieve relevant chunks via vector search.
@@ -285,13 +338,13 @@ class CodeIntelligenceAgent:
         return "", []
 
     async def _crawl_urls(self, urls: List[str]) -> List[Dict]:
-        """Crawl web pages."""
+        """Crawl specific seed URLs."""
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
                 response = await client.post(
                     f"{self.crawler_url}/crawl",
                     json={
-                        "query": "documentation",
+                        "query": "documentation",  # Generic query for seed URL crawling
                         "seed_urls": urls,
                         "max_results": 5,
                         "depth": 1,
@@ -303,6 +356,27 @@ class CodeIntelligenceAgent:
 
             except Exception as e:
                 logger.error(f"Crawling failed: {e}")
+                return []
+
+    async def _crawl_with_query(self, query: str) -> List[Dict]:
+        """Search web using query only (no seed URLs)."""
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                response = await client.post(
+                    f"{self.crawler_url}/crawl",
+                    json={
+                        "query": query,  # Use actual request text as search query
+                        "seed_urls": [],  # Empty - let crawler search
+                        "max_results": 5,
+                        "depth": 1,
+                    },
+                )
+                response.raise_for_status()
+                result = response.json()
+                return result.get("docs", [])
+
+            except Exception as e:
+                logger.error(f"Web search failed: {e}")
                 return []
 
     async def _index_docs(self, docs: List[Dict]):

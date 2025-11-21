@@ -179,8 +179,8 @@ class FirecrawlClient:
             auth_config = await self._get_auth_config()
             if auth_config.get("headers"):
                 crawl_params["headers"] = auth_config["headers"]
-            if auth_config.get("cookies"):
-                crawl_params["cookies"] = auth_config["cookies"]
+            # Note: Cookies are handled via httpx client session, not in crawl_params
+            # Firecrawl API doesn't support cookies parameter in scrape endpoint
 
             response = await self.client.post(
                 urljoin(self.base_url, "/v1/scrape"), json=crawl_params

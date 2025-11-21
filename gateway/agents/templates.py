@@ -178,10 +178,10 @@ class InspectWorkflowRequest(BaseModel):
         examples=[["https://cwe.mitre.org/", "https://owasp.org/"]],
     )
 
-    # Optional: Allow web search for additional context
+    # Optional: Control public internet crawling
     allow_web_search: bool = Field(
         default=False,
-        description="Allow agent to crawl public internet for related information. If seed URLs provided, they are crawled with priority.",
+        description="Control public internet crawling. False (default): only crawl seed URLs if provided. True: allow public internet crawling (seed URLs have priority if provided).",
     )
 
 
@@ -251,10 +251,10 @@ class GenerateWorkflowRequest(BaseModel):
         description="Usually not needed for generation (examples are sufficient)",
     )
 
-    # Optional: Allow web search for additional context
+    # Optional: Control public internet crawling
     allow_web_search: bool = Field(
         default=False,
-        description="Allow agent to crawl public internet for related information. If seed URLs provided, they are crawled with priority.",
+        description="Control public internet crawling. False (default): only crawl seed URLs if provided. True: allow public internet crawling (seed URLs have priority if provided).",
     )
 
 

@@ -99,9 +99,30 @@ MAX_INPUT_TOKENS=100000       # Token limit (default: 100k)
 ```
 
 **Web Search Control:**
-- `allow_web_search: false` (default) - No web crawling, even if URLs provided
-- `allow_web_search: true` + seed URLs - Crawls provided URLs with priority
-- `allow_web_search: true` without URLs - Currently no-op (future: auto-search)
+
+The `allow_web_search` flag controls whether public internet crawling is allowed. The `web_crawl_urls` (seed URLs) specify particular URLs to crawl with priority.
+
+| allow_web_search | seed URLs | Behavior |
+|------------------|-----------|----------|
+| `false` (default) | None | ❌ No crawling at all |
+| `true` | None | ✅ Crawl public internet (auto-generate query from request) |
+| `false` | Provided | ✅ Crawl only the specified seed URLs (no public internet) |
+| `true` | Provided | ✅ Crawl seed URLs with priority + allow public internet crawling |
+
+**Examples:**
+```json
+// Case 1: No web crawling
+{"allow_web_search": false}  // Default behavior
+
+// Case 2: Auto-search public internet (TODO: not yet implemented)
+{"allow_web_search": true}
+
+// Case 3: Crawl specific URLs only (no public internet)
+{"allow_web_search": false, "web_crawl_urls": ["https://docs.python.org"]}
+
+// Case 4: Crawl specific URLs with priority, allow additional public searches
+{"allow_web_search": true, "web_crawl_urls": ["https://docs.python.org"]}
+```
 
 ### 2. Inspect & Analyze
 
