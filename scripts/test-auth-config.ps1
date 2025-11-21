@@ -66,8 +66,8 @@ Write-Host ""
 Write-Host "   Example 2: Cookies Authentication" -ForegroundColor Cyan
 Write-Host "   -------------------------------" -ForegroundColor Cyan
 Write-Host '   FIRECRAWL_AUTH_TYPE=cookies' -ForegroundColor White
-Write-Host '   FIRECRAWL_AUTH_COOKIES={"session_id": "abc123"}' -ForegroundColor White
-Write-Host "   Use for: Session-based auth, web applications" -ForegroundColor Gray
+Write-Host '   FIRECRAWL_AUTH_STORAGE_STATE={"cookies": [...], "origins": [...]}' -ForegroundColor White
+Write-Host "   Use for: Session-based auth, web applications, SSO" -ForegroundColor Gray
 Write-Host ""
 
 # Example 3: Basic Authentication

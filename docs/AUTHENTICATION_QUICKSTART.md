@@ -161,17 +161,19 @@ FIRECRAWL_AUTH_HEADERS={"X-API-Key": "abc123", "X-User-ID": "user@company.com"}
 
 ## 6. Cookie Authentication (Manual)
 
-**Best for:** When you already have cookies
+**Best for:** When you already have cookies from browser
 
 ```bash
 FIRECRAWL_AUTH_TYPE=cookies
-FIRECRAWL_AUTH_COOKIES={"sessionid": "abc123", "token": "xyz789"}
+FIRECRAWL_AUTH_STORAGE_STATE={"cookies": [{"name": "sessionid", "value": "abc123", "domain": "example.com", "path": "/"}], "origins": []}
 ```
 
 **When to use:**
-- Extracted cookies manually
+- Extracted cookies manually from browser
 - Testing specific sessions
 - Short-term testing
+
+**Note:** Use `interactive_auth.py` instead - it automates cookie capture in the correct format.
 
 **Note:** Use [Interactive Auth](#1-interactive-browser-auth-easiest) instead - it captures cookies automatically!
 

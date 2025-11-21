@@ -36,8 +36,7 @@ Cleaned up LLMCrawl authentication code to keep only the working cookie-based au
 
 **Kept Variables:**
 - `FIRECRAWL_AUTH_TYPE` (only "cookies" supported)
-- `FIRECRAWL_AUTH_COOKIES` (legacy format)
-- `FIRECRAWL_AUTH_STORAGE_STATE` (preferred format)
+- `FIRECRAWL_AUTH_STORAGE_STATE` (Playwright storage state format)
 
 ### 3. Updated Documentation
 

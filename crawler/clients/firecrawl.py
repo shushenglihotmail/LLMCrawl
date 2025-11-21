@@ -26,7 +26,6 @@ class FirecrawlClient:
 
         # Cookie-based authentication for internal sites (e.g., www.osgwiki.com)
         self.auth_type = os.getenv("FIRECRAWL_AUTH_TYPE", "none")
-        self.auth_cookies = self._parse_json_env("FIRECRAWL_AUTH_COOKIES", {})
 
         # Setup HTTP client
         headers = {}
@@ -39,13 +38,9 @@ class FirecrawlClient:
             limits=httpx.Limits(max_connections=self.max_concurrency),
         )
 
-        if self.auth_type == "cookies" and self.auth_cookies:
-            logger.info(
-                f"Initialized Firecrawl client: {self.base_url} "
-                f"(auth_type: cookies, {len(self.auth_cookies)} cookies)"
-            )
-        else:
-            logger.info(f"Initialized Firecrawl client: {self.base_url}")
+        logger.info(
+            f"Initialized Firecrawl client: {self.base_url} (auth_type: {self.auth_type})"
+        )
 
     async def search_and_crawl(
         self,
@@ -296,20 +291,13 @@ class FirecrawlClient:
 
     async def _get_auth_config(self) -> Dict[str, Any]:
         """
-        Get authentication configuration for cookie-based auth.
+        Get authentication configuration.
+        Note: Cookies are handled via storage_state in Playwright, not here.
 
         Returns:
-            Dict with 'cookies' for authentication
+            Empty dict (auth handled by Playwright storage_state)
         """
-        config = {"cookies": {}}
-
-        if self.auth_type == "cookies" and self.auth_cookies:
-            config["cookies"].update(self.auth_cookies)
-            logger.debug(
-                f"Using cookie-based authentication ({len(self.auth_cookies)} cookies)"
-            )
-
-        return config
+        return {}
 
     async def health_check(self) -> Dict[str, Any]:
         """Check if Firecrawl service is healthy."""

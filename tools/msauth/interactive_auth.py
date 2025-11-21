@@ -506,8 +506,6 @@ class InteractiveAuth:
                 line.startswith(prefix)
                 for prefix in [
                     "FIRECRAWL_AUTH_TYPE=",
-                    "FIRECRAWL_AUTH_COOKIES=",
-                    "FIRECRAWL_AUTH_HEADERS=",
                     "FIRECRAWL_AUTH_STORAGE_STATE=",
                 ]
             ):
@@ -520,9 +518,7 @@ class InteractiveAuth:
             f"{auth_data['captured_at']})\n"
         )
         new_lines.append("FIRECRAWL_AUTH_TYPE=cookies\n")
-        # Store full cookie objects (not just name/value) to preserve domain, httpOnly, secure, etc.
-        new_lines.append(f"FIRECRAWL_AUTH_COOKIES={json.dumps(cookies_list)}\n")
-        # Also store the full storage_state for Playwright to restore entire session
+        # Store the full storage_state for Playwright to restore entire session
         if auth_data.get("storage_state"):
             new_lines.append(
                 f"FIRECRAWL_AUTH_STORAGE_STATE={json.dumps(auth_data['storage_state'])}\n"
