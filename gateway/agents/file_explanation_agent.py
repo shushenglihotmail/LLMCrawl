@@ -54,6 +54,7 @@ class CodeIntelligenceAgent:
         model: str,
         reference_files: Optional[List[str]] = None,
         seed_urls: Optional[List[str]] = None,
+        allow_web_search: bool = False,
     ) -> Dict[str, Any]:
         """
         Execute a code intelligence workflow.
@@ -64,7 +65,8 @@ class CodeIntelligenceAgent:
             request: User's specific request/instruction
             model: LLM model to use (from client selection)
             reference_files: Optional reference files (guides, templates, examples)
-            seed_urls: Optional URLs to crawl for additional context
+            seed_urls: Optional URLs to crawl for additional context (crawled with priority)
+            allow_web_search: Allow agent to crawl public internet for related information
 
         Returns:
             Result with content and sources
@@ -159,13 +161,25 @@ class CodeIntelligenceAgent:
                             {"file": ref_file, "content": content}
                         )
 
-            # Step 3: Gather web context (if seed URLs provided)
+            # Step 3: Gather web context (if enabled and seed URLs provided)
             web_context = ""
             sources = []
 
-            if seed_urls:
-                # Crawl provided URLs and retrieve relevant content
+            if allow_web_search and seed_urls:
+                # Crawl provided seed URLs with priority
+                logger.info(
+                    f"Web search enabled. Crawling {len(seed_urls)} seed URLs with priority"
+                )
                 web_context, sources = await self._gather_web_context(seed_urls)
+            elif seed_urls and not allow_web_search:
+                logger.info(
+                    f"Seed URLs provided but web search disabled. Skipping web crawl."
+                )
+            elif allow_web_search and not seed_urls:
+                logger.info(
+                    "Web search enabled but no seed URLs provided. Skipping web crawl."
+                )
+                # TODO: In future, could add automatic search query generation from request
 
             # Step 4: Build workflow-specific prompt
             prompt = self._build_workflow_prompt(

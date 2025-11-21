@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from .routers import agent, chat
+from .routers import agent, chat, models
 from .utils.logging import get_logger, setup_logging
 
 # Setup logging
@@ -58,6 +58,7 @@ app.add_middleware(
 # Include routers
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(agent.router)  # Agent router has its own /agent prefix
+app.include_router(models.router, prefix="/api")  # Models endpoint
 
 # Setup Prometheus metrics
 Instrumentator().instrument(app).expose(app)

@@ -93,9 +93,15 @@ MAX_INPUT_TOKENS=100000       # Token limit (default: 100k)
   "request": "Generate API documentation with examples",
   "model": "gpt-4",
   "educational_files": ["docs/api-guide.md"],
-  "web_crawl_urls": ["https://fastapi.tiangolo.com"]
+  "web_crawl_urls": ["https://fastapi.tiangolo.com"],
+  "allow_web_search": true
 }
 ```
+
+**Web Search Control:**
+- `allow_web_search: false` (default) - No web crawling, even if URLs provided
+- `allow_web_search: true` + seed URLs - Crawls provided URLs with priority
+- `allow_web_search: true` without URLs - Currently no-op (future: auto-search)
 
 ### 2. Inspect & Analyze
 

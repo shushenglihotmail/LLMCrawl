@@ -21,12 +21,14 @@ LLMCrawl is a production-grade Web RAG system that combines LLM chat capabilitie
 │                    GATEWAY SERVICE (Port 8000)                   │
 ├──────────────────────────────────────────────────────────────────┤
 │  • FastAPI REST API                                              │
-│  • Azure OpenAI / OpenAI SDK                                     │
+│  • Azure OpenAI / Azure Anthropic / OpenAI SDK                   │
+│  • Multi-Provider Routing (OpenAI ChatCompletions / Anthropic    │
+│    Messages API via HTTP)                                        │
 │  • Conversation Store (In-Memory, 24h TTL)                       │
-│  • Tool Calling Logic                                            │
+│  • Tool Calling Logic (OpenAI only, Anthropic uses text)         │
 │  • Intelligent Trigger Detection (29+ keywords)                  │
 │  • Context-Aware Follow-up Detection                             │
-│  • Timeout: 45 seconds                                           │
+│  • Timeout: 45s (OpenAI), 180s (Anthropic for large contexts)   │
 └────┬────────────────┬────────────────────────────────────────────┘
      │                │
      │ Tool Call      │ Index Request

@@ -31,6 +31,17 @@ router = APIRouter()
 _mcp_tools_cache: Optional[List[Dict[str, Any]]] = None
 
 
+def _get_default_model() -> str:
+    """Get the first available model from LLM_MODELS config."""
+    try:
+        llm_models = json.loads(os.getenv("LLM_MODELS", "[]"))
+        if llm_models and len(llm_models) > 0:
+            return llm_models[0]["name"]
+    except Exception as e:
+        logger.warning(f"Failed to parse LLM_MODELS, using fallback: {e}")
+    return "gpt-5-chat"  # Fallback
+
+
 async def get_mcp_tools() -> List[Dict[str, Any]]:
     """Fetch MCP tools from the MCP server."""
     global _mcp_tools_cache
@@ -57,6 +68,9 @@ class ChatRequest(BaseModel):
     """Chat request model."""
 
     message: str = Field(..., description="User message")
+    model: Optional[str] = Field(
+        None, description="Model name to use (defaults to first model in LLM_MODELS)"
+    )
     conversation_id: Optional[str] = Field(
         None, description="Conversation ID for context"
     )
@@ -289,10 +303,15 @@ async def _complete_chat_response(
     all_tool_calls = []
     sources = []
 
+    # Get model from request or use first available model
+    model = request.model or _get_default_model()
+    logger.info(f"Using model: {model}")
+
     # First LLM call
     logger.info(f"Calling LLM with tools: {bool(tools)}, tool_choice: {tool_choice}")
     response = await llm_client.chat_completion(
         messages=messages,
+        model=model,
         tools=tools,
         tool_choice=tool_choice,
         temperature=request.temperature,
@@ -351,6 +370,7 @@ async def _complete_chat_response(
         )
         response = await llm_client.chat_completion(
             messages=messages,
+            model=model,
             tools=tools,  # Keep tools available for next round
             tool_choice="auto",  # Let LLM decide if more tools needed
             temperature=request.temperature,
@@ -396,6 +416,9 @@ async def _stream_chat_response(
 
     conversation_id = request.conversation_id or str(uuid.uuid4())
 
+    # Get model from request or use first available model
+    model = request.model or _get_default_model()
+
     try:
         # Send conversation metadata
         yield f"data: {json.dumps({'type': 'start', 'conversation_id': conversation_id})}\n\n"
@@ -403,6 +426,7 @@ async def _stream_chat_response(
         # First LLM call (streaming)
         stream = await llm_client.chat_completion(
             messages=messages,
+            model=model,
             tools=tools,
             tool_choice=tool_choice,
             temperature=request.temperature,

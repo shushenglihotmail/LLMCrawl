@@ -4,7 +4,8 @@
     Restart all LLMCrawl services
 
 .DESCRIPTION
-    Restarts all LLMCrawl services by stopping and starting them.
+    Restarts all LLMCrawl services by recreating containers.
+    This ensures environment variables from .env are reloaded.
     Useful after updating .env configuration or code changes that require full restart.
 
 .PARAMETER Service
@@ -25,7 +26,8 @@ Write-Host "Restarting LLMCrawl services..." -ForegroundColor Cyan
 
 if ($Service) {
     Write-Host "Restarting $Service only..." -ForegroundColor Yellow
-    docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart $Service
+    Write-Host "Note: Using 'up -d' to reload environment variables" -ForegroundColor Gray
+    docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d $Service
 
     if ($LASTEXITCODE -eq 0) {
         Write-Host "`n$Service restarted successfully!" -ForegroundColor Green
@@ -35,7 +37,8 @@ if ($Service) {
     }
 } else {
     Write-Host "Restarting all services..." -ForegroundColor Yellow
-    docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart
+    Write-Host "Note: Using 'up -d' to reload environment variables" -ForegroundColor Gray
+    docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
     if ($LASTEXITCODE -eq 0) {
         Write-Host "`nAll services restarted successfully!" -ForegroundColor Green

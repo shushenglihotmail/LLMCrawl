@@ -107,6 +107,12 @@ class UnderstandWorkflowRequest(BaseModel):
         examples=[["https://docs.microsoft.com/windows/win32/services/"]],
     )
 
+    # Optional: Allow web search for additional context
+    allow_web_search: bool = Field(
+        default=False,
+        description="Allow agent to crawl public internet for related information. If seed URLs provided, they are crawled with priority.",
+    )
+
 
 class InspectWorkflowRequest(BaseModel):
     """
@@ -170,6 +176,12 @@ class InspectWorkflowRequest(BaseModel):
         default=None,
         description="Optional security resources to reference",
         examples=[["https://cwe.mitre.org/", "https://owasp.org/"]],
+    )
+
+    # Optional: Allow web search for additional context
+    allow_web_search: bool = Field(
+        default=False,
+        description="Allow agent to crawl public internet for related information. If seed URLs provided, they are crawled with priority.",
     )
 
 
@@ -237,6 +249,12 @@ class GenerateWorkflowRequest(BaseModel):
     web_crawl_urls: Optional[List[str]] = Field(
         default=None,
         description="Usually not needed for generation (examples are sufficient)",
+    )
+
+    # Optional: Allow web search for additional context
+    allow_web_search: bool = Field(
+        default=False,
+        description="Allow agent to crawl public internet for related information. If seed URLs provided, they are crawled with priority.",
     )
 
 

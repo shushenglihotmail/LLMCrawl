@@ -6,7 +6,7 @@ A production-ready, containerized Python web RAG system that enables LLMs to tri
 
 The system consists of five main services with conversation state management:
 
-- **Gateway Service** (Port 8000): FastAPI orchestrator with OpenAI/Azure SDK, conversation history storage, intelligent tool triggering
+- **Gateway Service** (Port 8000): FastAPI orchestrator with OpenAI/Azure OpenAI/Anthropic support, conversation history storage, intelligent tool triggering
 - **Crawler Service** (Port 8001): FireCrawl + Playwright fallback + Trafilatura extraction with sequential rendering
 - **Indexer Service** (Port 8002): LlamaIndex + Vector DB (Qdrant/pgvector) for RAG
 - **MCP Server** (Port 8003): Local file operations with indexing and semantic search
@@ -19,7 +19,7 @@ The system consists of five main services with conversation state management:
 ```mermaid
 graph TB
     Client[Client Application] --> Gateway[Gateway Service :8000]
-    Gateway --> LLM[OpenAI/Azure LLM]
+    Gateway --> LLM[OpenAI/Azure OpenAI/<br/>Anthropic Claude]
     Gateway --> Crawler[Crawler Service :8001]
     Gateway --> Indexer[Indexer Service :8002]
     Gateway --> MCP[MCP Server :8003]
@@ -101,7 +101,11 @@ graph TB
   - Wildcard: `src/*.cpp` or `x*.json`
   - Folder: `src/folder/` (non-recursive)
   - Recursive: `src/folder/**` (all subfolders)
-- **Model Selection**: Choose different models per request (GPT-4, Claude, etc.)
+- **Multi-Model Support**: Configure multiple LLM models (GPT, Claude, etc.), clients fetch available models dynamically
+- **Multi-Provider Support**: OpenAI, Azure OpenAI, and Anthropic Claude via HTTP
+- **Model Selection API**: Clients query `/api/models/available` for enabled models (no API keys exposed)
+- **Per-Request Model Choice**: Select different models for different workflows (e.g., GPT for tool-calling, Claude for analysis)
+- **Web Search Control**: Optional flag to allow/prevent public internet crawling (default: false)
 - **Cost Protection**: Configurable limits for max files (default: 50) and tokens (default: 100k)
 - **Rate Limit Handling**: Proper HTTP 429 status codes with detailed Azure error messages
 - **Educational References**: Include example files to guide code generation
@@ -140,10 +144,16 @@ Edit `.env` file with your API keys and preferences:
 # Required: OpenAI Configuration
 OPENAI_API_KEY=your_openai_key_here
 
-# OR: Azure OpenAI Configuration
+# OR: Azure OpenAI/Anthropic Configuration
 LLM_PROVIDER=azure
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+AZURE_OPENAI_ENDPOINT=https://your-resource.cognitiveservices.azure.com/
 AZURE_OPENAI_API_KEY=your_azure_key_here
+AZURE_ANTHROPIC_ENDPOINT=https://your-resource.services.ai.azure.com/anthropic/
+
+# Available Models Configuration (JSON array)
+# Model is selected by client per request. All models listed here are available to clients.
+# Each model: name (for API), display_name (for UI), deployment_name (Azure deployment), provider_type (openai/anthropic)
+LLM_MODELS=[{"name":"gpt-4","display_name":"GPT-4","deployment_name":"gpt-4","provider_type":"openai"},{"name":"claude-sonnet-4-5","display_name":"Claude Sonnet 4-5","deployment_name":"claude-sonnet-4-5","provider_type":"anthropic"}]
 
 # Vector Database (choose one)
 VECTOR_DB=qdrant  # or pgvector
@@ -468,7 +478,7 @@ docker-compose --profile monitoring up -d prometheus grafana
 ```bash
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...
-CHAT_MODEL=gpt-4-turbo-preview
+LLM_MODELS=[{"name":"gpt-4-turbo","display_name":"GPT-4 Turbo","deployment_name":"gpt-4-turbo"}]
 EMBED_MODEL=text-embedding-3-large
 ```
 
@@ -478,7 +488,7 @@ LLM_PROVIDER=azure
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
 AZURE_OPENAI_API_KEY=your_key_here
 AZURE_OPENAI_API_VERSION=2024-02-01
-CHAT_MODEL=gpt-4-turbo
+LLM_MODELS=[{"name":"gpt-4-turbo","display_name":"GPT-4 Turbo","deployment_name":"gpt-4-deployment-name"}]
 EMBED_MODEL=text-embedding-3-large
 ```
 

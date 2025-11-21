@@ -242,9 +242,12 @@ async def execute_workflow(
             logger.info(f"Expanded to {len(reference_files)} reference files")
 
         if seed_urls:
-            logger.info(f"Will crawl {len(seed_urls)} URLs")
+            logger.info(f"Will crawl {len(seed_urls)} seed URLs")
+
+        if request.allow_web_search:
+            logger.info(f"Web search enabled: allow_web_search=True")
         else:
-            logger.info("No web crawling (no URLs provided)")
+            logger.info(f"Web search disabled: allow_web_search=False")
 
         # Execute workflow
         result = await agent.execute_workflow(
@@ -254,6 +257,7 @@ async def execute_workflow(
             model=request.model,
             reference_files=reference_files,
             seed_urls=seed_urls,
+            allow_web_search=request.allow_web_search,
         )
 
         # Check for errors
