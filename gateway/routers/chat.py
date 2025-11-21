@@ -142,11 +142,12 @@ async def chat_endpoint(request: ChatRequest, req: Request):
         # Build messages with system prompts and examples
         base_messages = build_messages_with_examples(request.message)
 
-        # If we have previous conversation history, insert it after system prompt + examples
+        # If we have previous conversation history,
+        # insert it after system prompt + examples
         if previous_messages:
             # base_messages structure: [system, example1_user,
-            # example1_assistant, example2_user, example2_assistant,
-            # current_user]
+            # example1_assistant, example2_user,
+            # example2_assistant, current_user]
             # We want: [system, examples..., history..., current_user]
             # Remove the current user message from base_messages
             # (it's the last one)
@@ -429,7 +430,8 @@ async def _stream_chat_response(
 
     try:
         # Send conversation metadata
-        yield f"data: {json.dumps({'type': 'start', 'conversation_id': conversation_id})}\n\n"
+        metadata = {"type": "start", "conversation_id": conversation_id}
+        yield f"data: {json.dumps(metadata)}\n\n"
 
         # First LLM call (streaming)
         stream = await llm_client.chat_completion(
