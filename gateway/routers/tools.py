@@ -185,6 +185,40 @@ class ToolHandler:
 
         hits = retrieve_result.get("hits", [])
 
+        # If retrieval returns no results, fall back to direct crawled content
+        if not hits:
+            logger.warning(
+                "Retrieval returned 0 hits, using direct crawled content " "(fallback)"
+            )
+            return {
+                "count": len(docs),
+                "examples": [
+                    {
+                        "url": doc["url"],
+                        "title": doc.get("title", ""),
+                        "published_at": doc.get("published_at", ""),
+                    }
+                    for doc in docs[:3]  # Show first 3 as examples
+                ],
+                "hits": [
+                    {
+                        "url": doc["url"],
+                        "title": doc.get("title", ""),
+                        "content": (
+                            doc.get("markdown", "")[:500] + "..."
+                            if len(doc.get("markdown", "")) > 500
+                            else doc.get("markdown", "")
+                        ),
+                        "published_at": doc.get("published_at", ""),
+                        "score": 1.0,  # Fixed high relevance score for crawled content
+                    }
+                    for doc in docs
+                ],
+                "query": query,
+                "indexed": index_result.get("indexed", 0),
+                "fallback_mode": True,
+            }
+
         # Format result for LLM
         return {
             "count": len(hits),
@@ -262,6 +296,8 @@ class ToolHandler:
                         "query": query,
                         "k": k,
                         "recency_boost_days": recency_boost_days,
+                        # Accept all results, recency boost handles ranking
+                        "score_threshold": 0.0,
                     },
                     headers={"X-Request-ID": request_id},
                 )

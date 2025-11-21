@@ -1,16 +1,16 @@
 """
 LLM client for OpenAI, Azure OpenAI, and Anthropic integration.
 Handles chat completions, tool calling, and streaming.
-"""
+"""  # noqa: F401
 
-import asyncio
+import asyncio  # noqa: F401
 import json
 import logging
 import os
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
-import openai
+import openai  # noqa: F401
 from openai import AsyncAzureOpenAI, AsyncOpenAI
 
 logger = logging.getLogger(__name__)
@@ -216,25 +216,33 @@ class LLMClient:
                     if msg.get("content"):
                         content_blocks.append({"type": "text", "text": msg["content"]})
                     for tool_call in msg["tool_calls"]:
-                        content_blocks.append({
-                            "type": "tool_use",
-                            "id": tool_call["id"],
-                            "name": tool_call["function"]["name"],
-                            "input": json.loads(tool_call["function"]["arguments"]),
-                        })
-                    anthropic_messages.append({"role": "assistant", "content": content_blocks})
+                        content_blocks.append(
+                            {
+                                "type": "tool_use",
+                                "id": tool_call["id"],
+                                "name": tool_call["function"]["name"],
+                                "input": json.loads(tool_call["function"]["arguments"]),
+                            }
+                        )
+                    anthropic_messages.append(
+                        {"role": "assistant", "content": content_blocks}
+                    )
                 else:
                     anthropic_messages.append({"role": role, "content": msg["content"]})
             elif role == "tool":
                 # Convert tool result to Anthropic format
-                anthropic_messages.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": msg.get("tool_call_id"),
-                        "content": msg["content"],
-                    }]
-                })
+                anthropic_messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": msg.get("tool_call_id"),
+                                "content": msg["content"],
+                            }
+                        ],
+                    }
+                )
 
         # Prepare request payload
         payload = {
@@ -291,28 +299,30 @@ class LLMClient:
             # Convert Anthropic response to OpenAI format
             content = ""
             tool_calls = []
-            
+
             if data.get("content"):
                 for block in data["content"]:
                     if block.get("type") == "text":
                         content += block.get("text", "")
                     elif block.get("type") == "tool_use":
                         # Convert Anthropic tool_use to OpenAI tool_call format
-                        tool_calls.append({
-                            "id": block["id"],
-                            "type": "function",
-                            "function": {
-                                "name": block["name"],
-                                "arguments": json.dumps(block["input"]),
-                            },
-                        })
+                        tool_calls.append(
+                            {
+                                "id": block["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": block["name"],
+                                    "arguments": json.dumps(block["input"]),
+                                },
+                            }
+                        )
 
             result = {
                 "content": content,
                 "role": "assistant",
                 "finish_reason": data.get("stop_reason"),
             }
-            
+
             if tool_calls:
                 result["tool_calls"] = tool_calls
 
