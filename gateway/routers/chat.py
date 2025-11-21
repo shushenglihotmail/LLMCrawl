@@ -82,6 +82,10 @@ class ChatRequest(BaseModel):
         None, description="Seed URLs to crawl for context"
     )
     depth: int = Field(1, description="Crawl depth for seed URLs")
+    skip_embedding: bool = Field(
+        False,
+        description="Skip embedding/indexing and pass raw crawled content to LLM",
+    )
     max_tokens: int = Field(2000, description="Maximum response tokens")
     temperature: float = Field(0.1, description="Sampling temperature")
 
@@ -350,7 +354,11 @@ async def _complete_chat_response(
             all_tool_calls.append(tool_call)
 
             tool_result = await tool_handler.handle_tool_call(
-                tool_call, request_id, request.seed_urls, request.depth
+                tool_call,
+                request_id,
+                request.seed_urls,
+                request.depth,
+                request.skip_embedding,
             )
             messages.append(tool_result)
 

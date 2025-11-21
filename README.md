@@ -1129,6 +1129,24 @@ curl -X POST http://localhost:8000/chat \
   }'
 ```
 
+### Chat with Skip Embedding (Full Content Mode)
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Summarize this page",
+    "seed_urls": ["https://example.com/article"],
+    "skip_embedding": true
+  }'
+```
+
+When `skip_embedding` is true:
+- Bypasses vector embedding and indexing
+- Sends full crawled content directly to LLM
+- Useful for small pages or when you want complete context
+- Faster (no embedding API calls)
+- No chunking or semantic search
+
 ### Manual Crawling
 ```bash
 curl -X POST http://localhost:8001/crawl \

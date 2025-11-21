@@ -39,6 +39,7 @@ class ToolHandler:
         request_id: str,
         seed_urls: Optional[List[str]] = None,
         depth: Optional[int] = None,
+        skip_embedding: bool = False,
     ) -> Dict[str, Any]:
         """
         Handle a tool function call and return the result.
@@ -48,6 +49,7 @@ class ToolHandler:
             request_id: Request tracking ID
             seed_urls: Optional seed URLs to override tool arguments
             depth: Optional crawl depth to override tool arguments
+            skip_embedding: Skip embedding/indexing, return raw content
 
         Returns:
             Tool result for LLM context
@@ -68,7 +70,9 @@ class ToolHandler:
 
         try:
             if tool_name == "crawl_and_refresh":
-                result = await self._handle_crawl_and_refresh(arguments, request_id)
+                result = await self._handle_crawl_and_refresh(
+                    arguments, request_id, skip_embedding
+                )
                 success = True
             elif tool_name in self.mcp_tools:
                 result = await self._handle_mcp_tool(tool_name, arguments, request_id)
@@ -96,19 +100,20 @@ class ToolHandler:
         }
 
     async def _handle_crawl_and_refresh(
-        self, arguments: Dict[str, Any], request_id: str
+        self, arguments: Dict[str, Any], request_id: str, skip_embedding: bool = False
     ) -> Dict[str, Any]:
         """
         Handle the crawl_and_refresh tool call.
 
         Pipeline:
         1. Crawl web content with Firecrawl/Playwright
-        2. Index documents in vector database
-        3. Retrieve relevant results with recency boost
+        2. If skip_embedding=False: Index documents and retrieve with vector search
+        3. If skip_embedding=True: Return raw crawled content directly
 
         Args:
             arguments: Tool arguments (query, seed_urls, etc.)
             request_id: Request tracking ID
+            skip_embedding: Skip embedding/indexing, return raw content
 
         Returns:
             Formatted tool result with sources
@@ -138,6 +143,38 @@ class ToolHandler:
 
         docs = crawl_result["docs"]
         logger.info(f"Crawled {len(docs)} documents")
+
+        # If skip_embedding is True, return raw content directly
+        if skip_embedding:
+            logger.info(
+                "skip_embedding=True, returning raw crawled content " "without indexing"
+            )
+            return {
+                "count": len(docs),
+                "examples": [
+                    {
+                        "url": doc["url"],
+                        "title": doc.get("title", ""),
+                        "published_at": doc.get("published_at", ""),
+                    }
+                    for doc in docs[:3]  # Show first 3 as examples
+                ],
+                "hits": [
+                    {
+                        "url": doc["url"],
+                        "title": doc.get("title", ""),
+                        "content": doc.get(
+                            "markdown", ""
+                        ),  # Full content, not truncated
+                        "published_at": doc.get("published_at", ""),
+                        "score": 1.0,
+                    }
+                    for doc in docs
+                ],
+                "query": query,
+                "indexed": 0,
+                "skip_embedding": True,
+            }
 
         # Step 2: Try to index documents, but continue if it fails
         index_result = await self._call_indexer_index(docs, request_id)
