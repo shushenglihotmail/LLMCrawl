@@ -102,8 +102,8 @@ Write-Host ""
 Write-Host "# Step 1: Refresh authentication (browser will open)" -ForegroundColor Cyan
 Write-Host ".\venv\Scripts\python.exe tools\msauth\interactive_auth.py $SiteUrl" -ForegroundColor White
 Write-Host ""
-Write-Host "# Step 2: Restart crawler to load new cookies" -ForegroundColor Cyan
-Write-Host "docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler" -ForegroundColor White
+Write-Host "# Step 2: Recreate crawler to reload .env with new cookies" -ForegroundColor Cyan
+Write-Host "docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler" -ForegroundColor White
 Write-Host ""
 Write-Host "# Step 3: Verify auth is working" -ForegroundColor Cyan
 Write-Host ".\scripts\check-auth-status.ps1 $SiteUrl" -ForegroundColor White

@@ -553,7 +553,7 @@ class InteractiveAuth:
         print(f"✅ Updated {env_file}")
         print(f"\n📋 Next steps:")
         print(
-            f"   1. Restart crawler: docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler"
+            f"   1. Recreate crawler (to reload .env): docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler"
         )
         print(f"   2. Test: .\\scripts\\check-auth-status.ps1 {auth_data['url']}")
 
@@ -726,9 +726,9 @@ Examples:
             print(
                 f".\\venv\\Scripts\\python.exe tools\\msauth\\interactive_auth.py --apply {profile_name}"
             )
-            print(f"\n# Step 2: Restart crawler")
+            print(f"\n# Step 2: Recreate crawler (to reload .env with new cookies)")
             print(
-                f"docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler"
+                f"docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler"
             )
             print(f"\n# Step 3: Test crawling")
             print(f".\\scripts\\check-auth-status.ps1 {args.url}")
@@ -744,9 +744,9 @@ Examples:
             print(f"   - Navigate to: {args.url}")
             print("   - Copy AppServiceAuthSession cookie value")
             print("   - Paste when prompted")
-            print(f"\n# Step 2: Restart crawler")
+            print(f"\n# Step 2: Recreate crawler (to reload .env with new cookies)")
             print(
-                f"docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler"
+                f"docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler"
             )
             print(f"\n# Step 3: Test crawling")
             print(f".\\scripts\\check-auth-status.ps1 {args.url}")

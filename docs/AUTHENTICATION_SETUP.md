@@ -2,24 +2,56 @@
 
 This guide explains how to set up authentication for crawling internal Microsoft sites like osgwiki.com that use Azure App Service Easy Auth.
 
-## Quick Start
+## 🚀 Quick Start - Manual Auth Procedure
 
 **For Azure App Service Easy Auth sites (like osgwiki.com):**
 
+### Step 1: Run Interactive Auth Script
+Opens browser for you to sign in manually:
 ```powershell
-# Step 1: Capture login cookies
 .\venv\Scripts\python.exe tools\msauth\interactive_auth.py https://www.osgwiki.com/wiki/Main_Page
+```
+**What happens:**
+- Browser opens → You sign in with Microsoft account
+- Press Enter when logged in
+- Captures login cookies (but NOT AppServiceAuthSession for Easy Auth sites)
 
-# Step 2: Add AppServiceAuthSession cookie (follow prompts)
+### Step 2: Run Apply Cookie Script
+Manually copy the AppServiceAuthSession cookie:
+```powershell
 .\tools\msauth\scripts\add_cookie_manual.ps1
+```
+**What happens:**
+- Script prompts you to open browser DevTools (F12)
+- Navigate to the site → Application → Cookies
+- Copy `AppServiceAuthSession` cookie value
+- Paste when prompted
+- **Script automatically applies to `.env` and recreates crawler** ✅
 
-# Step 3: Press Enter when prompted to restart crawler
-
-# Step 4: Verify authentication
+### Step 3: Verify Auth Works (Optional)
+```powershell
 .\scripts\check-auth-status.ps1 https://www.osgwiki.com/wiki/Main_Page
 ```
+**What happens:**
+- Tests if crawler can access the site
+- Shows success/failure with details
 
-The scripts are now fully interactive and will guide you through each step!
+---
+
+## ⚠️ Important Notes
+
+**Why two steps?**
+- Azure App Service Easy Auth sets `AppServiceAuthSession` cookie ONLY after you access the protected page
+- Interactive auth captures login cookies but can't capture this cookie automatically
+- You must manually copy it from the browser after successful login
+
+**The `add_cookie_manual.ps1` script is fully automated** - it handles:
+- ✅ Adding cookie to `.auth` file
+- ✅ Applying to `.env`
+- ✅ Force-recreating crawler to reload environment
+- ✅ Running authentication test
+
+You only need to copy/paste the cookie value!
 
 ---
 
@@ -271,9 +303,9 @@ cd C:\src\github\LLMCrawl
 # 3. Add cookie manually
 .\tools\msauth\scripts\add_cookie_manual.ps1 -ProfileName www_osgwiki_com -CookieValue "YOUR_COOKIE_VALUE"
 
-# 4. Apply and restart
+# 4. Apply and recreate crawler (to reload .env)
 .\venv\Scripts\python.exe tools\msauth\interactive_auth.py --apply www_osgwiki_com
-docker-compose restart crawler
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
 
 # 5. Test
 $body = @{query='test'; seed_urls=@('https://www.osgwiki.com/wiki/Main_Page'); depth=1} | ConvertTo-Json

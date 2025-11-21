@@ -20,17 +20,25 @@ Choose your authentication method based on your needs:
 
 ### For Azure App Service Easy Auth (e.g., osgwiki.com):
 
+**3-Step Procedure:**
+
 ```powershell
-# All-in-one interactive workflow
+# Step 1: Capture login cookies (opens browser for you to sign in)
+.\venv\Scripts\python.exe tools\msauth\interactive_auth.py https://www.osgwiki.com/wiki/Main_Page
+
+# Step 2: Add AppServiceAuthSession manually (fully automated after you paste)
 .\tools\msauth\scripts\add_cookie_manual.ps1
+
+# Step 3: (Optional) Verify auth works
+.\scripts\check-auth-status.ps1 https://www.osgwiki.com/wiki/Main_Page
 ```
 
-The script will:
-1. Show available profiles or create new one
-2. Guide you to get the AppServiceAuthSession cookie from browser
-3. Automatically apply to `.env`
-4. Prompt to restart crawler
-5. Run authentication test
+**What happens:**
+- **Step 1**: Browser opens → You sign in → Captures login cookies (but NOT AppServiceAuthSession)
+- **Step 2**: You copy AppServiceAuthSession from browser DevTools → Script **automatically** applies to `.env`, force-recreates crawler, and tests auth
+- **Step 3**: Optional verification that crawler can access the site
+
+**Why manual cookie needed?** Azure App Service Easy Auth sets `AppServiceAuthSession` AFTER you access the page, so interactive_auth.py cannot capture it automatically.
 
 ### For standard OAuth/SSO sites:
 
@@ -38,8 +46,8 @@ The script will:
 # Step 1: Capture auth via browser
 .\venv\Scripts\python.exe tools\msauth\interactive_auth.py https://internal-site.com
 
-# Step 2: Restart crawler
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d crawler
+# Step 2: Recreate crawler (to reload .env with new cookies)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
 
 # Step 3: Verify
 .\scripts\check-auth-status.ps1 https://internal-site.com
@@ -84,7 +92,7 @@ AZURE_CLIENT_SECRET=your-client-secret
 AZURE_SCOPE=https://graph.microsoft.com/.default
 ```
 
-5. Restart: `docker-compose restart crawler`
+5. Recreate crawler: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler`
 
 **Advantages:**
 - ✅ Fully automated (no human intervention)
@@ -259,6 +267,33 @@ docker-compose logs crawler | Select-String "401|403"
 
 ## Common Issues
 
+### ⚠️ Important: Why Use `--force-recreate` Instead of `restart`?
+
+**TL;DR:** After updating `.env` with new cookies, you MUST use `--force-recreate` to reload environment variables.
+
+**Why?**
+- `docker-compose restart` = Restart container with OLD environment variables
+- `docker-compose up -d --force-recreate` = Recreate container with NEW environment variables from `.env`
+
+**Example:**
+```powershell
+# ❌ WRONG - Won't load new cookies from .env
+docker-compose restart crawler
+
+# ✅ CORRECT - Loads new cookies from .env
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
+```
+
+**When to use each:**
+- Use `restart`: When config hasn't changed (e.g., just restarting after crash)
+- Use `up -d --force-recreate`: After updating `.env` file with new auth credentials
+
+**The auth scripts now handle this automatically!** But if you manually edit `.env`, remember to use `--force-recreate`.
+
+---
+
+## Common Issues
+
 ### Authentication Fails
 
 **Problem:** 401 or 403 errors
@@ -268,7 +303,7 @@ docker-compose logs crawler | Select-String "401|403"
    ```powershell
    .\scripts\auth.ps1 login https://site.com
    .\scripts\auth.ps1 apply site_com
-   docker-compose restart crawler
+   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
    ```
 
 2. **Wrong auth type** → Check `.env` for `FIRECRAWL_AUTH_TYPE`
@@ -382,8 +417,8 @@ AZURE_SCOPE=https://graph.microsoft.com/.default
 docker-compose logs crawler | Select-String "auth"
 docker-compose logs crawler | Select-String "401|403"
 
-# Restart
-docker-compose restart crawler
+# Recreate crawler (after updating .env)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
 ```
 
 ---

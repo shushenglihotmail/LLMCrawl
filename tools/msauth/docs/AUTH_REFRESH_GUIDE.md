@@ -27,8 +27,8 @@ python tools/interactive_auth.py https://www.osgwiki.com/wiki/Main_Page --name w
 # 2. Apply to .env
 .\tools\apply_auth.ps1
 
-# 3. Restart crawler
-docker-compose restart crawler
+# 3. Recreate crawler (to reload .env)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
 ```
 
 ### Automated refresh
@@ -84,8 +84,8 @@ python tools/interactive_auth.py https://www.osgwiki.com/wiki/Main_Page --name w
 # Step 2: Apply to configuration
 .\tools\apply_auth.ps1
 
-# Step 3: Restart services
-docker-compose restart crawler
+# Step 3: Recreate services (to reload .env)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
 ```
 
 ### Option 2: Automated Refresh Script
@@ -206,7 +206,7 @@ python tools/test_auth.py
 
 # If expired, refresh
 python tools/refresh_auth.py --name www_osgwiki_com --force
-docker-compose restart crawler
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
 
 # Continue work
 curl -X POST http://localhost:8001/render `

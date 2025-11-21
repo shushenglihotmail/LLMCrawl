@@ -205,15 +205,15 @@ try {
 if ($envApplied) {
     Write-Host ""
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Gray
-    Write-Host "🔄 Step 2/3: Restarting crawler service..." -ForegroundColor Cyan
+    Write-Host "🔄 Step 2/3: Recreating crawler service..." -ForegroundColor Cyan
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Gray
-    Write-Host "Press Enter to restart crawler now (or Ctrl+C to skip)" -ForegroundColor Yellow
-    Read-Host
+    Write-Host "Recreating crawler to reload .env file with new cookies..." -ForegroundColor Gray
+    Write-Host ""
 
     try {
-        $output = docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler 2>&1
+        $output = docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "✓ Crawler restarted successfully" -ForegroundColor Green
+            Write-Host "✓ Crawler recreated successfully" -ForegroundColor Green
             Write-Host ""
             Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Gray
             Write-Host "🧪 Step 3/3: Testing authentication..." -ForegroundColor Cyan
@@ -223,12 +223,12 @@ if ($envApplied) {
 
             & ".\scripts\check-auth-status.ps1" "https://$Domain"
         } else {
-            Write-Host "✗ Failed to restart crawler" -ForegroundColor Red
-            Write-Host "  Run manually: docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler" -ForegroundColor Yellow
+            Write-Host "✗ Failed to recreate crawler" -ForegroundColor Red
+            Write-Host "  Run manually: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler" -ForegroundColor Yellow
         }
     } catch {
-        Write-Host "✗ Failed to restart crawler" -ForegroundColor Red
-        Write-Host "  Run manually: docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler" -ForegroundColor Yellow
+        Write-Host "✗ Failed to recreate crawler" -ForegroundColor Red
+        Write-Host "  Run manually: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler" -ForegroundColor Yellow
     }
 } else {
     Write-Host ""
@@ -237,8 +237,8 @@ if ($envApplied) {
     Write-Host "# Step 1: Apply cookie to .env" -ForegroundColor Cyan
     Write-Host ".\venv\Scripts\python.exe tools\msauth\interactive_auth.py --apply $ProfileName" -ForegroundColor White
     Write-Host ""
-    Write-Host "# Step 2: Restart crawler" -ForegroundColor Cyan
-    Write-Host "docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart crawler" -ForegroundColor White
+    Write-Host "# Step 2: Recreate crawler (loads new .env)" -ForegroundColor Cyan
+    Write-Host "docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler" -ForegroundColor White
     Write-Host ""
     Write-Host "# Step 3: Test authentication" -ForegroundColor Cyan
     Write-Host ".\scripts\check-auth-status.ps1 https://$Domain" -ForegroundColor White
