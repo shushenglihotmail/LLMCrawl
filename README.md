@@ -1147,6 +1147,40 @@ When `skip_embedding` is true:
 - Faster (no embedding API calls)
 - No chunking or semantic search
 
+### Export to Markdown File
+```bash
+curl -X POST http://localhost:8000/api/v1/export/markdown \
+  -H "Content-Type: application/json" \
+  -d '{
+    "seed_urls": ["https://example.com/article"],
+    "depth": 2,
+    "freshness_days": 30
+  }'
+```
+
+Response:
+```json
+{
+  "export_id": "19a3f089",
+  "download_url": "/api/v1/export/download/crawl_export_20251121_225258_19a3f089.md",
+  "pages_exported": 5,
+  "file_size_kb": 145,
+  "created_at": "2025-11-21T22:52:58.892139"
+}
+```
+
+Then download:
+```bash
+curl -O http://localhost:8000/api/v1/export/download/crawl_export_20251121_225258_19a3f089.md
+```
+
+The export feature:
+- Requires seed URLs (returns error if not provided)
+- Respects crawl depth setting
+- Combines all crawled pages into a single markdown file
+- Includes table of contents and metadata
+- Perfect for offline reading or manual LLM feeding
+
 ### Manual Crawling
 ```bash
 curl -X POST http://localhost:8001/crawl \

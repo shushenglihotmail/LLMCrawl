@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from .routers import agent, chat, models
+from .routers import agent, chat, export, models
 from .utils.logging import get_logger, setup_logging
 
 # Setup logging
@@ -57,6 +57,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(chat.router, prefix="/api/v1")
+app.include_router(export.router, prefix="/api/v1")  # Export endpoints
 app.include_router(agent.router)  # Agent router has its own /agent prefix
 app.include_router(models.router, prefix="/api")  # Models endpoint
 
@@ -73,6 +74,8 @@ async def root():
         "description": "Gateway service for web crawling and RAG-based question answering",
         "endpoints": {
             "chat": "/api/v1/chat",
+            "export": "/api/v1/export/markdown",
+            "download": "/api/v1/export/download/{filename}",
             "health": "/api/v1/health",
             "docs": "/docs",
         },
