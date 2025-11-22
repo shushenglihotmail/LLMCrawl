@@ -5,7 +5,6 @@ Handles authentication (interactive OAuth or PAT) and API calls.
 
 import base64
 import logging
-import os
 import webbrowser
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -41,8 +40,8 @@ class AzureDevOpsClient:
             organization: Azure DevOps organization name
             project: Project name
             repository: Repository name
-            pat: Personal Access Token (optional, will use interactive auth if not provided)
-            branch: Default branch name (default: None = use repository default branch)
+            pat: Personal Access Token (optional, interactive auth if None)
+            branch: Default branch name (None = repo default branch)
             max_results: Default maximum results per query (default: 50)
         """
         self.organization = organization
@@ -390,9 +389,6 @@ class AzureDevOpsClient:
         branch = branch or self.branch
 
         try:
-            # URL encode the file path
-            encoded_path = quote(file_path, safe="")
-
             url = (
                 f"{self.base_url}/{self.project}/_apis/git/repositories/"
                 f"{self.repository}/items"
@@ -531,7 +527,7 @@ class AzureDevOpsClient:
                 )
                 if file_content and regex.search(file_content.get("content", "")):
                     matching_files.append(file_item)
-            except:
+            except Exception:
                 # Skip files that can't be read
                 continue
 
