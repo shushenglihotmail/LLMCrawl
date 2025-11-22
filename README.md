@@ -124,6 +124,19 @@ graph TB
 - **Full Documentation**: [mcp_server/README.md](mcp_server/README.md) - Comprehensive guide
 - **Architecture**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design and data flows
 
+### Azure DevOps Code Search (Azure DevOps MCP Server)
+- **Dual Transport**: Works with both VS Code (stdio) and LLMCrawl (HTTP)
+- **Code Search**: Semantic search across Azure DevOps repositories
+- **File Retrieval**: Get file content from specific branches/commits
+- **MSAL Authentication**: Interactive OAuth with browser flow + PAT support
+- **Standalone Package**: Independent pip-installable Python package
+- **Docker Ready**: Containerized for easy deployment
+
+📖 **Azure DevOps MCP Server Documentation**:
+- **Quick Start**: [azure_devops_mcp_server/QUICKSTART.md](azure_devops_mcp_server/QUICKSTART.md) - Setup in 5 minutes
+- **Full Documentation**: [azure_devops_mcp_server/README.md](azure_devops_mcp_server/README.md) - Complete guide
+- **VS Code Integration**: Configure as MCP client for Copilot tool use
+
 ## 🚀 Quick Start
 
 ### 1. Clone and Setup Environment

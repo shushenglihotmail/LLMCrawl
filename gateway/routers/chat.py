@@ -64,6 +64,27 @@ async def get_mcp_tools() -> List[Dict[str, Any]]:
         return []
 
 
+async def get_azure_devops_tools() -> List[Dict[str, Any]]:
+    """Fetch tools from Azure DevOps MCP server."""
+    global _mcp_tools_cache
+
+    azure_mcp_url = os.getenv(
+        "AZURE_DEVOPS_MCP_URL", "http://azure-devops-mcp-server:8004"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{azure_mcp_url}/tools")
+            response.raise_for_status()
+            data = response.json()
+            tools = data.get("tools", [])
+            logger.info(f"Loaded {len(tools)} Azure DevOps MCP tools")
+            return tools
+    except Exception as e:
+        logger.warning(f"Failed to load Azure DevOps MCP tools: {e}")
+        return []
+
+
 class ChatRequest(BaseModel):
     """Chat request model."""
 
@@ -177,6 +198,9 @@ async def chat_endpoint(request: ChatRequest, req: Request):
         # Always load MCP tools for local file operations
         mcp_tools = await get_mcp_tools()
 
+        # Load Azure DevOps MCP tools if available
+        azure_devops_tools = await get_azure_devops_tools()
+
         # Include crawl tool if:
         # 1. Current query suggests need for fresh info
         # 2. User forces refresh
@@ -220,7 +244,7 @@ async def chat_endpoint(request: ChatRequest, req: Request):
                 )
 
         # Build tools list
-        if should_include_crawl_tool or mcp_tools:
+        if should_include_crawl_tool or mcp_tools or azure_devops_tools:
             tools = []
 
             # Add crawl tool if needed
@@ -229,6 +253,9 @@ async def chat_endpoint(request: ChatRequest, req: Request):
 
             # Always add MCP tools for local file operations
             tools.extend(mcp_tools)
+
+            # Add Azure DevOps MCP tools if available
+            tools.extend(azure_devops_tools)
 
             # Force crawl tool if:
             # - Query explicitly needs fresh data, OR

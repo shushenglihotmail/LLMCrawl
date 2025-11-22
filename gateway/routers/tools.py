@@ -77,6 +77,11 @@ class ToolHandler:
             elif tool_name in self.mcp_tools:
                 result = await self._handle_mcp_tool(tool_name, arguments, request_id)
                 success = True
+            elif tool_name in ["search_azure_devops_code", "get_azure_devops_file"]:
+                result = await self._handle_azure_devops_tool(
+                    tool_name, arguments, request_id
+                )
+                success = True
             else:
                 result = {"error": f"Unknown tool: {tool_name}"}
                 success = False
@@ -380,6 +385,54 @@ class ToolHandler:
             except httpx.HTTPStatusError as e:
                 logger.error(f"MCP server HTTP error: {e.response.status_code}")
                 return {"error": f"MCP server error: {e.response.status_code}"}
+
+    async def _handle_azure_devops_tool(
+        self, tool_name: str, arguments: Dict[str, Any], request_id: str
+    ) -> Dict[str, Any]:
+        """
+        Handle Azure DevOps MCP server tool calls.
+
+        Args:
+            tool_name: Name of the Azure DevOps tool
+            arguments: Tool arguments
+            request_id: Request tracking ID
+
+        Returns:
+            Tool result
+        """
+        azure_devops_mcp_url = os.getenv(
+            "AZURE_DEVOPS_MCP_URL", "http://azure-devops-mcp-server:8004"
+        )
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                response = await client.post(
+                    f"{azure_devops_mcp_url}/invoke",
+                    json={"tool_name": tool_name, "arguments": arguments},
+                    headers={"X-Request-ID": request_id},
+                )
+                response.raise_for_status()
+                result = response.json()
+
+                if not result.get("success"):
+                    return {
+                        "error": result.get(
+                            "error", "Azure DevOps tool execution failed"
+                        )
+                    }
+
+                return result.get("result", {})
+
+            except httpx.RequestError as e:
+                logger.error(f"Azure DevOps MCP server request failed: {e}")
+                return {"error": f"Azure DevOps MCP server unavailable: {e}"}
+            except httpx.HTTPStatusError as e:
+                logger.error(
+                    f"Azure DevOps MCP server HTTP error: {e.response.status_code}"
+                )
+                return {
+                    "error": f"Azure DevOps MCP server error: {e.response.status_code}"
+                }
 
 
 # Global tool handler

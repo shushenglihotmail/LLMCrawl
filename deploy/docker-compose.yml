@@ -189,6 +189,37 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Azure DevOps MCP Server
+  azure-devops-mcp-server:
+    build:
+      context: ../azure_devops_mcp_server
+      dockerfile: Dockerfile
+    container_name: web-rag-azure-devops-mcp
+    ports:
+      - "8004:8004"
+    environment:
+      - MCP_MODE=http
+      - MCP_PORT=8004
+      - MCP_HOST=0.0.0.0
+      - AZURE_DEVOPS_ORG=microsoft
+      - AZURE_DEVOPS_PROJECT=OS
+      - AZURE_DEVOPS_REPO=os.2020
+      - AZURE_DEVOPS_AUTH_MODE=pat
+      # Set AZURE_DEVOPS_PAT in .env file
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - azure_devops_cache:/app/.mcp_cache
+    networks:
+      - webrag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
   # Demo Web Client (optional)
   demo-client:
     build:
@@ -252,6 +283,7 @@ volumes:
   prometheus_data:
   grafana_data:
   mcp_vector_db:
+  azure_devops_cache:
 
 networks:
   webrag-network:

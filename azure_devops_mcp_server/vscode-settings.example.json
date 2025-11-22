@@ -1,0 +1,28 @@
+{
+    // Example VS Code settings.json for using Azure DevOps MCP Server
+    // Copy this to your .vscode/settings.json
+    "mcpServers": {
+        "azure-devops": {
+            "command": "python",
+            "args": [
+                "-m",
+                "azure_devops_mcp_server",
+                "--mode",
+                "stdio",
+                "--organization",
+                "microsoft",
+                "--project",
+                "OS",
+                "--repository",
+                "os.2020",
+                "--auth-mode",
+                "interactive"
+            ],
+            "env": {
+                // Optional: Use PAT instead of interactive auth
+                // "AZURE_DEVOPS_PAT": "your-personal-access-token-here",
+                // "AZURE_DEVOPS_AUTH_MODE": "pat"
+            }
+        }
+    }
+}
