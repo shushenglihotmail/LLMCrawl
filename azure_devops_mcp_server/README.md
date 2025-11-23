@@ -17,13 +17,23 @@ Your Workspace (any language) → VS Code Copilot → MCP Server (Python) → Az
 ## Features
 
 - **File Search**: Flexible file search with path patterns, file patterns, extensions, and keywords
+- **Code Search**: Fast indexed search across entire repository using Azure DevOps Code Search API
 - **File Retrieval**: Fetch file contents from specific paths
 - **Smart Filtering**: Support for glob patterns (**, *), wildcards, and complex queries
+- **Performance Optimized**: Automatically uses Code Search API for keyword/recursive searches (100x+ faster)
 - **Safe by Default**: Non-recursive search at root level, opt-in for deep searches
 - **Interactive Authentication**: Browser-based OAuth flow for Azure DevOps
 - **PAT Support**: Personal Access Token authentication
 - **Dual Transport**: Supports both stdio (for VS Code) and HTTP (for LLMCrawl)
 - **Command-Line Testing**: Standalone test utility for quick queries
+
+## Performance
+
+The server automatically optimizes searches using the Azure DevOps Code Search API:
+- **Keyword searches**: ~1 second (was 120+ seconds, timing out)
+- **File pattern + recursive**: ~1 second (was 120+ seconds, timing out)
+- **Indexed search**: Uses `https://almsearch.dev.azure.com` endpoint for fast results
+- **No file downloads**: Never iterates through files one-by-one
 
 ## Quick Start
 

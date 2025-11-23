@@ -54,7 +54,7 @@ class AzureDevOpsClient:
         self._connection: Optional[Connection] = None
 
         self.base_url = f"https://dev.azure.com/{organization}"
-        self.api_version = "7.2-preview.1"
+        self.api_version = "7.1-preview.1"  # Code Search API version
 
     async def authenticate(self, use_interactive: bool = True) -> bool:
         """
@@ -177,8 +177,8 @@ class AzureDevOpsClient:
             if file_type:
                 search_text = f"{query} ext:{file_type}"
 
-            url = f"{self.base_url}/{self.project}/_apis/search/codesearchresults"
-            params = {"api-version": self.api_version}
+            url = f"https://almsearch.dev.azure.com/{self.organization}/_apis/search/codesearchresults"
+            params = {"api-version": "6.0-preview.1"}
 
             payload = {
                 "searchText": search_text,
@@ -269,7 +269,60 @@ class AzureDevOpsClient:
         max_results = max_results or self.max_results
 
         try:
-            # Use Git Items API to list files with filters
+            # If keyword or file_pattern with recursive search, use Code Search API (fast & indexed)
+            # Code Search API is much faster than listing all files recursively
+            if keyword or (file_pattern and recursive):
+                logger.info(
+                    f"Using Azure DevOps Code Search API (keyword={keyword}, file_pattern={file_pattern}, recursive={recursive})"
+                )
+
+                # For file_pattern searches, extract the pattern as search query
+                search_query = keyword if keyword else ""
+                if file_pattern and not keyword:
+                    # Convert file pattern to filename search
+                    # Remove "file:" prefix if present
+                    pattern = file_pattern.replace("file:", "").strip()
+                    # Extract base name without wildcards for search
+                    # e.g., "Microsoft-Windows-Runtime-Metadata-NanoServer.*" -> "Microsoft-Windows-Runtime-Metadata-NanoServer"
+                    base_name = pattern.replace("*", "").replace("?", "").strip(".")
+                    search_query = base_name
+
+                file_ext = None
+                if extension:
+                    file_ext = extension.replace("ext:", "").replace(".", "").strip()
+
+                code_results = await self.search_code(
+                    query=search_query,
+                    file_type=file_ext,
+                    max_results=max_results,
+                )
+
+                # Convert code search results to file search format
+                results = [
+                    {
+                        "path": item["file_path"],
+                        "name": item["file_name"],
+                        "size": 0,  # Not provided by code search
+                        "objectId": "",
+                        "url": "",
+                        "preview": item.get("preview", ""),
+                    }
+                    for item in code_results
+                ]
+
+                # If file_pattern was specified, filter results by pattern match
+                if file_pattern and results:
+                    pattern = file_pattern.replace("file:", "").strip()
+                    import fnmatch
+
+                    results = [
+                        r for r in results if fnmatch.fnmatch(r["name"], pattern)
+                    ]
+
+                logger.info(f"Code search returned {len(results)} results")
+                return results
+
+            # Otherwise use Git Items API to list files with filters (for non-recursive or no pattern searches)
             url = f"{self.base_url}/{self.project}/_apis/git/repositories/{self.repository}/items"
             params = {
                 "recursionLevel": "Full" if recursive else "OneLevel",
@@ -343,10 +396,6 @@ class AzureDevOpsClient:
 
                 if len(results) >= max_results:
                     break
-
-            # If keyword search is specified, filter by content
-            if keyword and results:
-                results = await self._filter_by_keyword(results, keyword, branch)
 
             logger.info(f"File search returned {len(results)} results")
             return results[:max_results]
@@ -496,39 +545,3 @@ class AzureDevOpsClient:
         regex_pattern = regex_pattern.replace("?", ".")
         regex_pattern = f"^{regex_pattern}$"
         return bool(re.match(regex_pattern, path, re.IGNORECASE))
-
-    async def _filter_by_keyword(
-        self, files: List[Dict[str, Any]], keyword: str, branch: str
-    ) -> List[Dict[str, Any]]:
-        """
-        Filter files by keyword in content.
-
-        Args:
-            files: List of file items
-            keyword: Keyword to search (supports wildcards)
-            branch: Branch name
-
-        Returns:
-            Filtered list of files containing keyword
-        """
-        matching_files = []
-
-        # Convert keyword pattern to regex
-        import re
-
-        keyword_pattern = keyword.replace("*", ".*").replace("?", ".")
-        regex = re.compile(keyword_pattern, re.IGNORECASE)
-
-        # Check up to 100 files to avoid performance issues
-        for file_item in files[:100]:
-            try:
-                file_content = await self.get_file_content(
-                    file_item["path"], branch=branch
-                )
-                if file_content and regex.search(file_content.get("content", "")):
-                    matching_files.append(file_item)
-            except Exception:
-                # Skip files that can't be read
-                continue
-
-        return matching_files

@@ -148,8 +148,8 @@ class AzureDevOpsMCPServer:
                                 "Keyword to search in file content. "
                                 "Supports wildcards. Examples: 'Azure', "
                                 "'connection timeout', 'Http*Request'. "
-                                "Note: Searches first 100 matching files. "
-                                "Requires recursive=true."
+                                "Uses Azure DevOps Code Search API "
+                                "(fast, indexed search)."
                             ),
                         },
                         "branch": {
