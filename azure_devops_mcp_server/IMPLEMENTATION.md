@@ -101,7 +101,7 @@ Created a standalone Azure DevOps MCP server that provides code search and file 
     - Configuration table
     - Example tool calls
 
-11. **azure_devops_mcp_server/vscode-settings.example.json**
+11. **azure_devops_mcp_server/vscode-settings.example.jsonc**
     - Example VS Code MCP configuration
     - Command and arguments for stdio mode
     - Environment variable examples
@@ -190,7 +190,7 @@ VS Code (Copilot)           LLMCrawl Gateway
 
 ### VS Code (stdio mode)
 
-- Add to `.vscode/settings.json`:
+- Add to `mcp.json` in VS Code user folder:
 ```json
 {
   "mcpServers": {
@@ -303,7 +303,7 @@ azure_devops_mcp_server/
 ├── pyproject.toml
 ├── README.md
 ├── QUICKSTART.md
-├── vscode-settings.example.json
+├── vscode-settings.example.jsonc
 └── test_azure_devops_mcp.py
 ```
 

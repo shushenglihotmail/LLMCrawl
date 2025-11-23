@@ -2,9 +2,17 @@
 
 A Model Context Protocol (MCP) server for querying files from Azure DevOps repositories. This server provides code search and file retrieval capabilities that can be used by:
 
-- VS Code Copilot (via MCP stdio transport)
-- LLMCrawl Gateway (via HTTP REST API)
+- **VS Code Copilot** (via MCP stdio transport) - works with ANY workspace language
+- **LLMCrawl Gateway** (via HTTP REST API)
 - Any MCP-compatible client
+
+## 🎯 Key Concept
+
+This is a **standalone Python service** that VS Code Copilot communicates with. Your actual VS Code workspace can be **any language** (Go, JavaScript, C++, etc.). The Python environment is only used to run the MCP server process itself.
+
+```
+Your Workspace (any language) → VS Code Copilot → MCP Server (Python) → Azure DevOps
+```
 
 ## Features
 
@@ -17,13 +25,91 @@ A Model Context Protocol (MCP) server for querying files from Azure DevOps repos
 - **Dual Transport**: Supports both stdio (for VS Code) and HTTP (for LLMCrawl)
 - **Command-Line Testing**: Standalone test utility for quick queries
 
+## Quick Start
+
+### 1. Install in a Python Environment
+
+```bash
+# Use a virtual environment (recommended)
+cd C:\src\github\LLMCrawl
+python -m venv venv
+.\venv\Scripts\Activate.ps1  # Windows
+# source venv/bin/activate    # macOS/Linux
+
+cd azure_devops_mcp_server
+pip install -e .
+
+# Find your Python path (needed for VS Code config)
+(Get-Command python).Source  # Windows PowerShell
+# which python                # macOS/Linux
+```
+
+### 2. Configure VS Code
+
+Add to your **User Settings** (Ctrl+Shift+P → "Preferences: Open User Settings (JSON)"):
+
+```json
+{
+  "mcpServers": {
+    "azure-devops": {
+      "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",  // YOUR Python path
+      "args": ["-m", "azure_devops_mcp_server", "--mode", "stdio"],
+      "env": {
+        "AZURE_DEVOPS_ORG": "microsoft",
+        "AZURE_DEVOPS_PROJECT": "OS",
+        "AZURE_DEVOPS_REPO": "os.2020",
+        "AZURE_DEVOPS_PAT": "your-pat-token"
+      }
+    }
+  }
+}
+```
+
+### 3. Restart VS Code & Use
+
+Ask Copilot:
+- "List all YAML files in the OS repository"
+- "Show me the .gitignore file"
+- "Find JSON config files in src/"
+
+See [QUICKSTART.md](QUICKSTART.md) for complete setup guide.
+See [INTEGRATION.md](INTEGRATION.md) for detailed VS Code and LLMCrawl integration.
+
 ## Installation
 
-### Standalone Installation
+### Development Installation (Editable)
 
 ```bash
 cd azure_devops_mcp_server
 pip install -e .
+```
+
+### Build Wheel for Distribution
+
+```bash
+cd azure_devops_mcp_server
+
+# Install build tool (one-time)
+pip install build
+
+# Build the wheel
+python -m build
+
+# Wheel appears in: dist/azure_devops_mcp_server-0.1.0-py3-none-any.whl
+```
+
+### Install from Wheel (Other Environments)
+
+```bash
+# Copy the wheel file to target machine, then:
+pip install azure_devops_mcp_server-0.1.0-py3-none-any.whl
+
+# Or install from path:
+pip install C:\path\to\azure_devops_mcp_server-0.1.0-py3-none-any.whl
+
+# Then find Python path for VS Code config:
+# Windows: (Get-Command python).Source
+# Linux/Mac: which python
 ```
 
 ### Docker Installation
@@ -58,19 +144,31 @@ AZURE_DEVOPS_MAX_RESULTS=50  # Default max results per query
 
 ### As VS Code MCP Server (stdio mode)
 
-Add to your VS Code settings (`.vscode/settings.json` or `settings.json`):
+Add to your VS Code MCP configuration (`mcp.json` in VS Code user folder):
 
 ```json
 {
-  "mcp.servers": {
+  "mcpServers": {
     "azure-devops": {
-      "command": "python",
-      "args": ["-m", "azure_devops_mcp_server"],
+      "command": "C:\\path\\to\\python.exe",
+      "args": [
+        "-m",
+        "azure_devops_mcp_server",
+        "--mode",
+        "stdio",
+        "--organization",
+        "microsoft",
+        "--project",
+        "OS",
+        "--repository",
+        "os.2020",
+        "--branch",
+        "main",
+        "--auth-mode",
+        "pat"
+      ],
       "env": {
-        "AZURE_DEVOPS_ORG": "microsoft",
-        "AZURE_DEVOPS_PROJECT": "OS",
-        "AZURE_DEVOPS_REPO": "os.2020",
-        "SERVER_MODE": "stdio"
+        "AZURE_DEVOPS_PAT": "your-personal-access-token-here"
       }
     }
   }

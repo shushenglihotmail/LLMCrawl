@@ -56,7 +56,7 @@ The Azure DevOps MCP Server is fully implemented and ready for deployment. All c
    - ✅ README.md - Complete feature documentation
    - ✅ QUICKSTART.md - Step-by-step setup guide
    - ✅ IMPLEMENTATION.md - Technical implementation summary
-   - ✅ vscode-settings.example.json - VS Code configuration
+   - ✅ vscode-settings.example.jsonc - VS Code configuration
    - ✅ Updated main README.md with Azure DevOps section
 
 8. **Testing**
@@ -96,8 +96,8 @@ curl -X POST http://localhost:8004/invoke \
 cd azure_devops_mcp_server
 pip install -e .
 
-# 2. Add to VS Code settings
-# Copy vscode-settings.example.json to .vscode/settings.json
+# 2. Add to VS Code mcp.json
+# Copy vscode-settings.example.jsonc content to mcp.json in VS Code user folder
 
 # 3. Restart VS Code
 # The server will auto-start and prompt for authentication

@@ -16,7 +16,7 @@ azure_devops_mcp_server/
 ├── QUICKSTART.md                     # Quick start guide
 ├── IMPLEMENTATION.md                 # Implementation details
 ├── DEPLOYMENT.md                     # Deployment guide
-├── vscode-settings.example.json      # VS Code MCP config
+├── vscode-settings.example.jsonc     # VS Code MCP config
 └── test_azure_devops_mcp.py          # Test suite
 ```
 
@@ -79,11 +79,11 @@ azure_devops_mcp_server/
 - Entry point: azure-devops-mcp-server
 - Tool configurations (black, isort, mypy, pytest)
 
-**azure_devops_mcp_server/vscode-settings.example.json**
+**azure_devops_mcp_server/vscode-settings.example.jsonc**
 - VS Code MCP client configuration
 - Command and arguments for stdio mode
 - Environment variable examples
-- Copy to .vscode/settings.json
+- Copy content to mcp.json in VS Code user folder
 
 ### 3. Docker Files (2 files)
 
@@ -293,7 +293,7 @@ azure_devops_mcp_server/
 - ✅ Complete feature docs (README.md)
 - ✅ Implementation details (IMPLEMENTATION.md)
 - ✅ Deployment guide (DEPLOYMENT.md)
-- ✅ VS Code configuration (vscode-settings.example.json)
+- ✅ VS Code configuration (vscode-settings.example.jsonc)
 - ✅ Test documentation (test_azure_devops_mcp.py)
 - ✅ Main README update
 
@@ -321,7 +321,7 @@ azure_devops_mcp_server/
 1. Deploy to Docker: `docker-compose up -d azure-devops-mcp-server`
 2. Configure PAT: Add to `.env` file
 3. Test endpoints: Run `test_azure_devops_mcp.py`
-4. Use from VS Code: Copy vscode-settings.example.json
+4. Use from VS Code: Copy vscode-settings.example.jsonc
 5. Use from LLMCrawl: Chat with "Search OS repo for..."
 
 ---

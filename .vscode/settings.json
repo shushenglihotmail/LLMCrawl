@@ -34,6 +34,12 @@
     "docker.showStartPage": false,
     "makefile.configureOnOpen": true,
     "vscode-nmake-tools.workspaceBuildDirectories": [],
+    "yaml.schemas": {
+        "none": [
+            "**/grafana-provisioning/**/*.yml",
+            "**/grafana-provisioning/**/*.yaml"
+        ]
+    },
     "python-envs.pythonProjects": [
         {
             "path": "",

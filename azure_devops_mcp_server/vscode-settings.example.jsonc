@@ -1,0 +1,52 @@
+{
+    // Example VS Code settings.json for using Azure DevOps MCP Server
+    // Copy this to your .vscode/settings.json (workspace or user settings)
+    //
+    // IMPORTANT: Replace "python" with the ABSOLUTE path to your Python interpreter
+    // where azure-devops-mcp-server is installed. Examples:
+    //
+    // Windows (venv):     "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe"
+    // Windows (conda):    "C:\\Users\\YourName\\miniconda3\\envs\\yourenv\\python.exe"
+    // macOS/Linux (venv): "/Users/yourname/LLMCrawl/venv/bin/python"
+    // macOS/Linux (conda):"/home/yourname/miniconda3/envs/yourenv/bin/python"
+    //
+    // To find your Python path, run in terminal where package is installed:
+    //   Windows: (Get-Command python).Source
+    //   macOS/Linux: which python
+    //
+    "mcpServers": {
+        "azure-devops": {
+            "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
+            "args": [
+                "-m",
+                "azure_devops_mcp_server",
+                "--mode",
+                "stdio",
+                "--organization",
+                "microsoft",
+                "--project",
+                "OS",
+                "--repository",
+                "os.2020",
+                "--branch",
+                "official/rs_sparc_ctr_exp",
+                "--max-results",
+                "50",
+                "--auth-mode",
+                "pat"
+            ],
+            "env": {
+                // Recommended: Use PAT for reliable authentication
+                "AZURE_DEVOPS_PAT": "your-personal-access-token-here"
+                // Alternative: Use environment variables for all settings
+                // "AZURE_DEVOPS_ORG": "microsoft",
+                // "AZURE_DEVOPS_PROJECT": "OS",
+                // "AZURE_DEVOPS_REPO": "os.2020",
+                // "AZURE_DEVOPS_BRANCH": "official/rs_sparc_ctr_exp",
+                // "AZURE_DEVOPS_MAX_RESULTS": "50",
+                // "AZURE_DEVOPS_PAT": "your-pat-token",
+                // "AZURE_DEVOPS_AUTH_MODE": "pat"
+            }
+        }
+    }
+}

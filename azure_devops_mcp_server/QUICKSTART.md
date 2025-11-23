@@ -2,11 +2,47 @@
 
 ## Installation
 
-### From Source
+### Prerequisites
+
+You need Python 3.8+ with the azure-devops-mcp-server package installed. You can:
+
+1. **Use a virtual environment** (recommended):
+   ```bash
+   cd C:\src\github\LLMCrawl
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1  # Windows
+   # source venv/bin/activate    # macOS/Linux
+
+   cd azure_devops_mcp_server
+   pip install -e .
+   ```
+
+2. **Install globally** (not recommended):
+   ```bash
+   cd azure_devops_mcp_server
+   pip install -e .
+   ```
+
+3. **Use conda environment**:
+   ```bash
+   conda create -n azure-devops python=3.11
+   conda activate azure-devops
+   cd azure_devops_mcp_server
+   pip install -e .
+   ```
+
+**Find your Python path** (needed for VS Code config):
+
+```powershell
+# Windows PowerShell
+(Get-Command python).Source
+# Output example: C:\src\github\LLMCrawl\venv\Scripts\python.exe
+```
 
 ```bash
-cd azure_devops_mcp_server
-pip install -e .
+# macOS/Linux
+which python
+# Output example: /Users/yourname/LLMCrawl/venv/bin/python
 ```
 
 ## Quick Testing
@@ -39,15 +75,20 @@ See `tests/README.md` for detailed examples and filter syntax.
 
 ### 1. VS Code MCP Integration (stdio mode)
 
+The MCP server runs as a **separate Python process** that VS Code Copilot communicates with via stdio. Your workspace project can be **any language** - Python, Go, JavaScript, etc. The Python environment is only used to run the MCP server itself.
+
 **Step 1: Configure VS Code**
 
-Copy `vscode-settings.example.json` to your workspace `.vscode/settings.json`:
+Add to your **mcp.json** file in VS Code user folder (typically `%APPDATA%\Code\User\globalStorage\rooveterinaryinc.roo-cline\` on Windows):
 
 ```json
 {
   "mcpServers": {
     "azure-devops": {
-      "command": "python",
+      // CRITICAL: Use ABSOLUTE path to Python where package is installed
+      // Find it with: (Get-Command python).Source  (PowerShell)
+      //           or: which python                  (bash)
+      "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
       "args": [
         "-m",
         "azure_devops_mcp_server",
@@ -59,21 +100,29 @@ Copy `vscode-settings.example.json` to your workspace `.vscode/settings.json`:
         "OS",
         "--repository",
         "os.2020",
+        "--branch",
+        "official/rs_sparc_ctr_exp",
         "--auth-mode",
-        "interactive"
-      ]
+        "pat"  // or "interactive" for browser OAuth
+      ],
+      "env": {
+        // Recommended: Use PAT for non-interactive auth
+        "AZURE_DEVOPS_PAT": "your-personal-access-token-here"
+      }
     }
   }
 }
 ```
 
-**Step 2: Start Using**
+**Important Notes:**
+- Use **absolute path** to Python executable (not just `"python"`)
+- The Python environment only runs the MCP server - your workspace can be any language
+- User settings work globally; workspace settings only when that workspace is open
+- PAT is more reliable than interactive auth for automated scenarios
 
-When you open VS Code with Copilot, the Azure DevOps MCP server will:
-1. Automatically launch in stdio mode
-2. Prompt for interactive authentication (browser OAuth)
-3. Cache credentials for future use
-4. Make tools available to Copilot
+**Step 2: Restart VS Code**
+
+Close and reopen VS Code for the MCP server configuration to take effect.
 
 **Available Tools:**
 - `search_azure_devops_files` - Search files with flexible filters (path, file pattern, extension, keyword)

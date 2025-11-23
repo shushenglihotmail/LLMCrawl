@@ -2,16 +2,70 @@
 
 ## VS Code Copilot Integration
 
+### Understanding MCP Architecture
+
+The Azure DevOps MCP server is a **standalone Python process** that runs separately from VS Code. It communicates with VS Code Copilot through the Model Context Protocol (MCP) via stdio.
+
+**Key Points:**
+- Your VS Code workspace can be **any language** (Python, Go, C++, JavaScript, etc.)
+- The Python environment is **only for running the MCP server process**
+- The server provides tools that Copilot can call to access Azure DevOps
+- No Python integration needed in your actual project
+
+```
+Your Workspace (any language)
+    ↓
+VS Code Copilot (MCP Client)
+    ↕️ stdio communication
+Azure DevOps MCP Server (Python process in separate env)
+    ↕️ HTTPS API calls
+Azure DevOps REST API
+```
+
+### Prerequisites
+
+1. **Install the package** in a Python environment:
+
+   ```bash
+   # Option 1: Virtual environment (recommended)
+   cd C:\src\github\LLMCrawl
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
+   cd azure_devops_mcp_server
+   pip install -e .
+
+   # Option 2: Conda environment
+   conda create -n azure-devops python=3.11
+   conda activate azure-devops
+   pip install -e .
+   ```
+
+2. **Find the Python executable path** (needed for config):
+
+   ```powershell
+   # Windows
+   (Get-Command python).Source
+   # Example: C:\src\github\LLMCrawl\venv\Scripts\python.exe
+   ```
+
+   ```bash
+   # macOS/Linux
+   which python
+   # Example: /Users/yourname/venv/bin/python
+   ```
+
 ### Quick Setup
 
-1. **Create VS Code MCP settings file**:
+1. **Add to VS Code mcp.json** (located in VS Code user folder):
 
 ```json
-// .vscode/settings.json
+// mcp.json in VS Code user folder
+// Typical location: %APPDATA%\Code\User\globalStorage\rooveterinaryinc.roo-cline\mcp.json
 {
   "mcpServers": {
     "azure-devops": {
-      "command": "python",
+      // CRITICAL: Must use ABSOLUTE path to Python where package is installed
+      "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
       "args": [
         "-m",
         "azure_devops_mcp_server",
@@ -36,16 +90,35 @@
 }
 ```
 
-2. **Or use environment variable** (more secure):
+**Why absolute path?** VS Code launches the MCP server as a subprocess. Without an absolute path, it won't find the Python environment where the package is installed.
+
+### How VS Code Copilot Discovers MCP Servers
+
+When you add `"mcpServers"` to your mcp.json:
+
+1. **VS Code reads mcp.json** - On startup, VS Code reads the mcp.json file from the user folder
+2. **Copilot extension discovers servers** - The Copilot extension looks for the `"mcpServers"` configuration
+3. **Launches server process** - When Copilot needs the tools, it spawns the Python process using your `"command"` and `"args"`
+4. **Stdio communication** - Copilot sends MCP protocol messages via stdin, receives responses via stdout
+5. **Tool discovery** - Copilot sends `tools/list` request to get available tools
+6. **Tool invocation** - When you ask questions, Copilot calls tools via `tools/call` requests
+
+**Key Points:**
+- The server is **NOT** an extension - it's a separate process
+- Copilot **auto-starts** the server when needed
+- Configuration in **mcp.json** applies globally (all workspaces)
+- You can check **Output → MCP** in VS Code to see server status and logs
+
+2. **Alternative: Use environment variables** (more secure for PAT):
 
 ```json
-// .vscode/settings.json
+// mcp.json
 {
   "mcpServers": {
     "azure-devops": {
-      "command": "python",
+      "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
       "args": ["-m", "azure_devops_mcp_server", "--mode", "stdio"],
-      "env": {}  // Uses environment variables
+      "env": {}  // Server reads from environment variables
     }
   }
 }

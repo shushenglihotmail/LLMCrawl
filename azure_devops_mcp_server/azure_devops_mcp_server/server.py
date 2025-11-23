@@ -4,7 +4,6 @@ Azure DevOps MCP Server
 Supports both stdio transport (for VS Code) and HTTP REST API (for LLMCrawl).
 """
 
-import asyncio
 import json
 import logging
 import sys
@@ -44,140 +43,167 @@ class AzureDevOpsMCPServer:
         self.tools = self._define_tools()
 
     def _define_tools(self) -> List[Dict[str, Any]]:
-        """Define available MCP tools in OpenAI function calling format."""
+        """Define available MCP tools."""
         return [
             {
-                "type": "function",
-                "function": {
-                    "name": "search_azure_devops_code",
-                    "description": (
-                        "Search for code in Azure DevOps repository. "
-                        "Use this when user asks to find, search, or locate code, "
-                        "files, functions, or classes in the repository. "
-                        "Returns file paths and code previews matching the query."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "Search query (e.g., 'manifest builder', 'OneCore')",
-                            },
-                            "file_type": {
-                                "type": "string",
-                                "description": "Filter by file extension (e.g., '*.cpp', '*.h', '*.cs')",
-                            },
-                            "max_results": {
-                                "type": "integer",
-                                "description": "Maximum number of results (default: 20)",
-                                "default": 20,
-                            },
+                "name": "search_azure_devops_code",
+                "description": (
+                    "Search for code in Azure DevOps repository. "
+                    "Use this when user asks to find, search, or "
+                    "locate code, files, functions, or classes in "
+                    "the repository. Returns file paths and code "
+                    "previews matching the query."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": (
+                                "Search query (e.g., 'manifest builder', " "'OneCore')"
+                            ),
                         },
-                        "required": ["query"],
+                        "file_type": {
+                            "type": "string",
+                            "description": (
+                                "Filter by file extension "
+                                "(e.g., '*.cpp', '*.h', '*.cs')"
+                            ),
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "Maximum number of results (default: 20)",
+                        },
                     },
+                    "required": ["query"],
                 },
             },
             {
-                "type": "function",
-                "function": {
-                    "name": "search_azure_devops_files",
-                    "description": (
-                        "Search for files in Azure DevOps repository with flexible filtering. "
-                        "⚠️ IMPORTANT: Searches only root directory by default (non-recursive). "
-                        "Set recursive=true to search subdirectories in large repos. "
-                        "\n\nSupports path patterns, file name patterns, extensions, and keyword search. "
-                        "Use this when user wants to list, find, or filter files by name, location, or type. "
-                        "Returns list of file paths matching the criteria. "
-                        "\n\nFilter patterns:\n"
-                        "- Path: 'src/' or 'path:src/Services' or 'path:**/pipelines/**' (** = any depth, requires recursive=true)\n"
-                        "- File: 'file:azure-pipelines*' or 'file:*test*' or 'file:README.md'\n"
-                        "- Extension: 'ext:yml' or 'ext:cs' or 'ext:json'\n"
-                        "- Keyword: Search in file content (use wildcards: 'Azure*', '*timeout', requires recursive=true)\n"
-                        "- Glob patterns: ** (any depth), * (any chars), ? (single char)\n"
-                        "\nExamples:\n"
-                        "- List root files: (no filters)\n"
-                        "- Root YAML files: ext:yml\n"
-                        "- Recursive search: ext:cs recursive:true\n"
-                        "- Deep search: path:**/pipelines/** ext:yml recursive:true"
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path_pattern": {
-                                "type": "string",
-                                "description": (
-                                    "Path filter pattern. Examples: "
-                                    "'src/', 'path:src/Services', 'path:**/pipelines/**'. "
-                                    "Note: ** patterns require recursive=true."
-                                ),
-                            },
-                            "file_pattern": {
-                                "type": "string",
-                                "description": (
-                                    "File name pattern (matches only filename, not path). "
-                                    "Examples: 'file:azure-pipelines*', 'file:*test*', "
-                                    "'file:README.md', '*service*.cs'. Supports * and ? wildcards."
-                                ),
-                            },
-                            "extension": {
-                                "type": "string",
-                                "description": (
-                                    "File extension filter. Examples: 'ext:yml', 'ext:json', "
-                                    "'ext:cs', 'yml', '.yml'"
-                                ),
-                            },
-                            "keyword": {
-                                "type": "string",
-                                "description": (
-                                    "Keyword to search in file content. Supports wildcards. "
-                                    "Examples: 'Azure', 'connection timeout', 'Http*Request'. "
-                                    "Note: Searches first 100 matching files. Requires recursive=true."
-                                ),
-                            },
-                            "branch": {
-                                "type": "string",
-                                "description": "Branch name (default: configured default branch)",
-                            },
-                            "max_results": {
-                                "type": "integer",
-                                "description": "Maximum number of results (default: configured max)",
-                            },
-                            "recursive": {
-                                "type": "boolean",
-                                "description": (
-                                    "Search subdirectories recursively. Default: false (root only). "
-                                    "Set to true for deep searches in large repos (slower but thorough)."
-                                ),
-                                "default": False,
-                            },
+                "name": "search_azure_devops_files",
+                "description": (
+                    "Search for files in Azure DevOps repository "
+                    "with flexible filtering. "
+                    "⚠️ IMPORTANT: Searches only root directory by "
+                    "default (non-recursive). "
+                    "Set recursive=true to search subdirectories in "
+                    "large repos. "
+                    "\n\nSupports path patterns, file name patterns, "
+                    "extensions, and keyword search. "
+                    "Use this when user wants to list, find, or "
+                    "filter files by name, location, or type. "
+                    "Returns list of file paths matching the criteria. "
+                    "\n\nFilter patterns:\n"
+                    "- Path: 'src/' or 'path:src/Services' or "
+                    "'path:**/pipelines/**' (** = any depth, "
+                    "requires recursive=true)\n"
+                    "- File: 'file:azure-pipelines*' or "
+                    "'file:*test*' or 'file:README.md'\n"
+                    "- Extension: 'ext:yml' or 'ext:cs' or "
+                    "'ext:json'\n"
+                    "- Keyword: Search in file content "
+                    "(use wildcards: 'Azure*', '*timeout', "
+                    "requires recursive=true)\n"
+                    "- Glob patterns: ** (any depth), * (any chars), "
+                    "? (single char)\n"
+                    "\nExamples:\n"
+                    "- List root files: (no filters)\n"
+                    "- Root YAML files: ext:yml\n"
+                    "- Recursive search: ext:cs recursive:true\n"
+                    "- Deep search: path:**/pipelines/** ext:yml "
+                    "recursive:true"
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path_pattern": {
+                            "type": "string",
+                            "description": (
+                                "Path filter pattern. Examples: "
+                                "'src/', 'path:src/Services', "
+                                "'path:**/pipelines/**'. "
+                                "Note: ** patterns require recursive=true."
+                            ),
                         },
-                        "required": [],
+                        "file_pattern": {
+                            "type": "string",
+                            "description": (
+                                "File name pattern (matches only "
+                                "filename, not path). Examples: "
+                                "'file:azure-pipelines*', 'file:*test*', "
+                                "'file:README.md', '*service*.cs'. "
+                                "Supports * and ? wildcards."
+                            ),
+                        },
+                        "extension": {
+                            "type": "string",
+                            "description": (
+                                "File extension filter. Examples: "
+                                "'ext:yml', 'ext:json', 'ext:cs', 'yml', "
+                                "'.yml'"
+                            ),
+                        },
+                        "keyword": {
+                            "type": "string",
+                            "description": (
+                                "Keyword to search in file content. "
+                                "Supports wildcards. Examples: 'Azure', "
+                                "'connection timeout', 'Http*Request'. "
+                                "Note: Searches first 100 matching files. "
+                                "Requires recursive=true."
+                            ),
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": (
+                                "Branch name (default: configured " "default branch)"
+                            ),
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": (
+                                "Maximum number of results " "(default: configured max)"
+                            ),
+                        },
+                        "recursive": {
+                            "type": "boolean",
+                            "description": (
+                                "Search subdirectories recursively. "
+                                "Default: false (root only). "
+                                "Set to true for deep searches in large "
+                                "repos (slower but thorough)."
+                            ),
+                            "default": False,
+                        },
                     },
+                    "required": [],
                 },
             },
             {
-                "type": "function",
-                "function": {
-                    "name": "get_azure_devops_file",
-                    "description": (
-                        "Retrieve the full content of a file from Azure DevOps repository. "
-                        "Use this when user asks to read, show, display, or get the content "
-                        "of a specific file. Requires the full file path."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": {
-                                "type": "string",
-                                "description": "Path to the file in repository (e.g., 'src/main.cpp', '.gitignore')",
-                            },
-                            "branch": {
-                                "type": "string",
-                                "description": "Branch name (default: repository default branch)",
-                            },
+                "name": "get_azure_devops_file",
+                "description": (
+                    "Retrieve the full content of a file from Azure "
+                    "DevOps repository. Use this when user asks to "
+                    "read, show, display, or get the content of a "
+                    "specific file. Requires the full file path."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": (
+                                "Path to the file in repository "
+                                "(e.g., 'src/main.cpp', '.gitignore')"
+                            ),
                         },
-                        "required": ["file_path"],
+                        "branch": {
+                            "type": "string",
+                            "description": (
+                                "Branch name (default: repository " "default branch)"
+                            ),
+                        },
                     },
+                    "required": ["file_path"],
                 },
             },
         ]
@@ -301,7 +327,7 @@ class AzureDevOpsMCPServer:
 
         return {"success": True, **result}
 
-    async def run_stdio(self):
+    async def run_stdio(self) -> None:
         """
         Run server in stdio mode for VS Code MCP integration.
 
@@ -313,18 +339,7 @@ class AzureDevOpsMCPServer:
         if not await self.initialize(use_interactive_auth=True):
             sys.exit(1)
 
-        # Send initialization message
-        self._send_message(
-            {
-                "jsonrpc": "2.0",
-                "method": "initialized",
-                "params": {
-                    "serverInfo": {"name": "azure-devops-mcp", "version": "1.0.0"}
-                },
-            }
-        )
-
-        # Main message loop
+        # Main message loop - wait for initialize request from client
         while True:
             try:
                 line = sys.stdin.readline()
@@ -352,6 +367,18 @@ class AzureDevOpsMCPServer:
         msg_id = message.get("id")
         params = message.get("params", {})
 
+        # Handle initialize request (required by MCP protocol)
+        if method == "initialize":
+            return {
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "azure-devops-mcp", "version": "1.0.0"},
+                },
+            }
+
         if method == "tools/list":
             return {
                 "jsonrpc": "2.0",
@@ -365,10 +392,13 @@ class AzureDevOpsMCPServer:
 
             result = await self.handle_tool_call(tool_name, arguments)
 
+            # MCP requires content array format
             return {
                 "jsonrpc": "2.0",
                 "id": msg_id,
-                "result": result,
+                "result": {
+                    "content": [{"type": "text", "text": json.dumps(result, indent=2)}]
+                },
             }
 
         elif method == "ping":
@@ -380,6 +410,6 @@ class AzureDevOpsMCPServer:
 
         return None
 
-    def _send_message(self, message: Dict[str, Any]):
+    def _send_message(self, message: Dict[str, Any]) -> None:
         """Send JSON-RPC message to stdout."""
         print(json.dumps(message), flush=True)
