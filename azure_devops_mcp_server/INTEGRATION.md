@@ -56,15 +56,13 @@ Azure DevOps REST API
 
 ### Quick Setup
 
-1. **Add to VS Code mcp.json** (located in VS Code user folder):
+1. **Add to VS Code mcp.json** (located in `%APPDATA%\Code\User\` on Windows):
 
 ```json
-// mcp.json in VS Code user folder
-// Typical location: %APPDATA%\Code\User\globalStorage\rooveterinaryinc.roo-cline\mcp.json
 {
-  "mcpServers": {
+  "inputs": [],
+  "servers": {
     "azure-devops": {
-      // CRITICAL: Must use ABSOLUTE path to Python where package is installed
       "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
       "args": [
         "-m",
@@ -83,8 +81,9 @@ Azure DevOps REST API
         "pat"
       ],
       "env": {
-        "AZURE_DEVOPS_PAT": "your-personal-access-token-here"
-      }
+        "AZURE_DEVOPS_PAT": "YOUR_PAT_TOKEN_HERE"
+      },
+      "type": "stdio"
     }
   }
 }
@@ -94,10 +93,10 @@ Azure DevOps REST API
 
 ### How VS Code Copilot Discovers MCP Servers
 
-When you add `"mcpServers"` to your mcp.json:
+When you add `"servers"` to your mcp.json:
 
 1. **VS Code reads mcp.json** - On startup, VS Code reads the mcp.json file from the user folder
-2. **Copilot extension discovers servers** - The Copilot extension looks for the `"mcpServers"` configuration
+2. **Copilot extension discovers servers** - The Copilot extension looks for the `"servers"` configuration
 3. **Launches server process** - When Copilot needs the tools, it spawns the Python process using your `"command"` and `"args"`
 4. **Stdio communication** - Copilot sends MCP protocol messages via stdin, receives responses via stdout
 5. **Tool discovery** - Copilot sends `tools/list` request to get available tools
@@ -112,13 +111,14 @@ When you add `"mcpServers"` to your mcp.json:
 2. **Alternative: Use environment variables** (more secure for PAT):
 
 ```json
-// mcp.json
 {
-  "mcpServers": {
+  "inputs": [],
+  "servers": {
     "azure-devops": {
       "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
       "args": ["-m", "azure_devops_mcp_server", "--mode", "stdio"],
-      "env": {}  // Server reads from environment variables
+      "env": {},
+      "type": "stdio"
     }
   }
 }

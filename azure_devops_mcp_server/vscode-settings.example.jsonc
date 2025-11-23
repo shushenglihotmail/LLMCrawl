@@ -1,6 +1,8 @@
 {
-    // Example VS Code settings.json for using Azure DevOps MCP Server
-    // Copy this to your .vscode/settings.json (workspace or user settings)
+    // Example VS Code mcp.json for using Azure DevOps MCP Server
+    // Location: %APPDATA%\Code\User\mcp.json (Windows)
+    //           ~/Library/Application Support/Code/User/mcp.json (macOS)
+    //           ~/.config/Code/User/mcp.json (Linux)
     //
     // IMPORTANT: Replace "python" with the ABSOLUTE path to your Python interpreter
     // where azure-devops-mcp-server is installed. Examples:
@@ -14,7 +16,8 @@
     //   Windows: (Get-Command python).Source
     //   macOS/Linux: which python
     //
-    "mcpServers": {
+    "inputs": [],
+    "servers": {
         "azure-devops": {
             "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
             "args": [
@@ -37,16 +40,17 @@
             ],
             "env": {
                 // Recommended: Use PAT for reliable authentication
-                "AZURE_DEVOPS_PAT": "your-personal-access-token-here"
+                "AZURE_DEVOPS_PAT": "YOUR_PAT_TOKEN_HERE"
                 // Alternative: Use environment variables for all settings
                 // "AZURE_DEVOPS_ORG": "microsoft",
                 // "AZURE_DEVOPS_PROJECT": "OS",
                 // "AZURE_DEVOPS_REPO": "os.2020",
                 // "AZURE_DEVOPS_BRANCH": "official/rs_sparc_ctr_exp",
                 // "AZURE_DEVOPS_MAX_RESULTS": "50",
-                // "AZURE_DEVOPS_PAT": "your-pat-token",
+                // "AZURE_DEVOPS_PAT": "YOUR_PAT_TOKEN_HERE",
                 // "AZURE_DEVOPS_AUTH_MODE": "pat"
-            }
+            },
+            "type": "stdio"
         }
     }
 }

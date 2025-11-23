@@ -79,15 +79,13 @@ The MCP server runs as a **separate Python process** that VS Code Copilot commun
 
 **Step 1: Configure VS Code**
 
-Add to your **mcp.json** file in VS Code user folder (typically `%APPDATA%\Code\User\globalStorage\rooveterinaryinc.roo-cline\` on Windows):
+Add to your **mcp.json** file in VS Code user folder (typically `%APPDATA%\Code\User\` on Windows):
 
 ```json
 {
-  "mcpServers": {
+  "inputs": [],
+  "servers": {
     "azure-devops": {
-      // CRITICAL: Use ABSOLUTE path to Python where package is installed
-      // Find it with: (Get-Command python).Source  (PowerShell)
-      //           or: which python                  (bash)
       "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
       "args": [
         "-m",
@@ -103,12 +101,12 @@ Add to your **mcp.json** file in VS Code user folder (typically `%APPDATA%\Code\
         "--branch",
         "official/rs_sparc_ctr_exp",
         "--auth-mode",
-        "pat"  // or "interactive" for browser OAuth
+        "pat"
       ],
       "env": {
-        // Recommended: Use PAT for non-interactive auth
-        "AZURE_DEVOPS_PAT": "your-personal-access-token-here"
-      }
+        "AZURE_DEVOPS_PAT": "YOUR_PAT_TOKEN_HERE"
+      },
+      "type": "stdio"
     }
   }
 }
@@ -116,8 +114,8 @@ Add to your **mcp.json** file in VS Code user folder (typically `%APPDATA%\Code\
 
 **Important Notes:**
 - Use **absolute path** to Python executable (not just `"python"`)
+- Find your Python path with: `(Get-Command python).Source` (PowerShell) or `which python` (bash)
 - The Python environment only runs the MCP server - your workspace can be any language
-- User settings work globally; workspace settings only when that workspace is open
 - PAT is more reliable than interactive auth for automated scenarios
 
 **Step 2: Restart VS Code**

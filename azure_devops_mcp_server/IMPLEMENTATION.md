@@ -228,13 +228,22 @@ VS Code (Copilot)           LLMCrawl Gateway
 
 ### VS Code (stdio mode)
 
-- Add to `mcp.json` in VS Code user folder:
+- Add to `mcp.json` in `%APPDATA%\Code\User\`:
 ```json
 {
-  "mcpServers": {
+  "inputs": [],
+  "servers": {
     "azure-devops": {
-      "command": "python",
-      "args": ["-m", "azure_devops_mcp_server", "--mode", "stdio"]
+      "command": "C:\\path\\to\\python.exe",
+      "args": ["-m", "azure_devops_mcp_server", "--mode", "stdio"],
+      "env": {
+        "AZURE_DEVOPS_ORG": "your-org",
+        "AZURE_DEVOPS_PROJECT": "your-project",
+        "AZURE_DEVOPS_REPO": "your-repo",
+        "AZURE_DEVOPS_BRANCH": "main",
+        "AZURE_DEVOPS_PAT": "YOUR_PAT_TOKEN_HERE"
+      },
+      "type": "stdio"
     }
   }
 }

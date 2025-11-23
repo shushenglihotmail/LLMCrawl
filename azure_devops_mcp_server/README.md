@@ -56,20 +56,34 @@ pip install -e .
 
 ### 2. Configure VS Code
 
-Add to your **User Settings** (Ctrl+Shift+P → "Preferences: Open User Settings (JSON)"):
+Add to your **mcp.json** file (located in `%APPDATA%\Code\User\mcp.json` on Windows):
 
 ```json
 {
-  "mcpServers": {
+  "inputs": [],
+  "servers": {
     "azure-devops": {
-      "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",  // YOUR Python path
-      "args": ["-m", "azure_devops_mcp_server", "--mode", "stdio"],
+      "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
+      "args": [
+        "-m",
+        "azure_devops_mcp_server",
+        "--mode",
+        "stdio",
+        "--organization",
+        "microsoft",
+        "--project",
+        "OS",
+        "--repository",
+        "os.2020",
+        "--branch",
+        "official/rs_sparc_ctr_exp",
+        "--auth-mode",
+        "pat"
+      ],
       "env": {
-        "AZURE_DEVOPS_ORG": "microsoft",
-        "AZURE_DEVOPS_PROJECT": "OS",
-        "AZURE_DEVOPS_REPO": "os.2020",
-        "AZURE_DEVOPS_PAT": "your-pat-token"
-      }
+        "AZURE_DEVOPS_PAT": "YOUR_PAT_TOKEN_HERE"
+      },
+      "type": "stdio"
     }
   }
 }
@@ -154,11 +168,12 @@ AZURE_DEVOPS_MAX_RESULTS=50  # Default max results per query
 
 ### As VS Code MCP Server (stdio mode)
 
-Add to your VS Code MCP configuration (`mcp.json` in VS Code user folder):
+Add to your VS Code MCP configuration (`mcp.json` in `%APPDATA%\Code\User\` on Windows):
 
 ```json
 {
-  "mcpServers": {
+  "inputs": [],
+  "servers": {
     "azure-devops": {
       "command": "C:\\path\\to\\python.exe",
       "args": [
@@ -173,13 +188,14 @@ Add to your VS Code MCP configuration (`mcp.json` in VS Code user folder):
         "--repository",
         "os.2020",
         "--branch",
-        "main",
+        "official/rs_sparc_ctr_exp",
         "--auth-mode",
         "pat"
       ],
       "env": {
-        "AZURE_DEVOPS_PAT": "your-personal-access-token-here"
-      }
+        "AZURE_DEVOPS_PAT": "YOUR_PAT_TOKEN_HERE"
+      },
+      "type": "stdio"
     }
   }
 }
