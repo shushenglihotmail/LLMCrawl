@@ -5,7 +5,9 @@ import os
 import sys
 import time
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 from azure_devops_mcp_server.azure_client import AzureDevOpsClient
 
 # Load .env from parent directory

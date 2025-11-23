@@ -7,7 +7,6 @@ import base64
 import logging
 import webbrowser
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote
 
 import httpx
 from azure.devops.connection import Connection
@@ -29,8 +28,8 @@ class AzureDevOpsClient:
         organization: str,
         project: str,
         repository: str,
+        branch: str,
         pat: Optional[str] = None,
-        branch: Optional[str] = None,
         max_results: int = 50,
     ):
         """
@@ -40,15 +39,15 @@ class AzureDevOpsClient:
             organization: Azure DevOps organization name
             project: Project name
             repository: Repository name
+            branch: Branch name (required)
             pat: Personal Access Token (optional, interactive auth if None)
-            branch: Default branch name (None = repo default branch)
             max_results: Default maximum results per query (default: 50)
         """
         self.organization = organization
         self.project = project
         self.repository = repository
-        self.pat = pat
         self.branch = branch
+        self.pat = pat
         self.max_results = max_results
         self._access_token: Optional[str] = None
         self._connection: Optional[Connection] = None
@@ -156,6 +155,8 @@ class AzureDevOpsClient:
         query: str,
         file_type: Optional[str] = None,
         max_results: int = 20,
+        branch: str = "",
+        path: str = "/",
     ) -> List[Dict[str, Any]]:
         """
         Search for code in the repository.
@@ -164,12 +165,19 @@ class AzureDevOpsClient:
             query: Search query
             file_type: Filter by file extension (e.g., "*.cpp", "*.h")
             max_results: Maximum number of results
+            branch: Branch to search (uses configured branch if empty string)
+            path: Path filter (default: "/" for root)
 
         Returns:
             List of search results with file path, content preview, etc.
         """
         if not self._access_token:
             raise RuntimeError("Not authenticated")
+
+        # Use provided branch or fall back to configured branch (always set)
+        search_branch = branch or self.branch
+        # Use root path if not specified
+        search_path = path or "/"
 
         try:
             # Build search request
@@ -180,14 +188,19 @@ class AzureDevOpsClient:
             url = f"https://almsearch.dev.azure.com/{self.organization}/_apis/search/codesearchresults"
             params = {"api-version": "6.0-preview.1"}
 
+            # Build filters - always include Repository, Project, Branch, and Path
+            filters = {
+                "Repository": [self.repository],
+                "Project": [self.project],
+                "Branch": [search_branch],  # Always include branch filter
+                "Path": [search_path],  # Always include path filter
+            }
+
             payload = {
                 "searchText": search_text,
                 "$top": max_results,
                 "$skip": 0,
-                "filters": {
-                    "Repository": [self.repository],
-                    "Project": [self.project],
-                },
+                "filters": filters,
             }
 
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -291,10 +304,23 @@ class AzureDevOpsClient:
                 if extension:
                     file_ext = extension.replace("ext:", "").replace(".", "").strip()
 
+                # Prepare path filter for Code Search API
+                search_path = "/"
+                if path_pattern:
+                    # Remove "path:" prefix if present
+                    search_path = (
+                        path_pattern.replace("path:", "").strip().strip('"').lstrip("/")
+                    )
+                    # For Code Search API, ensure path starts with /
+                    if not search_path.startswith("/"):
+                        search_path = "/" + search_path
+
                 code_results = await self.search_code(
                     query=search_query,
                     file_type=file_ext,
                     max_results=max_results,
+                    branch=branch,
+                    path=search_path,
                 )
 
                 # Convert code search results to file search format
