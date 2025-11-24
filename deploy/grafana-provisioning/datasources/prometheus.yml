@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../grafana-datasource.schema.json
 apiVersion: 1
 
 datasources:

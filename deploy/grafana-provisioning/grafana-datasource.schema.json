@@ -1,0 +1,65 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "apiVersion": {
+            "type": "integer"
+        },
+        "datasources": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "type": {
+                        "type": "string"
+                    },
+                    "access": {
+                        "type": "string"
+                    },
+                    "url": {
+                        "type": "string"
+                    },
+                    "password": {
+                        "type": "string"
+                    },
+                    "user": {
+                        "type": "string"
+                    },
+                    "database": {
+                        "type": "string"
+                    },
+                    "basicAuth": {
+                        "type": "boolean"
+                    },
+                    "basicAuthUser": {
+                        "type": "string"
+                    },
+                    "basicAuthPassword": {
+                        "type": "string"
+                    },
+                    "withCredentials": {
+                        "type": "boolean"
+                    },
+                    "isDefault": {
+                        "type": "boolean"
+                    },
+                    "jsonData": {
+                        "type": "object"
+                    },
+                    "secureJsonData": {
+                        "type": "object"
+                    },
+                    "version": {
+                        "type": "integer"
+                    },
+                    "editable": {
+                        "type": "boolean"
+                    }
+                }
+            }
+        }
+    }
+}
