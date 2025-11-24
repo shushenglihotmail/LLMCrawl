@@ -181,6 +181,7 @@ services:
       - ./logs:/app/logs
       - C:/os:/data/files  # Mount local C:\os folder
       - mcp_vector_db:/data/mcp_vector_db
+    command: uvicorn mcp_server.main:app --host 0.0.0.0 --port 8003
     networks:
       - webrag-network
     healthcheck:

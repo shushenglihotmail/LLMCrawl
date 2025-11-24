@@ -200,7 +200,7 @@ FIRECRAWL_AUTH_STORAGE_STATE={"cookies": [{"name": "sessionid", "value": "abc123
 ```powershell
 .\scripts\auth.ps1 login https://company.sharepoint.com
 .\scripts\auth.ps1 apply company_sharepoint_com
-docker-compose restart crawler
+cd deploy && docker-compose restart crawler
 ```
 
 **Option B: Azure AD (Automated)**
@@ -218,7 +218,7 @@ AZURE_SCOPE=https://graph.microsoft.com/.default
 ```powershell
 .\scripts\auth.ps1 login https://wiki.company.com
 .\scripts\auth.ps1 apply wiki_company_com
-docker-compose restart crawler
+cd deploy && docker-compose restart crawler
 ```
 
 ### REST API with Key
@@ -259,10 +259,10 @@ FIRECRAWL_AUTH_PASSWORD=password123
 
 ```powershell
 # View auth status
-docker-compose logs crawler | Select-String "auth"
+cd deploy && docker-compose logs crawler | Select-String "auth"
 
 # Check for failures
-docker-compose logs crawler | Select-String "401|403"
+cd deploy && docker-compose logs crawler | Select-String "401|403"
 ```
 
 ---
@@ -280,7 +280,7 @@ docker-compose logs crawler | Select-String "401|403"
 **Example:**
 ```powershell
 # ❌ WRONG - Won't load new cookies from .env
-docker-compose restart crawler
+cd deploy && docker-compose restart crawler
 
 # ✅ CORRECT - Loads new cookies from .env
 cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
@@ -416,8 +416,8 @@ AZURE_SCOPE=https://graph.microsoft.com/.default
 .\scripts\test-azure-ad.ps1                 # Test Azure AD
 
 # Debugging
-docker-compose logs crawler | Select-String "auth"
-docker-compose logs crawler | Select-String "401|403"
+cd deploy && docker-compose logs crawler | Select-String "auth"
+cd deploy && docker-compose logs crawler | Select-String "401|403"
 
 # Recreate crawler (after updating .env)
 cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler

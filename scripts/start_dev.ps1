@@ -9,15 +9,15 @@ Write-Host "🚀 LLMCrawl Development Environment Quick Start" -ForegroundColor 
 Write-Host "=============================================="
 
 # Check if .env exists
-if (!(Test-Path ".env")) {
-    Write-Host "❌ .env file not found!" -ForegroundColor Red
+if (!(Test-Path "deploy/.env")) {
+    Write-Host "❌ deploy/.env file not found!" -ForegroundColor Red
     Write-Host "Please run setup first:"
     Write-Host "  .\scripts\setup_dev.ps1"
     exit 1
 }
 
 # Check if OpenAI API key is configured
-$envContent = Get-Content ".env" -Raw
+$envContent = Get-Content "deploy/.env" -Raw
 if ($envContent -match "your_openai_key_here") {
     Write-Host "⚠️  Please configure your API keys in .env file" -ForegroundColor Yellow
     Write-Host "   Edit .env and add your OPENAI_API_KEY"

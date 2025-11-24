@@ -14,7 +14,9 @@ def run_command(cmd, check=True):
     """Run a shell command and print output."""
     print(f"Running: {cmd}")
     try:
-        result = subprocess.run(cmd, shell=True, check=check, capture_output=True, text=True)
+        result = subprocess.run(
+            cmd, shell=True, check=check, capture_output=True, text=True
+        )
         if result.stdout:
             print(result.stdout)
         return result
@@ -36,7 +38,7 @@ def create_venv():
 
 def get_pip_command():
     """Get the correct pip command based on OS."""
-    if os.name == 'nt':  # Windows
+    if os.name == "nt":  # Windows
         return "venv\\Scripts\\pip"
     else:  # Unix/Linux/macOS
         return "venv/bin/pip"
@@ -44,7 +46,7 @@ def get_pip_command():
 
 def get_python_command():
     """Get the correct python command based on OS."""
-    if os.name == 'nt':  # Windows
+    if os.name == "nt":  # Windows
         return "venv\\Scripts\\python"
     else:  # Unix/Linux/macOS
         return "venv/bin/python"
@@ -53,19 +55,19 @@ def get_python_command():
 def install_requirements():
     """Install all Python dependencies."""
     pip_cmd = get_pip_command()
-    
+
     # Upgrade pip first
     run_command(f"{pip_cmd} install --upgrade pip")
-    
+
     # Install requirements in order
     requirements_files = [
         "requirements/gateway.txt",
-        "requirements/crawler.txt", 
+        "requirements/crawler.txt",
         "requirements/indexer.txt",
         "requirements/test.txt",
-        "requirements/dev.txt"
+        "requirements/dev.txt",
     ]
-    
+
     for req_file in requirements_files:
         if os.path.exists(req_file):
             print(f"Installing dependencies from {req_file}...")
@@ -90,40 +92,41 @@ def setup_pre_commit():
 
 def create_env_file():
     """Create .env file from example if it doesn't exist."""
-    if not os.path.exists(".env") and os.path.exists(".env.example"):
-        print("Creating .env file from .env.example...")
+    if not os.path.exists("deploy/.env") and os.path.exists("deploy/.env.example"):
+        print("Creating deploy/.env file from deploy/.env.example...")
         import shutil
-        shutil.copy(".env.example", ".env")
-        print("Please edit .env file with your API keys and configuration.")
+
+        shutil.copy("deploy/.env.example", "deploy/.env")
+        print("Please edit deploy/.env file with your API keys and configuration.")
 
 
 def main():
     """Main setup function."""
     print("🚀 Setting up LLMCrawl development environment...")
-    
+
     # Check Python version
     if sys.version_info < (3, 10):
         print("❌ Python 3.10+ is required!")
         sys.exit(1)
-    
+
     # Change to project root directory (parent of scripts)
     project_root = Path(__file__).parent.parent
     os.chdir(project_root)
-    
+
     # Setup steps
     create_venv()
     install_requirements()
     install_playwright()
     setup_pre_commit()
     create_env_file()
-    
+
     print("\n✅ Development environment setup complete!")
     print("\nNext steps:")
-    print("1. Edit .env file with your API keys")
-    print("2. Run 'make dev-up' to start development services") 
+    print("1. Edit deploy/.env file with your API keys")
+    print("2. Run 'make dev-up' to start development services")
     print("3. Run 'make health' to verify all services are running")
-    
-    if os.name == 'nt':  # Windows
+
+    if os.name == "nt":  # Windows
         print("4. Activate environment: venv\\Scripts\\activate")
     else:  # Unix/Linux/macOS
         print("4. Activate environment: source venv/bin/activate")

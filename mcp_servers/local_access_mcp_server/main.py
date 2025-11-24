@@ -88,147 +88,133 @@ async def health_check():
 @app.get("/tools")
 async def get_tools():
     """
-    Return tool definitions in OpenAI function calling format.
+    Return tool definitions in MCP format.
     This endpoint is called by the gateway to get available tools.
     """
     tools = [
         {
-            "type": "function",
-            "function": {
-                "name": "read_local_file",
-                "description": (
-                    "Read and return the content of a local file. "
-                    "The file path must be relative to the configured root folder, "
-                    "or an absolute path that is within the root folder. "
-                    "Use this when the user asks to 'read', 'show', 'display', or "
-                    "'get content of' a specific file."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": (
-                                "Path to the file (relative to root folder or "
-                                "absolute path within root folder)"
-                            ),
-                        }
-                    },
-                    "required": ["file_path"],
+            "name": "read_local_file",
+            "description": (
+                "Read and return the content of a local file. "
+                "The file path must be relative to the configured root folder, "
+                "or an absolute path that is within the root folder. "
+                "Use this when the user asks to 'read', 'show', 'display', or "
+                "'get content of' a specific file."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": (
+                            "Path to the file (relative to root folder or "
+                            "absolute path within root folder)"
+                        ),
+                    }
                 },
+                "required": ["file_path"],
             },
         },
         {
-            "type": "function",
-            "function": {
-                "name": "list_files",
-                "description": (
-                    "List files in a directory under the root folder. "
-                    "Supports filtering by file extension and recursive search. "
-                    "Use this when the user asks to 'list', 'find files', 'show files' "
-                    "in a specific folder."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "folder_path": {
-                            "type": "string",
-                            "description": (
-                                "Path to the folder (relative to root or absolute "
-                                "within root)"
-                            ),
-                            "default": ".",
-                        },
-                        "extension": {
-                            "type": "string",
-                            "description": (
-                                "Filter by file extension (e.g., '.json', '.txt'). "
-                                "Leave empty for all files."
-                            ),
-                            "default": "",
-                        },
-                        "recursive": {
-                            "type": "boolean",
-                            "description": "Whether to search subdirectories",
-                            "default": False,
-                        },
+            "name": "list_files",
+            "description": (
+                "List files in a directory under the root folder. "
+                "Supports filtering by file extension and recursive search. "
+                "Use this when the user asks to 'list', 'find files', 'show files' "
+                "in a specific folder."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "folder_path": {
+                        "type": "string",
+                        "description": (
+                            "Path to the folder (relative to root or absolute "
+                            "within root)"
+                        ),
+                        "default": ".",
                     },
-                    "required": ["folder_path"],
+                    "extension": {
+                        "type": "string",
+                        "description": (
+                            "Filter by file extension (e.g., '.json', '.txt'). "
+                            "Leave empty for all files."
+                        ),
+                        "default": "",
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "Whether to search subdirectories",
+                        "default": False,
+                    },
                 },
+                "required": ["folder_path"],
             },
         },
         {
-            "type": "function",
-            "function": {
-                "name": "search_file_content",
-                "description": (
-                    "Search for files containing specific text or matching a query. "
-                    "Files are indexed and searchable using semantic similarity. "
-                    "Use this when the user asks to 'find files containing', "
-                    "'search for', or 'look for files with' specific content."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Search query or text to find",
-                        },
-                        "folder_path": {
-                            "type": "string",
-                            "description": (
-                                "Limit search to specific folder (relative to root)"
-                            ),
-                            "default": ".",
-                        },
-                        "top_k": {
-                            "type": "integer",
-                            "description": "Number of results to return",
-                            "default": 5,
-                        },
+            "name": "search_file_content",
+            "description": (
+                "Search for files containing specific text or matching a query. "
+                "Files are indexed and searchable using semantic similarity. "
+                "Use this when the user asks to 'find files containing', "
+                "'search for', or 'look for files with' specific content."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query or text to find",
                     },
-                    "required": ["query"],
+                    "folder_path": {
+                        "type": "string",
+                        "description": (
+                            "Limit search to specific folder (relative to root)"
+                        ),
+                        "default": ".",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Number of results to return",
+                        "default": 5,
+                    },
                 },
+                "required": ["query"],
             },
         },
         {
-            "type": "function",
-            "function": {
-                "name": "index_files",
-                "description": (
-                    "Index files in a folder for semantic search. "
-                    "This processes and embeds file content for efficient searching. "
-                    "Use this before searching if files haven't been indexed yet."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "folder_path": {
-                            "type": "string",
-                            "description": "Path to folder to index (relative to root)",
-                            "default": ".",
-                        },
-                        "recursive": {
-                            "type": "boolean",
-                            "description": "Whether to index subdirectories",
-                            "default": True,
-                        },
-                        "extensions": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": (
-                                "File extensions to index (e.g., ['.txt', '.json']). "
-                                "Empty for all text files."
-                            ),
-                            "default": [],
-                        },
+            "name": "index_files",
+            "description": (
+                "Index files in a folder for semantic search. "
+                "This processes and embeds file content for efficient searching. "
+                "Use this when the user asks to 'index', 'scan', or 'process' "
+                "files in a folder."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "folder_path": {
+                        "type": "string",
+                        "description": (
+                            "Path to the folder to index (relative to root)"
+                        ),
+                        "default": ".",
                     },
-                    "required": ["folder_path"],
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "Whether to index subdirectories",
+                        "default": True,
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Force re-indexing even if unchanged",
+                        "default": False,
+                    },
                 },
+                "required": ["folder_path"],
             },
         },
     ]
-
     return {"tools": tools}
 
 

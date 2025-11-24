@@ -111,7 +111,7 @@ Write-Info "Installing Python dependencies..."
 
 $requirementFiles = @(
     "requirements\gateway.txt",
-    "requirements\crawler.txt", 
+    "requirements\crawler.txt",
     "requirements\indexer.txt",
     "requirements\test.txt",
     "requirements\dev.txt"
@@ -137,23 +137,23 @@ if (Test-Path ".pre-commit-config.yaml") {
 }
 
 # Create .env file
-if (!(Test-Path ".env") -and (Test-Path ".env.example")) {
-    Write-Info "Creating .env file from example..."
-    Copy-Item ".env.example" ".env"
-    Write-Warning "Please edit .env file with your API keys!"
+if (!(Test-Path "deploy/.env") -and (Test-Path "deploy/.env.example")) {
+    Write-Info "Creating deploy/.env file from example..."
+    Copy-Item "deploy/.env.example" "deploy/.env"
+    Write-Warning "Please edit deploy/.env file with your API keys!"
 }
 
 # Docker setup
 if (!$SkipDocker) {
     Write-Info "Setting up Docker environment..."
-    
+
     # Create network if it doesn't exist
     $networkExists = docker network ls --filter name=webrag-network --format "{{.Name}}" | Select-String "webrag-network"
     if (!$networkExists) {
         docker network create webrag-network
         Write-Success "Docker network created"
     }
-    
+
     Write-Info "You can now run 'make dev-up' to start the development environment"
 }
 
@@ -167,7 +167,7 @@ Write-Host "4. Run 'make health' to verify services are running"
 Write-Host ""
 Write-Info "Available commands:"
 Write-Host "  make dev-up      - Start development environment"
-Write-Host "  make dev-down    - Stop development environment"  
+Write-Host "  make dev-down    - Stop development environment"
 Write-Host "  make dev-logs    - View development logs"
 Write-Host "  make test-dev    - Run tests in local environment"
 Write-Host "  make pre-commit  - Run code quality checks"

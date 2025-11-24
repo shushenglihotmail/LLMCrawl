@@ -2,14 +2,14 @@ services:
   # Override services for development with volume mounts for hot reload
   gateway:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile.gateway
     container_name: web-rag-gateway-dev
     ports:
       - "8000:8000"
     volumes:
-      - ./gateway:/app/gateway:rw
-      - ./requirements:/app/requirements:ro
+      - ../gateway:/app/gateway:rw
+      - ../requirements:/app/requirements:ro
     env_file:
       - .env
     environment:
@@ -29,14 +29,14 @@ services:
 
   crawler:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile.crawler
     container_name: web-rag-crawler-dev
     ports:
       - "8001:8001"
     volumes:
-      - ./crawler:/app/crawler:rw
-      - ./requirements:/app/requirements:ro
+      - ../crawler:/app/crawler:rw
+      - ../requirements:/app/requirements:ro
     environment:
       - ENVIRONMENT=development
       - LOG_LEVEL=DEBUG
@@ -51,14 +51,14 @@ services:
 
   indexer:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile.indexer
     container_name: web-rag-indexer-dev
     ports:
       - "8002:8002"
     volumes:
-      - ./indexer:/app/indexer:rw
-      - ./requirements:/app/requirements:ro
+      - ../indexer:/app/indexer:rw
+      - ../requirements:/app/requirements:ro
     environment:
       - ENVIRONMENT=development
       - LOG_LEVEL=DEBUG
@@ -105,13 +105,13 @@ services:
   # MCP Server for local file operations
   mcp-server:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile.mcp_server
     container_name: web-rag-mcp-server
     ports:
       - "8003:8003"
     volumes:
-      - ./mcp_servers/local_access_mcp_server:/app/mcp_server:rw
+      - ../mcp_servers/local_access_mcp_server:/app/mcp_server:rw
       - C:/os:/data/files  # Mount local C:\os folder
       - mcp_vector_db:/data/mcp_vector_db
     environment:

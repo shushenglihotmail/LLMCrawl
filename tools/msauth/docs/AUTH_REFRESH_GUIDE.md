@@ -63,7 +63,7 @@ Content length: 35570 bytes
 ### 2. Monitor Crawler Logs
 Watch for 401 errors in crawler logs:
 ```powershell
-docker-compose logs crawler -f | Select-String "401|authentication|expired"
+cd deploy && docker-compose logs crawler -f | Select-String "401|authentication|expired"
 ```
 
 ## Refresh Options
@@ -158,6 +158,7 @@ Based on Azure App Service Easy Auth defaults:
 Select-String -Path .env -Pattern "AppServiceAuthSession"
 
 # Force restart
+cd deploy
 docker-compose down
 docker-compose up -d crawler
 ```

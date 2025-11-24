@@ -86,9 +86,17 @@ try {
 
 # Show 401 errors from logs
 Write-Host "`nRecent Auth Errors:" -ForegroundColor Cyan
-$logs = docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs --tail=100 crawler 2>$null |
-        Select-String -Pattern "401|Unauthorized" |
-        Select-Object -Last 3
+$DeployPath = Join-Path $PSScriptRoot "../deploy"
+if (Test-Path $DeployPath) {
+    Push-Location $DeployPath
+    try {
+        $logs = docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs --tail=100 crawler 2>$null |
+                Select-String -Pattern "401|Unauthorized" |
+                Select-Object -Last 3
+    } finally {
+        Pop-Location
+    }
+}
 
 if ($logs) {
     $logs | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
@@ -103,7 +111,7 @@ Write-Host "# Step 1: Refresh authentication (browser will open)" -ForegroundCol
 Write-Host ".\venv\Scripts\python.exe tools\msauth\interactive_auth.py $SiteUrl" -ForegroundColor White
 Write-Host ""
 Write-Host "# Step 2: Recreate crawler to reload .env with new cookies" -ForegroundColor Cyan
-Write-Host "docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler" -ForegroundColor White
+Write-Host "cd deploy; docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler" -ForegroundColor White
 Write-Host ""
 Write-Host "# Step 3: Verify auth is working" -ForegroundColor Cyan
 Write-Host ".\scripts\check-auth-status.ps1 $SiteUrl" -ForegroundColor White

@@ -137,7 +137,7 @@ Authenticated Page Access
 
 ### Docker Container Issues
 - Restart container after config changes
-- Rebuild if code changes: `docker-compose up --build -d crawler`
+- Rebuild if code changes: `cd deploy && docker-compose up --build -d crawler`
 
 ## Example: OSGWiki (www.osgwiki.com)
 

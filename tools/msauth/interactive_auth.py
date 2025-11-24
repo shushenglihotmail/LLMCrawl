@@ -7,13 +7,13 @@ interactively, then captures and saves the authentication credentials
 
 Usage:
     python tools/interactive_auth.py https://internal-site.com
-    python tools/interactive_auth.py --name sharepoint https://company.sharepoint.com
+    python tools/interactive_auth.py --name sharepoint \
+        https://company.sharepoint.com
 """
 
 import argparse
 import asyncio
 import json
-import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -77,7 +77,7 @@ class InteractiveAuth:
 
         async with async_playwright() as p:
             # Launch Microsoft Edge browser with full UI
-            # Note: We can't use launch_persistent_context if Edge is already running
+            # Note: We can't use launch_persistent_context if Edge is running
             # Instead, use regular browser and capture storage state after auth
             browser = await p.chromium.launch(
                 headless=headless,
@@ -115,7 +115,7 @@ class InteractiveAuth:
                         token = auth_header.replace("Bearer ", "")
                         if token and token not in captured_tokens:
                             captured_tokens.append(token)
-                            print(f"   🎫 Captured Bearer token from request")
+                            print("   🎫 Captured Bearer token from request")
 
                     # Check for tokens in response headers
                     response_auth = response.headers.get("authorization", "")
@@ -123,10 +123,11 @@ class InteractiveAuth:
                         token = response_auth.replace("Bearer ", "")
                         if token and token not in captured_tokens:
                             captured_tokens.append(token)
-                            print(f"   🎫 Captured Bearer token from response")
+                            print("   🎫 Captured Bearer token from response")
 
                     # Check for tokens in response body (JSON)
-                    if "application/json" in response.headers.get("content-type", ""):
+                    content_type = response.headers.get("content-type", "")
+                    if "application/json" in content_type:
                         try:
                             body = await response.json()
                             # Common OAuth2 token fields
@@ -141,11 +142,12 @@ class InteractiveAuth:
                                     if token not in captured_tokens:
                                         captured_tokens.append(token)
                                         print(
-                                            f"   🎫 Captured {field} from response body"
+                                            f"   🎫 Captured {field} "
+                                            "from response body"
                                         )
-                        except:
+                        except Exception:
                             pass
-                except Exception as e:
+                except Exception:
                     pass  # Silently ignore errors in interception
 
             page.on("response", handle_response)
@@ -165,9 +167,8 @@ class InteractiveAuth:
                 print(f"   ⚠️  Navigation message: {e}")
                 print("   Continuing anyway - browser should still be open")
 
-            await asyncio.sleep(
-                2
-            )  # Give browser time to complete redirects and token requests
+            # Give browser time to complete redirects and token requests
+            await asyncio.sleep(2)
 
             print("✅ Browser is open - please complete authentication:")
             print("   1. Sign in with your Microsoft credentials")
@@ -212,20 +213,25 @@ class InteractiveAuth:
             for c in cdp_cookies_immediate:
                 if "osgwiki" in c.get("domain", ""):
                     print(
-                        f"   ✅ {c.get('name')}: {c.get('domain')} (httpOnly={c.get('httpOnly', False)}, path={c.get('path', '/')})"
+                        f"   ✅ {c.get('name')}: {c.get('domain')} "
+                        f"(httpOnly={c.get('httpOnly', False)}, "
+                        f"path={c.get('path', '/')})"
                     )
 
             print("\n🔍 URL-specific cookie capture - all names:")
             for c in cdp_cookies_for_url:
                 if "osgwiki" in c.get("domain", ""):
                     print(
-                        f"   ✅ {c.get('name')}: {c.get('domain')} (httpOnly={c.get('httpOnly', False)}, path={c.get('path', '/')})"
+                        f"   ✅ {c.get('name')}: {c.get('domain')} "
+                        f"(httpOnly={c.get('httpOnly', False)}, "
+                        f"path={c.get('path', '/')})"
                     )
 
             # Use the URL-specific cookies as they might be more complete
             if len(cdp_cookies_for_url) > len(cdp_cookies_immediate):
                 print(
-                    f"\n📌 Using URL-specific cookies ({len(cdp_cookies_for_url)} cookies)"
+                    f"\n📌 Using URL-specific cookies "
+                    f"({len(cdp_cookies_for_url)} cookies)"
                 )
                 cdp_cookies_immediate = cdp_cookies_for_url
             print()
@@ -247,7 +253,8 @@ class InteractiveAuth:
                         c for c in cookies_before if "osgwiki" in c.get("domain", "")
                     ]
                     print(
-                        f"🍪 Cookies for osgwiki before navigation: {len(osgwiki_cookies_before)}"
+                        f"🍪 Cookies for osgwiki before navigation: "
+                        f"{len(osgwiki_cookies_before)}"
                     )
                     for c in osgwiki_cookies_before:
                         print(f"   - {c.get('name')}: {c.get('domain')}")
@@ -256,7 +263,9 @@ class InteractiveAuth:
                     target_domain = urlparse(url).netloc
                     current_domain = urlparse(current_url).netloc
                     if target_domain not in current_domain:
-                        print(f"🔄 Navigating back to {url} to capture auth cookies...")
+                        print(
+                            f"🔄 Navigating back to {url} " "to capture auth cookies..."
+                        )
                         await page.goto(url, wait_until="networkidle", timeout=30000)
                         await asyncio.sleep(3)  # Give cookies more time to be set
                         print(f"✅ Successfully navigated to {page.url}")
@@ -267,7 +276,8 @@ class InteractiveAuth:
                             c for c in cookies_after if "osgwiki" in c.get("domain", "")
                         ]
                         print(
-                            f"🍪 Cookies for osgwiki after navigation: {len(osgwiki_cookies_after)}"
+                            f"🍪 Cookies for osgwiki after navigation: "
+                            f"{len(osgwiki_cookies_after)}"
                         )
                         for c in osgwiki_cookies_after:
                             print(f"   - {c.get('name')}: {c.get('domain')}")
@@ -285,7 +295,8 @@ class InteractiveAuth:
 
             # Also capture storage state (for compatibility)
             print(
-                "💾 Capturing storage state (cookies, localStorage, sessionStorage)..."
+                "💾 Capturing storage state "
+                "(cookies, localStorage, sessionStorage)..."
             )
             storage_state = await context.storage_state()
             storage_cookies = storage_state.get("cookies", [])
@@ -294,7 +305,8 @@ class InteractiveAuth:
             cookie_map = {(c.get("name"), c.get("domain")): c for c in storage_cookies}
             for c in cdp_cookies:
                 key = (c.get("name"), c.get("domain"))
-                cookie_map[key] = c  # CDP cookies override storage_state cookies
+                # CDP cookies override storage_state cookies
+                cookie_map[key] = c
 
             cookies = list(cookie_map.values())
             storage_state["cookies"] = cookies
@@ -304,7 +316,7 @@ class InteractiveAuth:
             from collections import Counter
 
             cookie_domains = Counter(c.get("domain", "unknown") for c in cookies)
-            print(f"   Cookie distribution:")
+            print("   Cookie distribution:")
             for domain, count in sorted(cookie_domains.items(), key=lambda x: -x[1]):
                 print(f"   - {domain}: {count} cookies")
 
@@ -355,7 +367,7 @@ class InteractiveAuth:
                     else ""
                 )
             else:
-                print(f"⚠️  No bearer tokens captured - site may use cookie-based auth")
+                print("⚠️  No bearer tokens captured - site may use cookie-based auth")
 
             await browser.close()
 
@@ -391,7 +403,7 @@ class InteractiveAuth:
             json.dump(auth_data, f, indent=2)
 
         print(f"\n✅ Authentication saved to: {auth_file}")
-        print(f"📊 Summary:")
+        print("📊 Summary:")
         print(f"   - Cookies: {len(cookies)}")
         print(f"   - LocalStorage: {len(local_storage)}")
         print(f"   - SessionStorage: {len(session_storage)}")
@@ -409,7 +421,7 @@ class InteractiveAuth:
 
         return auth_data
 
-    async def _extract_bearer_tokens(self, page) -> List[str]:
+    async def _extract_bearer_tokens(self, page: object) -> List[str]:
         """Try to extract bearer tokens from page."""
         tokens = []
 
@@ -422,7 +434,7 @@ class InteractiveAuth:
                     const key = localStorage.key(i);
                     const value = localStorage.getItem(key);
                     // Look for JWT-like patterns
-                    if (value && value.match(/^eyJ[A-Za-z0-9-_=]+\\.eyJ[A-Za-z0-9-_=]+\\.[A-Za-z0-9-_.+/=]*$/)) {
+                    if (value && value.match(/^eyJ[A-Za-z0-9-_=]+\\.eyJ[A-Za-z0-9-_=]+\\.[A-Za-z0-9-_.+/=]*$/)) {  # noqa: E501
                         tokens.push(value);
                     }
                 }
@@ -451,17 +463,22 @@ class InteractiveAuth:
             return earliest.strftime("%Y-%m-%d %H:%M:%S")
         return None
 
-    def apply_to_env(self, name: str, env_file: str = ".env") -> bool:
+    def apply_to_env(self, name: str, env_file: str = "deploy/.env") -> bool:
         """
         Apply saved auth credentials to .env file.
 
         Args:
             name: Profile name
-            env_file: Path to .env file
+            env_file: Path to .env file (default: deploy/.env)
 
         Returns:
             True if successful
         """
+        # Check if env_file exists, else try root .env
+        if not Path(env_file).exists() and Path(".env").exists():
+            print(f"⚠️  {env_file} not found, falling back to .env")
+            env_file = ".env"
+
         auth_file = self.auth_dir / f"{name}.json"
         if not auth_file.exists():
             print(f"❌ Auth profile '{name}' not found")
@@ -482,9 +499,9 @@ class InteractiveAuth:
 
         print(f"\n📝 Applying auth profile '{name}' to {env_file}")
 
-        # Store FULL cookie objects with all attributes (domain, httpOnly, secure, etc.)
+        # Store FULL cookie objects with all attributes (domain, httpOnly, etc.)
         # This is needed for proper authentication in Playwright
-        cookies_list = auth_data["cookies"]
+        # cookies_list = auth_data["cookies"]
 
         # Build headers dict (include bearer tokens if found)
         headers_dict = {}
@@ -500,7 +517,7 @@ class InteractiveAuth:
 
         # Remove old auth settings
         new_lines = []
-        skip_next = False
+        # skip_next = False
         for line in env_lines:
             if any(
                 line.startswith(prefix)
@@ -521,7 +538,8 @@ class InteractiveAuth:
         # Store the full storage_state for Playwright to restore entire session
         if auth_data.get("storage_state"):
             new_lines.append(
-                f"FIRECRAWL_AUTH_STORAGE_STATE={json.dumps(auth_data['storage_state'])}\n"
+                f"FIRECRAWL_AUTH_STORAGE_STATE="
+                f"{json.dumps(auth_data['storage_state'])}\n"
             )
         if headers_dict:
             new_lines.append(f"FIRECRAWL_AUTH_HEADERS={json.dumps(headers_dict)}\n")
@@ -547,10 +565,11 @@ class InteractiveAuth:
             f.writelines(new_lines)
 
         print(f"✅ Updated {env_file}")
-        print(f"\n📋 Next steps:")
-        print(
-            f"   1. Recreate crawler (to reload .env): docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler"
-        )
+        print("\n📋 Next steps:")
+        print("   1. Recreate crawler (to reload .env):")
+        print("      cd deploy")
+        print("      docker-compose up -d --force-recreate crawler")
+        print("      cd ..")
         print(f"   2. Test: .\\scripts\\check-auth-status.ps1 {auth_data['url']}")
 
         return True
@@ -586,7 +605,7 @@ class InteractiveAuth:
                 if expires != "Unknown":
                     expires_dt = datetime.fromisoformat(expires)
                     if datetime.now() > expires_dt:
-                        print(f"   ⚠️  STATUS: EXPIRED")
+                        print("   ⚠️  STATUS: EXPIRED")
                     else:
                         remaining = expires_dt - datetime.now()
                         hours = remaining.total_seconds() / 3600
@@ -621,7 +640,8 @@ Examples:
   python tools/msauth/interactive_auth.py https://internal-site.com
 
   # Authenticate with custom profile name
-  python tools/msauth/interactive_auth.py --name sharepoint https://company.sharepoint.com
+  python tools/msauth/interactive_auth.py --name sharepoint \\
+      https://company.sharepoint.com
 
   # Apply saved credentials to .env
   python tools/msauth/interactive_auth.py --apply sharepoint
@@ -647,7 +667,10 @@ Examples:
         "--headless", action="store_true", help="Run browser in headless mode"
     )
     parser.add_argument(
-        "--apply", "-a", metavar="PROFILE", help="Apply saved profile to .env file"
+        "--apply",
+        "-a",
+        metavar="PROFILE",
+        help="Apply saved profile to .env file",
     )
     parser.add_argument(
         "--list", "-l", action="store_true", help="List saved auth profiles"
@@ -718,33 +741,35 @@ Examples:
         if has_app_service_cookie:
             print("\n✅ AppServiceAuthSession cookie captured!")
             print("\n📋 Next steps - Copy/Paste these commands:")
-            print(f"\n# Step 1: Apply cookies to .env")
+            print("\n# Step 1: Apply cookies to .env")
             print(
-                f".\\venv\\Scripts\\python.exe tools\\msauth\\interactive_auth.py --apply {profile_name}"
+                f".\\venv\\Scripts\\python.exe tools\\msauth\\interactive_auth.py "
+                f"--apply {profile_name}"
             )
-            print(f"\n# Step 2: Recreate crawler (to reload .env with new cookies)")
-            print(
-                f"docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler"
-            )
-            print(f"\n# Step 3: Test crawling")
+            print("\n# Step 2: Recreate crawler (to reload .env with new cookies)")
+            print("cd deploy")
+            print("docker-compose up -d --force-recreate crawler")
+            print("cd ..")
+            print("\n# Step 3: Test crawling")
             print(f".\\scripts\\check-auth-status.ps1 {args.url}")
         else:
             print(
-                "\n⚠️  AppServiceAuthSession cookie NOT captured (Azure App Service auth)"
+                "\n⚠️  AppServiceAuthSession cookie NOT captured "
+                "(Azure App Service auth)"
             )
             print("\n📋 Next steps - Use manual method:")
-            print(f"\n# Step 1: Add AppServiceAuthSession cookie manually")
-            print(f".\\tools\\msauth\\scripts\\add_cookie_manual.ps1")
+            print("\n# Step 1: Add AppServiceAuthSession cookie manually")
+            print(".\\tools\\msauth\\scripts\\add_cookie_manual.ps1")
             print("\n   The script will guide you to:")
             print("   - Open browser DevTools (F12) → Application → Cookies")
             print(f"   - Navigate to: {args.url}")
             print("   - Copy AppServiceAuthSession cookie value")
             print("   - Paste when prompted")
-            print(f"\n# Step 2: Recreate crawler (to reload .env with new cookies)")
-            print(
-                f"docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler"
-            )
-            print(f"\n# Step 3: Test crawling")
+            print("\n# Step 2: Recreate crawler (to reload .env with new cookies)")
+            print("cd deploy")
+            print("docker-compose up -d --force-recreate crawler")
+            print("cd ..")
+            print("\n# Step 3: Test crawling")
             print(f".\\scripts\\check-auth-status.ps1 {args.url}")
 
     except KeyboardInterrupt:

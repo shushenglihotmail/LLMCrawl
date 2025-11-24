@@ -14,9 +14,22 @@
 Write-Host "LLMCrawl Service Status" -ForegroundColor Cyan
 Write-Host "=" * 60 -ForegroundColor Gray
 
-# Check docker-compose services
-Write-Host "`nDocker Containers:" -ForegroundColor Yellow
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml ps
+# Ensure we are in the deploy directory where docker-compose files are located
+$DeployPath = Join-Path $PSScriptRoot "../deploy"
+if (-not (Test-Path $DeployPath)) {
+    Write-Error "Deploy directory not found at $DeployPath"
+    exit 1
+}
+Push-Location $DeployPath
+
+try {
+    # Check docker-compose services
+    Write-Host "`nDocker Containers:" -ForegroundColor Yellow
+    docker-compose -f docker-compose.yml -f docker-compose.dev.yml ps
+}
+finally {
+    Pop-Location
+}
 
 # Check health endpoints
 Write-Host "`n`nService Health Checks:" -ForegroundColor Yellow

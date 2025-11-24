@@ -26,7 +26,7 @@ Write-Host ""
 
 # Test 2: Check current authentication configuration
 Write-Host "2. Checking authentication configuration..." -ForegroundColor Yellow
-$envFile = Get-Content ".env" | Where-Object { $_ -match "FIRECRAWL_AUTH" }
+$envFile = Get-Content "deploy/.env" | Where-Object { $_ -match "FIRECRAWL_AUTH" }
 if ($envFile) {
     Write-Host "   Current authentication settings:" -ForegroundColor Cyan
     foreach ($line in $envFile) {

@@ -18,7 +18,8 @@ $storageState = $authData.storage_state | ConvertTo-Json -Compress -Depth 10
 Write-Host "Storage state has $($authData.storage_state.cookies.Count) cookies" -ForegroundColor Green
 
 # Read .env
-$envContent = Get-Content .env
+$DeployEnv = Join-Path $PSScriptRoot "../../../deploy/.env"
+$envContent = Get-Content $DeployEnv
 
 # Find and update FIRECRAWL_AUTH_STORAGE_STATE
 $updated = $false
@@ -38,7 +39,7 @@ if (-not $updated) {
 }
 
 # Save .env
-$envContent | Set-Content .env
+$envContent | Set-Content $DeployEnv
 
 Write-Host "`n✅ Authentication configured!" -ForegroundColor Green
 Write-Host "The crawler will now use the AppServiceAuthSession cookie." -ForegroundColor Cyan

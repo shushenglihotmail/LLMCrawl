@@ -211,7 +211,18 @@ if ($envApplied) {
     Write-Host ""
 
     try {
-        $output = docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler 2>&1
+        if (Test-Path "deploy") {
+            Push-Location "deploy"
+            try {
+                $output = docker-compose up -d --force-recreate crawler 2>&1
+            } finally {
+                Pop-Location
+            }
+        } else {
+            # Fallback if deploy folder doesn't exist (unlikely given user context)
+            $output = docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler 2>&1
+        }
+
         if ($LASTEXITCODE -eq 0) {
             Write-Host "✓ Crawler recreated successfully" -ForegroundColor Green
             Write-Host ""
@@ -224,11 +235,17 @@ if ($envApplied) {
             & ".\scripts\check-auth-status.ps1" "https://$Domain"
         } else {
             Write-Host "✗ Failed to recreate crawler" -ForegroundColor Red
-            Write-Host "  Run manually: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler" -ForegroundColor Yellow
+            Write-Host "  Run manually:" -ForegroundColor Yellow
+            Write-Host "  cd deploy" -ForegroundColor Yellow
+            Write-Host "  docker-compose up -d --force-recreate crawler" -ForegroundColor Yellow
+            Write-Host "  cd .." -ForegroundColor Yellow
         }
     } catch {
         Write-Host "✗ Failed to recreate crawler" -ForegroundColor Red
-        Write-Host "  Run manually: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler" -ForegroundColor Yellow
+        Write-Host "  Run manually:" -ForegroundColor Yellow
+        Write-Host "  cd deploy" -ForegroundColor Yellow
+        Write-Host "  docker-compose up -d --force-recreate crawler" -ForegroundColor Yellow
+        Write-Host "  cd .." -ForegroundColor Yellow
     }
 } else {
     Write-Host ""
@@ -238,7 +255,9 @@ if ($envApplied) {
     Write-Host ".\venv\Scripts\python.exe tools\msauth\interactive_auth.py --apply $ProfileName" -ForegroundColor White
     Write-Host ""
     Write-Host "# Step 2: Recreate crawler (loads new .env)" -ForegroundColor Cyan
-    Write-Host "docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler" -ForegroundColor White
+    Write-Host "cd deploy" -ForegroundColor White
+    Write-Host "docker-compose up -d --force-recreate crawler" -ForegroundColor White
+    Write-Host "cd .." -ForegroundColor White
     Write-Host ""
     Write-Host "# Step 3: Test authentication" -ForegroundColor Cyan
     Write-Host ".\scripts\check-auth-status.ps1 https://$Domain" -ForegroundColor White

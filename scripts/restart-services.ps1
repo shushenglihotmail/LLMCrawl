@@ -22,33 +22,46 @@ param(
     [string]$Service
 )
 
-Write-Host "Restarting LLMCrawl services..." -ForegroundColor Cyan
+# Ensure we are in the deploy directory where docker-compose files are located
+$DeployPath = Join-Path $PSScriptRoot "../deploy"
+if (-not (Test-Path $DeployPath)) {
+    Write-Error "Deploy directory not found at $DeployPath"
+    exit 1
+}
+Push-Location $DeployPath
 
-if ($Service) {
-    Write-Host "Restarting $Service only..." -ForegroundColor Yellow
-    Write-Host "Note: Using 'up -d' to reload environment variables" -ForegroundColor Gray
-    docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d $Service
+try {
+    Write-Host "Restarting LLMCrawl services..." -ForegroundColor Cyan
 
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "`n$Service restarted successfully!" -ForegroundColor Green
+    if ($Service) {
+        Write-Host "Restarting $Service only..." -ForegroundColor Yellow
+        Write-Host "Note: Using 'up -d' to reload environment variables" -ForegroundColor Gray
+        docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d $Service
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "`n$Service restarted successfully!" -ForegroundColor Green
+        } else {
+            Write-Host "`nFailed to restart $Service" -ForegroundColor Red
+            exit 1
+        }
     } else {
-        Write-Host "`nFailed to restart $Service" -ForegroundColor Red
-        exit 1
-    }
-} else {
-    Write-Host "Restarting all services..." -ForegroundColor Yellow
-    Write-Host "Note: Using 'up -d' to reload environment variables" -ForegroundColor Gray
-    docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+        Write-Host "Restarting all services..." -ForegroundColor Yellow
+        Write-Host "Note: Using 'up -d' to reload environment variables" -ForegroundColor Gray
+        docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "`nAll services restarted successfully!" -ForegroundColor Green
-        Write-Host "`nService URLs:" -ForegroundColor Cyan
-        Write-Host "  Gateway:    http://localhost:8000" -ForegroundColor White
-        Write-Host "  Crawler:    http://localhost:8001" -ForegroundColor White
-        Write-Host "  Indexer:    http://localhost:8002" -ForegroundColor White
-        Write-Host "  MCP Server: http://localhost:8003" -ForegroundColor White
-    } else {
-        Write-Host "`nFailed to restart services" -ForegroundColor Red
-        exit 1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "`nAll services restarted successfully!" -ForegroundColor Green
+            Write-Host "`nService URLs:" -ForegroundColor Cyan
+            Write-Host "  Gateway:    http://localhost:8000" -ForegroundColor White
+            Write-Host "  Crawler:    http://localhost:8001" -ForegroundColor White
+            Write-Host "  Indexer:    http://localhost:8002" -ForegroundColor White
+            Write-Host "  MCP Server: http://localhost:8003" -ForegroundColor White
+        } else {
+            Write-Host "`nFailed to restart services" -ForegroundColor Red
+            exit 1
+        }
     }
+}
+finally {
+    Pop-Location
 }

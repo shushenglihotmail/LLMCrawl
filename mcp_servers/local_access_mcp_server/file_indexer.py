@@ -63,6 +63,7 @@ class FileIndexer:
 
     async def initialize(self):
         """Initialize LlamaIndex settings and load existing index."""
+        logger.info("Initializing FileIndexer...")
         # Only initialize if OpenAI API key is available
         if not os.getenv("OPENAI_API_KEY"):
             logger.warning(
@@ -72,14 +73,20 @@ class FileIndexer:
             return
 
         try:
+            logger.info("Configuring LlamaIndex Settings...")
             # Configure LlamaIndex
             Settings.llm = OpenAI(
                 model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"), temperature=0
             )
+            logger.info("LLM configured.")
+
             Settings.embed_model = OpenAIEmbedding(
                 model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
             )
+            logger.info("Embedding model configured.")
+
             Settings.node_parser = SentenceSplitter(chunk_size=512, chunk_overlap=50)
+            logger.info("Node parser configured.")
 
             # Try to load existing index
             if (
@@ -87,6 +94,7 @@ class FileIndexer:
                 and (self.vector_db_path / "docstore.json").exists()
             ):
                 try:
+                    logger.info(f"Loading existing index from {self.vector_db_path}...")
                     storage_context = StorageContext.from_defaults(
                         persist_dir=str(self.vector_db_path)
                     )
@@ -95,9 +103,14 @@ class FileIndexer:
                 except Exception as e:
                     logger.warning(f"Failed to load existing index: {e}")
                     self.index = None
+            else:
+                logger.info("No existing index found.")
+
         except Exception as e:
-            logger.warning(f"Failed to initialize embeddings: {e}")
+            logger.error(f"Failed to initialize embeddings: {e}", exc_info=True)
             self.index = None
+
+        logger.info("FileIndexer initialization complete.")
 
     def _validate_path(self, file_path: str) -> Path:
         """Validate path is within root folder."""

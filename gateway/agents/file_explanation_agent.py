@@ -311,6 +311,32 @@ class CodeIntelligenceAgent:
 
         # Use local file MCP server
         logger.info(f"Reading local file: {file_path}")
+
+        # Handle Windows paths with drive letters if running in container
+        # If path starts with drive letter (e.g. c:\os\src\...) and we are in container
+        # where root is mounted (e.g. /data/files), we need to strip the prefix
+        # This is a hack for the specific mapping C:\os -> /data/files
+
+        # First, ensure we have forward slashes (client might have sent backslashes,
+        # or _expand_paths might have already normalized them)
+        file_path = file_path.replace("\\", "/")
+
+        if ":" in file_path:
+            # Check if it looks like the mapped root
+            # Assuming C:\os is mapped to self.root_folder
+            # We can try to find the relative part
+            parts = file_path.split("/")
+            # Try to find where the relative path starts
+            # Heuristic: if path contains 'src', 'docs', 'data', 'tools', 'tests'
+            for i, part in enumerate(parts):
+                if part.lower() in ["src", "docs", "data", "tools", "tests"]:
+                    # Construct relative path from here
+                    file_path = "/".join(parts[i:])
+                    logger.info(
+                        f"Normalized Windows path to relative path: {file_path}"
+                    )
+                    break
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 response = await client.post(
@@ -863,7 +889,8 @@ class CodeIntelligenceAgent:
         # Workflow-specific instructions
         workflow_instructions = {
             "understand": """
-Analyze and document these files. Your response should:
+Analyze and document these files.
+Unless the user request specifies otherwise, your response should:
 1. Summarize what each file does (purpose and functionality)
 2. Explain key components and their roles
 3. Describe how files interact with each other
@@ -871,7 +898,8 @@ Analyze and document these files. Your response should:
 5. Create clear, comprehensive documentation
 """,
             "inspect": """
-Inspect these files for potential issues. Look for:
+Inspect these files for potential issues.
+Unless the user request specifies otherwise, look for:
 1. Bugs or logic errors
 2. Security vulnerabilities
 3. Performance issues
@@ -907,10 +935,11 @@ Format your response as:
 
 ## Workflow: {workflow.upper()}
 
-## User Request:
-{request}
-
+## Default Workflow Guidelines:
 {workflow_instructions.get(workflow, "")}
+
+## User Request (PRIMARY INSTRUCTION - OVERRIDES GUIDELINES):
+{request}
 
 ---
 

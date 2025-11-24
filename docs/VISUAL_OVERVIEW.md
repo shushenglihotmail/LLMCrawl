@@ -327,10 +327,10 @@ Demo Client          | http://localhost:3000            | Web interface
 
 ```bash
 # Start services
-docker-compose up -d
+cd deploy && docker-compose up -d
 
 # View logs
-docker-compose logs -f gateway
+cd deploy && docker-compose logs -f gateway
 
 # Check health
 curl http://localhost:8000/health
