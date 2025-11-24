@@ -153,13 +153,13 @@ python scripts/setup_dev.py  # First time setup
 
 ```bash
 # Build images
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml build
+cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml build
 
 # Start services
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 # View logs
-docker-compose logs -f
+cd deploy && docker-compose logs -f
 ```
 
 ### Step 5: Verify Development Setup
@@ -818,7 +818,7 @@ docker-compose up -d --scale crawler=3
 ## Additional Resources
 
 - **[Architecture Guide](ARCHITECTURE.md)** - System design and data flows
-- **[MCP Server Documentation](../mcp_server/README.md)** - Detailed MCP guide
+- **[MCP Servers Documentation](../mcp_servers/)** - Local access and Azure DevOps MCP servers
 - **[Monitoring Setup](MONITORING.md)** - Observability configuration
 - **[Authentication Guide](AUTHENTICATION_SETUP.md)** - Crawl authenticated sites
 - **[Main README](../README.md)** - Quick start and overview

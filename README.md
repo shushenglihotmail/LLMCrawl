@@ -24,20 +24,24 @@ graph TB
     Gateway --> LLM[OpenAI/Azure OpenAI/<br/>Anthropic Claude]
     Gateway --> Crawler[Crawler Service :8001]
     Gateway --> Indexer[Indexer Service :8002]
-    Gateway --> MCP[MCP Server :8003]
+    Gateway --> LocalMCP[Local MCP Server :8003]
+    Gateway --> AzDOMCP[Azure DevOps MCP :8004]
 
     Crawler --> FireCrawl[FireCrawl + Playwright]
     Crawler --> Redis[(Redis Cache)]
 
     Indexer --> VectorDB[(Qdrant/pgvector)]
 
-    MCP --> LocalFiles[Local Files<br/>Mounted Volume]
-    MCP --> MCPIndex[(Optional Index<br/>for Semantic Search)]
+    LocalMCP --> LocalFiles[Local Files<br/>Mounted Volume]
+    LocalMCP --> MCPIndex[(Optional Index<br/>for Semantic Search)]
+
+    AzDOMCP --> AzureDevOps[Azure DevOps<br/>Code Search API]
 
     style Gateway fill:#4A90E2
     style Crawler fill:#50C878
     style Indexer fill:#E28743
-    style MCP fill:#9B59B6
+    style LocalMCP fill:#9B59B6
+    style AzDOMCP fill:#8E44AD
     style Client fill:#95A5A6
 ```
 
@@ -63,9 +67,11 @@ graph TB
     J2 --> K
     K --> L{Which Tool?}
     L -->|Web Crawl| M[FireCrawl Search & Crawl]
-    L -->|File Read| N[MCP: read_local_file]
-    L -->|File List| O[MCP: list_files]
-    L -->|File Search| P[MCP: search_file_content]
+    L -->|Local File Read| N[Local MCP: read_local_file]
+    L -->|Local File List| O[Local MCP: list_files]
+    L -->|Local File Search| P[Local MCP: search_file_content]
+    L -->|Azure DevOps Search| Q1[Azure DevOps MCP: search_code]
+    L -->|Azure DevOps File| Q2[Azure DevOps MCP: get_file_content]
     M --> Q[Playwright Fallback if Needed]
     Q --> R[Trafilatura Text Extraction]
     R --> S[LlamaIndex Chunking & Embedding]
@@ -74,9 +80,13 @@ graph TB
     N --> V[Read File Content]
     O --> W[List Directory]
     P --> X[Semantic File Search]
+    Q1 --> Y1[Azure DevOps Code Search]
+    Q2 --> Y2[Get File from Repo]
     V --> Y[Return to LLM]
     W --> Y
     X --> Y
+    Y1 --> Y
+    Y2 --> Y
     U --> Y
     Y --> Z[LLM Response with Citations]
     Z --> AA[Store User + Assistant Messages]
@@ -298,7 +308,7 @@ This provides:
 - Recommended extensions
 - Python environment auto-detection
 
-See `DEVELOPMENT.md` for detailed development setup instructions.
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed development setup instructions.
 
 ## 🚀 Production Deployment
 
@@ -1308,13 +1318,19 @@ llmcrawl/
 - **[Visual Overview](docs/VISUAL_OVERVIEW.md)** - Quick visual guide with diagrams and cheatsheet ⭐
 - **[Architecture Overview](docs/ARCHITECTURE.md)** - System design, data flows, and component interactions
 - **[Deployment Guide](docs/DEPLOYMENT.md)** - Complete deployment instructions for dev and production
-- **[Development Guide](DEVELOPMENT.md)** - Setting up development environment
+- **[Development Guide](docs/DEVELOPMENT.md)** - Setting up development environment
 - **[Monitoring Guide](docs/MONITORING.md)** - Observability, metrics, and dashboards
 
-### MCP Server (Local File Operations)
-- **[Quick Start](mcp_servers/local_access_mcp_server/QUICKSTART.md)** - Get started with file operations in 5 minutes
-- **[Full MCP Documentation](mcp_servers/local_access_mcp_server/README.md)** - Complete guide with API reference
-- **[API Examples](mcp_servers/local_access_mcp_server/README.md#api-reference)** - Direct API usage examples
+### MCP Servers
+- **Local File Operations (Port 8003)**
+  - [Quick Start](mcp_servers/local_access_mcp_server/QUICKSTART.md) - Get started with file operations in 5 minutes
+  - [Full Documentation](mcp_servers/local_access_mcp_server/README.md) - Complete guide with API reference
+  - [API Examples](mcp_servers/local_access_mcp_server/README.md#api-reference) - Direct API usage examples
+
+- **Azure DevOps Code Search (Port 8004)**
+  - [Quick Start](mcp_servers/azure_devops_mcp_server/QUICKSTART.md) - Setup in 5 minutes
+  - [Full Documentation](mcp_servers/azure_devops_mcp_server/README.md) - Complete guide with VS Code integration
+  - [Integration Guide](mcp_servers/azure_devops_mcp_server/INTEGRATION.md) - VS Code Copilot and LLMCrawl setup
 
 ### Authentication & Crawling
 - **[Authentication Setup](docs/AUTHENTICATION_SETUP.md)** - Crawl authenticated internal sites

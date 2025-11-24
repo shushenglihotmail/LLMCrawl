@@ -192,7 +192,7 @@ grep VARIABLE_NAME .env
 ## Related Documentation
 
 - [README.md](../README.md) - Main project documentation
-- [ARCHITECTURE.md](../ARCHITECTURE.md) - System architecture
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture
 - [deploy/.env.example](../deploy/.env.example) - Example configuration file
 - [MULTI_PROVIDER_LLM.md](MULTI_PROVIDER_LLM.md) - LLM provider setup
 - [tools/msauth/README.md](../tools/msauth/README.md) - Firecrawl authentication

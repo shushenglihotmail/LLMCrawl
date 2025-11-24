@@ -183,12 +183,12 @@ Source: playwright+trafilatura
 
 2. **Crawler not reloading .env** - Need to recreate container, not just restart
    ```powershell
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d crawler
+   cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d crawler
    ```
 
 3. **Check what crawler sees:**
    ```powershell
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs --tail=20 crawler | Select-String "storage_state|401"
+   cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs --tail=20 crawler | Select-String "storage_state|401"
    ```
 
 4. **Wrong cookie count** - Should match your `.auth` file
@@ -305,7 +305,7 @@ cd C:\src\github\LLMCrawl
 
 # 4. Apply and recreate crawler (to reload .env)
 .\venv\Scripts\python.exe tools\msauth\interactive_auth.py --apply www_osgwiki_com
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
+cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
 
 # 5. Test
 $body = @{query='test'; seed_urls=@('https://www.osgwiki.com/wiki/Main_Page'); depth=1} | ConvertTo-Json

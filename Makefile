@@ -16,9 +16,9 @@ quick-start:
 quick-start-windows:
 	powershell -ExecutionPolicy Bypass -File scripts/start_dev.ps1
 
-# Development Docker operations
+# Development Docker operations (from deploy folder)
 dev-up:
-	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 	@echo "Development environment is running!"
 	@echo "Gateway: http://localhost:8000"
 	@echo "Crawler: http://localhost:8001"
@@ -26,35 +26,35 @@ dev-up:
 	@echo "Qdrant Dashboard: http://localhost:6333/dashboard"
 
 dev-down:
-	docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
+	cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
 
 dev-logs:
-	docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
+	cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
 
 dev-rebuild:
-	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+	cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
-# Production Docker operations
+# Production Docker operations (from deploy folder)
 build:
-	docker-compose build --no-cache
+	cd deploy && docker-compose build --no-cache
 
 up:
-	docker-compose up -d
+	cd deploy && docker-compose up -d
 
 down:
-	docker-compose down
+	cd deploy && docker-compose down
 
 logs:
-	docker-compose logs -f
+	cd deploy && docker-compose logs -f
 
 # Development shortcuts
 dev: dev-up
 
 # Testing
 test:
-	docker-compose exec gateway python -m pytest tests/ -v
-	docker-compose exec crawler python -m pytest tests/ -v
-	docker-compose exec indexer python -m pytest tests/ -v
+	cd deploy && docker-compose exec gateway python -m pytest tests/ -v
+	cd deploy && docker-compose exec crawler python -m pytest tests/ -v
+	cd deploy && docker-compose exec indexer python -m pytest tests/ -v
 
 test-dev:
 	pytest tests/ -v --cov=. --cov-report=html
@@ -67,29 +67,29 @@ pre-commit:
 	pre-commit run --all-files
 
 lint:
-	docker-compose exec gateway python -m black . --check
-	docker-compose exec gateway python -m isort . --check-only
-	docker-compose exec gateway python -m flake8 .
+	cd deploy && docker-compose exec gateway python -m black . --check
+	cd deploy && docker-compose exec gateway python -m isort . --check-only
+	cd deploy && docker-compose exec gateway python -m flake8 .
 
 format:
-	docker-compose exec gateway python -m black .
-	docker-compose exec gateway python -m isort .
+	cd deploy && docker-compose exec gateway python -m black .
+	cd deploy && docker-compose exec gateway python -m isort .
 
 # Database operations
 db-reset:
-	docker-compose down -v
-	docker-compose up -d qdrant postgres redis
+	cd deploy && docker-compose down -v
+	cd deploy && docker-compose up -d qdrant postgres redis
 
 # Monitoring and Metrics
 monitoring-up:
-	docker-compose --profile monitoring up -d
+	cd deploy && docker-compose --profile monitoring up -d
 	@echo "Monitoring stack started!"
 	@echo "Prometheus: http://localhost:9090"
 	@echo "Grafana: http://localhost:3001 (admin/admin)"
 	@echo "Qdrant Dashboard: http://localhost:6333/dashboard"
 
 monitoring-down:
-	docker-compose stop prometheus grafana
+	cd deploy && docker-compose stop prometheus grafana
 
 metrics:
 	@echo "Opening monitoring dashboards..."
@@ -115,7 +115,7 @@ metrics-all:
 
 # Cleanup
 clean:
-	docker-compose down -v --remove-orphans
+	cd deploy && docker-compose down -v --remove-orphans
 	docker system prune -f
 	docker volume prune -f
 

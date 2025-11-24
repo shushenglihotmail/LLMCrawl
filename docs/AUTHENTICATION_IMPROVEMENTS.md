@@ -73,7 +73,7 @@ Improved authentication workflow for Azure App Service Easy Auth sites (like osg
 
 **Solution:** Use `docker-compose up -d <service>` to recreate container
 ```powershell
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d crawler
+cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d crawler
 ```
 
 ### API Field Name Bug

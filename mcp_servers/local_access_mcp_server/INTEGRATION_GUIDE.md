@@ -372,4 +372,4 @@ export AZURE_DEVOPS_PAT=your-token
 - [Model Context Protocol Spec](https://spec.modelcontextprotocol.io/)
 - [Azure DevOps MCP Server README](../azure_devops_mcp_server/README.md)
 - [Local File MCP Server README](README.md)
-- [LLMCrawl Architecture](../ARCHITECTURE.md)
+- [LLMCrawl Architecture](../../docs/ARCHITECTURE.md)

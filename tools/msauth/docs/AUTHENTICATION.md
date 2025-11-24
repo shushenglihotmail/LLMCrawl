@@ -72,7 +72,7 @@ Verify authentication works:
 python tools/test_auth.py
 
 # Recreate crawler (after updating .env)
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
+cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
 
 # Test render endpoint
 $body = @{url='https://www.osgwiki.com/wiki/Main_Page'} | ConvertTo-Json
@@ -159,7 +159,7 @@ python tools/interactive_auth.py https://www.osgwiki.com/wiki/Main_Page --name w
 python tools/test_auth.py
 
 # Recreate crawler (to reload .env)
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
+cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
 ```
 
 ## Additional Resources

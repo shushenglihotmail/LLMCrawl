@@ -47,7 +47,7 @@ Choose your authentication method based on your needs:
 .\venv\Scripts\python.exe tools\msauth\interactive_auth.py https://internal-site.com
 
 # Step 2: Recreate crawler (to reload .env with new cookies)
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
+cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
 
 # Step 3: Verify
 .\scripts\check-auth-status.ps1 https://internal-site.com
@@ -92,7 +92,7 @@ AZURE_CLIENT_SECRET=your-client-secret
 AZURE_SCOPE=https://graph.microsoft.com/.default
 ```
 
-5. Recreate crawler: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler`
+5. Recreate crawler: `cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler`
 
 **Advantages:**
 - ✅ Fully automated (no human intervention)
@@ -283,7 +283,7 @@ docker-compose logs crawler | Select-String "401|403"
 docker-compose restart crawler
 
 # ✅ CORRECT - Loads new cookies from .env
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
+cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
 ```
 
 **When to use each:**
@@ -305,7 +305,7 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-rec
    ```powershell
    .\scripts\auth.ps1 login https://site.com
    .\scripts\auth.ps1 apply site_com
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
+   cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
    ```
 
 2. **Wrong auth type** → Check `.env` for `FIRECRAWL_AUTH_TYPE`
@@ -420,7 +420,7 @@ docker-compose logs crawler | Select-String "auth"
 docker-compose logs crawler | Select-String "401|403"
 
 # Recreate crawler (after updating .env)
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
+cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler
 ```
 
 ---

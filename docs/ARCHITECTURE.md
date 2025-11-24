@@ -2,526 +2,470 @@
 
 ## Overview
 
-LLMCrawl is a production-ready RAG (Retrieval-Augmented Generation) system that combines web crawling, local file operations, and conversational AI to provide intelligent, context-aware responses with citations.
+LLMCrawl is a production-grade Web RAG system that combines LLM chat capabilities with real-time web crawling and semantic search. The system features conversation memory, intelligent tool calling, and robust multi-source web scraping.
 
 ## System Components
 
-### 1. Gateway Service (Port 8000)
-**Role**: Orchestration and LLM interaction hub
-
-**Responsibilities**:
-- Handle incoming chat requests
-- Manage conversation history (24-hour TTL)
-- Intelligent tool selection and triggering
-- Coordinate between crawler, indexer, and MCP server
-- Stream responses to clients
-- OpenAI/Azure OpenAI SDK integration
-
-**Technology**: FastAPI, Python 3.11, httpx (async HTTP)
-
-**Key Features**:
-- Conversation state management
-- Multi-turn context preservation
-- Automatic tool triggering based on query patterns
-- Forced tool execution for data-needing queries
-- SSE (Server-Sent Events) streaming support
-
----
-
-### 2. Crawler Service (Port 8001)
-**Role**: Web content extraction and rendering
-
-**Responsibilities**:
-- Search web for relevant content
-- Render JavaScript-heavy pages with Playwright
-- Extract clean text with Trafilatura
-- Handle authenticated sites (cookies, headers, basic auth)
-- Sequential browser rendering for stability
-
-**Technology**: FastAPI, Playwright (Chromium), Trafilatura, FireCrawl
-
-**Pipeline**:
-```
-Query → FireCrawl Search → Page Fetch → Playwright Render → Trafilatura Extract → Clean Text
-```
-
-**Supported Authentication**:
-- Cookie-based (Microsoft SSO, etc.)
-- Header-based (API keys)
-- Basic Auth
-- Bearer tokens
-
----
-
-### 3. Indexer Service (Port 8002)
-**Role**: Document storage and semantic retrieval
-
-**Responsibilities**:
-- Chunk documents into manageable pieces
-- Generate embeddings (text-embedding-3-large)
-- Store in vector database (Qdrant/pgvector)
-- Semantic retrieval with recency boost
-- Relevance scoring
-
-**Technology**: FastAPI, LlamaIndex, OpenAI Embeddings
-
-**Chunking Strategy**:
-- Chunk size: 512 tokens
-- Overlap: 50 tokens
-- Metadata preserved: URL, title, published_at
-
-**Retrieval**:
-- Top-K semantic search
-- Recency boost for time-sensitive queries
-- Score threshold filtering
-
----
-
-### 4. MCP Server (Port 8003)
-**Role**: Local file operations and semantic file search
-
-**Responsibilities**:
-- Read local files securely
-- List files and directories
-- Index files for semantic search
-- Search file content by meaning (not just keywords)
-- Path validation and security
-
-**Technology**: FastAPI, LlamaIndex, OpenAI Embeddings (optional)
-
-**Security**:
-- Configurable root folder restriction
-- Path traversal prevention
-- Relative and absolute path validation
-- Binary file detection
-
-**Operations**:
-1. **list_files**: List files/directories (no embeddings needed)
-2. **read_local_file**: Read file content (no embeddings needed)
-3. **index_files**: Index for semantic search (requires OpenAI API key)
-4. **search_file_content**: Semantic search (requires indexing first)
-
----
-
-### 5. Supporting Services
-
-#### Vector Database
-**Options**:
-- **Qdrant** (Recommended): Native vector storage, web UI
-- **pgvector**: PostgreSQL extension for vector storage
-
-**Role**: Store and query document embeddings
-
-#### Redis
-**Role**: Caching and rate limiting for FireCrawl
-
-#### PostgreSQL
-**Role**: Alternative vector storage (when using pgvector)
-
-#### Prometheus + Grafana (Optional)
-**Role**: Monitoring, metrics, and alerting
-
----
-
-## Architecture Diagrams
-
-### High-Level System Architecture
-
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Client Applications                      │
-│  (HiChat Web Client, HiChat Console, Direct API Calls)         │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ HTTP/REST
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Gateway Service (8000)                      │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  • Conversation Manager (24h TTL)                        │  │
-│  │  • Tool Selector & Orchestrator                          │  │
-│  │  • LLM Client (OpenAI/Azure)                            │  │
-│  │  • Request Router                                        │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└───┬─────────────────┬─────────────────┬────────────────────┬───┘
-    │                 │                 │                    │
-    │ Web Crawl      │ Index/Retrieve  │ File Operations   │ LLM API
-    │                 │                 │                    │
-    ▼                 ▼                 ▼                    ▼
-┌─────────┐     ┌──────────┐     ┌──────────┐      ┌──────────────┐
-│ Crawler │     │ Indexer  │     │   MCP    │      │ OpenAI/Azure │
-│ (8001)  │     │ (8002)   │     │  Server  │      │     API      │
-│         │     │          │     │ (8003)   │      │              │
-└────┬────┘     └────┬─────┘     └────┬─────┘      └──────────────┘
-     │               │                 │
-     │               │                 │
-     ▼               ▼                 ▼
-┌─────────┐    ┌──────────┐    ┌──────────────┐
-│FireCrawl│    │ Qdrant/  │    │ Local Files  │
-│  Redis  │    │ pgvector │    │  (Mounted)   │
-└─────────┘    └──────────┘    └──────────────┘
+│                         CLIENT LAYER                             │
+├─────────────────────────────────────────────────────────────────┤
+│  HiChat Console  │  HiChat WebClient  │  Demo Client  │  cURL   │
+└────────┬─────────────────────┬─────────────────┬────────────────┘
+         │                     │                 │
+         └─────────────────────┼─────────────────┘
+                               │
+                    HTTP POST /api/v1/chat
+                               │
+┌──────────────────────────────▼──────────────────────────────────┐
+│                    GATEWAY SERVICE (Port 8000)                   │
+├──────────────────────────────────────────────────────────────────┤
+│  • FastAPI REST API                                              │
+│  • Azure OpenAI / Azure Anthropic / OpenAI SDK                   │
+│  • Multi-Provider Routing (OpenAI ChatCompletions / Anthropic    │
+│    Messages API via HTTP)                                        │
+│  • Conversation Store (In-Memory, 24h TTL)                       │
+│  • Tool Calling Logic (OpenAI only, Anthropic uses text)         │
+│  • Intelligent Trigger Detection (29+ keywords)                  │
+│  • Context-Aware Follow-up Detection                             │
+│  • Timeout: 45s (OpenAI), 180s (Anthropic for large contexts)   │
+└────┬────────────┬───────────┬────────────────────────────────────┘
+     │            │           │ Index Request
+     │ Tool Call  │           ▼
+     │            │   ┌────────────────────────────────────────────┐
+     │            │   │      INDEXER SERVICE (Port 8002)           │
+     │            │   ├────────────────────────────────────────────┤
+     │            │   │  • LlamaIndex Document Processing          │
+     │            │   │  • Embedding Generation                    │
+     │            │   │  • Vector DB Storage                       │
+     │            │   │  • Semantic Search with Recency Boost      │
+     │            │   │  • Source Ranking                          │
+     │            │   └────────────────────────────────────────────┘
+     │            │                      │
+     │            │                      ▼
+     │            │      ┌──────────────────────────────┐
+     │            │      │  VECTOR DB (Qdrant/pgvector) │
+     │            │      └──────────────────────────────┘
+     │            │
+     │            └─────────────┐
+     │                          │
+     ▼                          ▼
+┌────────────────┐   ┌──────────────────────────────┐
+│ CRAWLER (8001) │   │   MCP SERVERS (8003, 8004)   │
+├────────────────┤   ├──────────────────────────────┤
+│ • FireCrawl    │   │  LOCAL ACCESS (8003)          │
+│   Search API   │   │  • Read local files           │
+│ • Playwright   │   │  • List directories           │
+│   Fallback     │   │  • Semantic search (optional) │
+│ • Trafilatura  │   │  • Mounted volume             │
+│   Extraction   │   │                               │
+│ • Sequential   │   │  AZURE DEVOPS (8004)          │
+│   Rendering    │   │  • Code search                │
+│ • Auth Support │   │  • File retrieval             │
+└────┬───────────┘   │  • MSAL/PAT auth              │
+     │               │  • Fast indexed search        │
+     │               └──────────────────────────────┘
+     ▼
+┌─────────────────┐
+│ FIRECRAWL (3002)│
+├─────────────────┤       ┌──────────────┐
+│ • Search & Scrape│───────│ Redis (6379) │ Rate Limiting
+│ • Rate Limiting  │       └──────────────┘
+│ • Clean HTML     │
+└──────────────────┘       ┌──────────────┐
+                           │ PostgreSQL   │ Metadata Storage
+                           └──────────────┘
 ```
-
-### Request Flow - Web RAG Query
-
-```mermaid
-sequenceDiagram
-    participant U as User/Client
-    participant G as Gateway
-    participant L as LLM (OpenAI)
-    participant C as Crawler
-    participant I as Indexer
-    participant V as Vector DB
-
-    U->>G: POST /chat: "Latest NVIDIA earnings?"
-    G->>G: Load conversation history
-    G->>G: Detect query needs web data
-    G->>L: Request with crawl_and_refresh tool
-    L->>G: Tool call decision: crawl_and_refresh
-    G->>C: POST /crawl with query
-    C->>C: FireCrawl search
-    C->>C: Playwright render pages
-    C->>C: Trafilatura extract text
-    C->>G: Return cleaned documents
-    G->>I: POST /index with documents
-    I->>I: Chunk documents (512 tokens)
-    I->>I: Generate embeddings
-    I->>V: Store vectors with metadata
-    V->>I: Confirm storage
-    I->>G: Index complete
-    G->>I: POST /retrieve with query
-    I->>V: Semantic search (top-K)
-    V->>I: Return relevant chunks
-    I->>G: Return ranked results
-    G->>L: Second call with tool results
-    L->>G: Generate answer with citations
-    G->>U: Response with sources
-```
-
-### Request Flow - Local File Query
-
-```mermaid
-sequenceDiagram
-    participant U as User/Client
-    participant G as Gateway
-    participant L as LLM (OpenAI)
-    participant M as MCP Server
-    participant F as Local Files
-
-    U->>G: POST /chat: "List files in src folder"
-    G->>G: Load MCP tools
-    G->>L: Request with all tools (crawl + MCP)
-    L->>G: Tool call: list_files
-    G->>M: POST /invoke: list_files
-    M->>M: Validate path security
-    M->>F: Read directory
-    F->>M: Files + directories list
-    M->>G: Return structured results
-    G->>L: Second call with tool results
-    L->>G: Format response for user
-    G->>U: List of files and folders
-```
-
-### Tool Selection Logic
-
-```mermaid
-flowchart TD
-    A[Incoming Query] --> B{Load Conversation<br/>History}
-    B -->|History Exists| C[Include Previous Context]
-    B -->|New Conversation| D[Start Fresh]
-    C --> E{Analyze Query}
-    D --> E
-
-    E --> F{Contains Web<br/>Trigger Words?}
-    F -->|Yes: news, earnings,<br/>latest, recent| G[Include Crawl Tool]
-    F -->|No| H{Contains File<br/>Keywords?}
-
-    H -->|Yes: list, read,<br/>search files| I[MCP Tools Only]
-    H -->|No| J[No Tools]
-
-    G --> K[Include MCP Tools Too]
-    K --> L{User Provided<br/>Seed URLs?}
-    I --> M[Let LLM Choose]
-
-    L -->|Yes| N[Force Crawl Tool]
-    L -->|No| O{Query Explicitly<br/>Needs Fresh Data?}
-
-    O -->|Yes| N
-    O -->|No| M
-
-    N --> P[LLM MUST Use Crawl]
-    M --> Q[LLM Decides Which Tool]
-    J --> R[Direct LLM Response]
-```
-
----
 
 ## Data Flow
 
-### Web Content Pipeline
+### 1. User Query Flow
 
-```
-User Query
-    ↓
-Gateway detects "latest news"
-    ↓
-Trigger crawl_and_refresh tool
-    ↓
-Crawler:
-  1. FireCrawl search for URLs
-  2. Playwright renders JavaScript
-  3. Trafilatura extracts clean text
-  4. Returns structured documents
-    ↓
-Indexer:
-  1. Split into 512-token chunks
-  2. Generate embeddings
-  3. Store in vector DB with metadata
-    ↓
-Indexer:
-  1. Semantic search for relevant chunks
-  2. Apply recency boost
-  3. Return top-K results
-    ↓
-Gateway:
-  1. Send tool results to LLM
-  2. LLM generates answer with citations
-    ↓
-User receives response with sources
-```
+```mermaid
+sequenceDiagram
+    participant User
+    participant Gateway
+    participant ConvStore as Conversation Store
+    participant LLM as Azure OpenAI
+    participant Crawler
+    participant FireCrawl
+    participant Indexer
+    participant VectorDB
 
-### Local File Pipeline
+    User->>Gateway: POST /chat {message, conversation_id}
+    Gateway->>ConvStore: Load previous messages
+    ConvStore-->>Gateway: User/Assistant history
+    Gateway->>Gateway: Check triggers & context
 
-```
-User Query: "List files under src/"
-    ↓
-Gateway loads MCP tools
-    ↓
-LLM recognizes file operation
-    ↓
-Calls list_files tool
-    ↓
-MCP Server:
-  1. Validates path (security check)
-  2. Resolves to absolute path
-  3. Lists files and directories
-  4. Returns structured data
-    ↓
-Gateway sends results to LLM
-    ↓
-LLM formats friendly response
-    ↓
-User sees file/folder list
+    alt Needs Fresh Data
+        Gateway->>LLM: Chat with tools (forced/auto)
+        LLM-->>Gateway: tool_calls: crawl_and_refresh
+        Gateway->>Crawler: POST /crawl {query, freshness}
+
+        Crawler->>FireCrawl: Search + Scrape
+        FireCrawl-->>Crawler: HTML content
+
+        alt FireCrawl fails/timeout
+            Crawler->>Crawler: Playwright fallback
+        end
+
+        Crawler->>Crawler: Trafilatura extraction
+        Crawler-->>Gateway: Clean documents
+
+        Gateway->>Indexer: POST /index {documents}
+        Indexer->>VectorDB: Store embeddings
+        Indexer->>Indexer: Semantic search
+        Indexer-->>Gateway: Ranked sources
+
+        Gateway->>LLM: Generate response with sources
+        LLM-->>Gateway: Final answer
+    else General Knowledge
+        Gateway->>LLM: Direct chat
+        LLM-->>Gateway: Answer
+    end
+
+    Gateway->>ConvStore: Store user + assistant messages
+    Gateway-->>User: {response, sources, conversation_id}
 ```
 
----
+### 2. Conversation Memory Flow
 
-## Deployment Architectures
+```mermaid
+stateDiagram-v2
+    [*] --> NewConversation: No conversation_id
+    [*] --> LoadHistory: Has conversation_id
 
-### Development Setup
+    NewConversation --> BuildContext: Generate UUID
+    LoadHistory --> BuildContext: Retrieve messages
 
-```
-┌─────────────────────────────────────────┐
-│         Developer Machine                │
-│                                          │
-│  ┌────────────────────────────────┐    │
-│  │  Docker Containers (Hot-Reload)│    │
-│  │                                 │    │
-│  │  ┌──────────┐  ┌──────────┐   │    │
-│  │  │ Gateway  │  │ Crawler  │   │    │
-│  │  │  (dev)   │  │  (dev)   │   │    │
-│  │  └────┬─────┘  └────┬─────┘   │    │
-│  │       │             │          │    │
-│  │  Volume Mounts      │          │    │
-│  │       ↓             ↓          │    │
-│  │  ./gateway/    ./crawler/      │    │
-│  │  (Local code - instant reload) │    │
-│  └────────────────────────────────┘    │
-│                                          │
-│  Local Files: C:\os                     │
-│       ↓                                  │
-│  Mounted to MCP Server as /data/files   │
-└─────────────────────────────────────────┘
+    BuildContext --> CheckTriggers: System + Examples + History + User
 
-Features:
-✓ Code changes reflect instantly
-✓ Debug logging enabled
-✓ Direct file access
-✓ No rebuild needed
+    CheckTriggers --> IncludeTools: Trigger words OR Context suggests news
+    CheckTriggers --> DirectLLM: General question
+
+    IncludeTools --> ForceTool: Explicit fresh data query
+    IncludeTools --> AutoTool: Follow-up question
+
+    ForceTool --> ExecuteTool: tool_choice=function
+    AutoTool --> ExecuteTool: tool_choice=auto (with strong prompt)
+
+    ExecuteTool --> CallCrawler: LLM calls tool
+    CallCrawler --> GenerateResponse: Tool returns sources
+
+    DirectLLM --> GenerateResponse: No tool needed
+
+    GenerateResponse --> StoreMessages: Save user + assistant
+    StoreMessages --> [*]: Return response + conversation_id
 ```
 
-### Production Setup
+## Conversation Store Architecture
+
+### Storage Structure
 
 ```
-┌─────────────────────────────────────────┐
-│         Production Server                │
-│                                          │
-│  ┌────────────────────────────────┐    │
-│  │  Docker Containers (Optimized) │    │
-│  │                                 │    │
-│  │  ┌──────────┐  ┌──────────┐   │    │
-│  │  │ Gateway  │  │ Crawler  │   │    │
-│  │  │  (prod)  │  │  (prod)  │   │    │
-│  │  └────┬─────┘  └────┬─────┘   │    │
-│  │       │             │          │    │
-│  │  Code baked in images          │    │
-│  │  (Immutable, versioned)        │    │
-│  └────────────────────────────────┘    │
-│                                          │
-│  Persistent Volumes:                    │
-│  - Vector DB data                       │
-│  - Redis cache                          │
-│  - Application logs                     │
-└─────────────────────────────────────────┘
-
-Features:
-✓ Stable, tested images
-✓ Version control
-✓ Scalable
-✓ Rollback support
+ConversationStore (In-Memory)
+├── conversations: Dict[conversation_id, List[Message]]
+│   └── Message: {role, content, tool_calls?, name?, tool_call_id?}
+├── timestamps: Dict[conversation_id, datetime]
+├── max_age: 24 hours
+└── max_messages: 50 per conversation
 ```
 
----
+### Message Flow
+
+**Stored Messages**:
+- User messages: `{role: "user", content: "..."}`
+- Assistant responses: `{role: "assistant", content: "..."}`
+
+**NOT Stored**:
+- System prompts (regenerated each request)
+- Few-shot examples (always included)
+- Intermediate tool call messages
+- Tool result messages
+
+### Context Rebuilding
+
+For each request with `conversation_id`:
+```
+Final Messages = [
+    System Prompt (with current date),
+    Few-Shot Examples (NVIDIA, RISC-V),
+    Stored User/Assistant History,
+    New User Message
+]
+```
+
+## Tool Calling Intelligence
+
+### Trigger Detection
+
+**29 Trigger Words**:
+```
+'latest', 'this week', 'this month', 'breaking', 'recent',
+'earnings', 'guidance', 'ticker', 'market', 'price',
+'launched', 'announced', 'filed', 'SEC', '10-K', '10-Q',
+'news', 'update', 'current', 'now', 'just', 'new', 'fresh',
+'live', 'today', 's&p', 'sp500', 'dow', 'nasdaq', 'index',
+'stock', 'close', 'closing'
+```
+
+### Context-Aware Detection
+
+If trigger words NOT in current query, check conversation history:
+- Examine last 4 messages
+- Look for: `news`, `event`, `headline`, `story`, `article`, `report`, `coverage`
+- If found → Include tools for follow-up questions
+
+### Tool Choice Strategy
+
+| Scenario | tool_choice | Behavior |
+|----------|-------------|----------|
+| Explicit fresh data query | `{"type": "function", "function": {"name": "crawl_and_refresh"}}` | **FORCED**: LLM must call tool |
+| Follow-up in news context | `"auto"` | **GUIDED**: Tool available, strong prompt enforcement |
+| General question | `null` | No tools included |
+
+## Timeout Configuration
+
+```
+User Request
+    ↓
+Gateway (45s timeout)
+    ↓
+Crawler (endpoint timeout)
+    ↓
+FireCrawl (25s asyncio.wait_for)
+    ├─ Search API
+    └─ Scrape API (per URL)
+
+If FireCrawl times out → Playwright fallback
+```
+
+## Environment Configuration
+
+### Critical Settings
+
+```bash
+# FireCrawl Redis Connection (Required!)
+REDIS_RATE_LIMIT_URL=redis://redis:6379
+
+# Gateway Timeout
+GATEWAY_TIMEOUT=45  # seconds
+
+# FireCrawl Timeout
+FIRECRAWL_TIMEOUT=25  # seconds
+
+# Conversation Memory
+CONVERSATION_MAX_AGE=24  # hours
+CONVERSATION_MAX_MESSAGES=50
+
+# LLM Provider
+LLM_PROVIDER=azure  # or 'openai'
+AZURE_OPENAI_ENDPOINT=https://...
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5-chat
+AZURE_OPENAI_API_VERSION=2025-01-01-preview
+```
+
+## Deployment
+
+### Docker Compose Services
+
+```yaml
+services:
+  gateway:              # FastAPI + Conversation Store + Multi-LLM
+  crawler:              # FireCrawl + Playwright + Trafilatura
+  indexer:              # LlamaIndex + Vector DB Client
+  mcp-server:           # Local file operations (Port 8003)
+  azure-devops-mcp:     # Azure DevOps code search (Port 8004)
+  firecrawl:            # Search & Scrape Engine
+  qdrant:               # Vector Database
+  postgres:             # Metadata Store
+  redis:                # Rate Limiting
+```
+
+### MCP Server Architecture
+
+#### Local Access MCP Server (Port 8003)
+
+**Purpose**: Secure file operations on mounted local volumes
+
+**Features**:
+- Read files with path validation
+- List directories with filters
+- Semantic search (optional, requires OpenAI API key)
+- Security: Path traversal protection
+
+**Configuration**:
+```bash
+MCP_ROOT_FOLDER=/data/files          # Container path
+MCP_VECTOR_DB_PATH=/data/mcp_vector_db  # Optional index
+MCP_SERVER_URL=http://mcp-server:8003
+```
+
+**Volume Mounting**:
+```yaml
+volumes:
+  - C:/os:/data/files           # Windows
+  - /opt/data:/data/files:ro    # Linux (read-only)
+```
+
+#### Azure DevOps MCP Server (Port 8004)
+
+**Purpose**: Fast code search across Azure DevOps repositories
+
+**Features**:
+- Code search using Azure DevOps Code Search API (100x+ faster)
+- File retrieval from specific paths/branches
+- MSAL OAuth + PAT authentication
+- Automatic search optimization (indexed vs. direct)
+
+**Configuration**:
+```bash
+AZURE_DEVOPS_ORG=microsoft
+AZURE_DEVOPS_PROJECT=OS
+AZURE_DEVOPS_REPO=os.2020
+AZURE_DEVOPS_BRANCH=official/rs_sparc_ctr_exp
+AZURE_DEVOPS_PAT=your-pat-token
+AZURE_DEVOPS_MCP_URL=http://azure-devops-mcp:8004
+```
+
+**Performance**:
+- Keyword searches: ~1 second (was 120+ seconds)
+- File pattern + recursive: ~1 second
+- Uses `https://almsearch.dev.azure.com` for indexed search
+
+**Tool Selection Logic**:
+
+The gateway automatically routes requests to the appropriate MCP server:
+
+```python
+# Local file operations
+"List files in /docs folder" → Local MCP (8003)
+"Read README.md" → Local MCP (8003)
+
+# Azure DevOps operations
+"azdo:find TypeScript files" → Azure DevOps MCP (8004)
+"azdo:show config.json" → Azure DevOps MCP (8004)
+```
+
+**Prefix Convention**:
+- `azdo:` prefix → Azure DevOps MCP
+- No prefix → Local MCP (default)
+
+📖 **Documentation**:
+- Local MCP: [mcp_servers/local_access_mcp_server/](../mcp_servers/local_access_mcp_server/)
+- Azure DevOps MCP: [mcp_servers/azure_devops_mcp_server/](../mcp_servers/azure_devops_mcp_server/)
+
+### Health Checks
+
+- Gateway: `GET /health` (200 OK)
+- Crawler: `GET /health` (200 OK)
+- Indexer: `GET /health` (200 OK)
+- MCP Server (Local): `GET /health` (200 OK)
+- Azure DevOps MCP: `GET /health` (200 OK)
+- FireCrawl: Port 3002 accessible
+
+## Scaling Considerations
+
+### Current Limitations
+
+1. **Conversation Store**: In-memory (lost on restart)
+   - Production: Use Redis with persistence
+
+2. **Sequential Playwright**: No parallel browser instances
+   - Reason: Docker stability (prevents crashes)
+   - Future: Browser pooling with proper resource limits
+
+3. **Single Gateway Instance**: No load balancing
+   - Production: Multiple gateway replicas + Redis conversation store
+
+### Recommended Production Setup
+
+```
+                    ┌──────────────┐
+                    │ Load Balancer│
+                    └──────┬───────┘
+                           │
+            ┌──────────────┼──────────────┐
+            ▼              ▼              ▼
+        Gateway-1      Gateway-2      Gateway-3
+            │              │              │
+            └──────────────┼──────────────┘
+                           │
+            ┌──────────────┼──────────────┐
+            ▼              ▼              ▼
+        Crawler-1      Crawler-2      Crawler-3
+            │              │              │
+            └──────────────┼──────────────┘
+                           │
+                    ┌──────▼───────┐
+                    │ Shared Redis │ (Conversation Store)
+                    └──────────────┘
+```
+
+## Performance Metrics
+
+| Operation | Typical Time | Max Time |
+|-----------|-------------|----------|
+| Simple query (no tools) | 500-800ms | 2s |
+| News query (with crawl) | 10-15s | 45s |
+| Follow-up (with tool) | 8-12s | 45s |
+| Conversation load | <10ms | 50ms |
+
+## Troubleshooting
+
+### Common Issues
+
+1. **"I'll fetch..." but no data returned**
+   - Cause: Tool not called, tool_choice=auto failed
+   - Fix: Check trigger words, verify context detection logs
+
+2. **FireCrawl hanging**
+   - Cause: Missing REDIS_RATE_LIMIT_URL
+   - Fix: Set environment variable in docker-compose.yml
+
+3. **Conversation context lost**
+   - Cause: conversation_id not passed by client
+   - Fix: Client must store and send conversation_id
+
+4. **Timeout errors**
+   - Cause: Queries taking >45 seconds
+   - Fix: Increase GATEWAY_TIMEOUT, optimize crawl depth
+
+5. **Playwright crashes in Docker**
+   - Cause: Concurrent browser instances
+   - Fix: Sequential rendering already implemented
 
 ## Security Considerations
 
-### MCP Server Security
-- **Path Validation**: All file paths validated against configured root
-- **No Directory Traversal**: `../` attempts rejected
-- **Read-Only by Default**: No write operations without explicit approval
-- **Binary Detection**: Non-text files identified and handled safely
+- **API Keys**: Store in `.env`, never commit
+- **Rate Limiting**: Redis-backed FireCrawl limits
+- **Conversation TTL**: Auto-expire after 24 hours
+- **Input Validation**: FastAPI Pydantic models
+- **CORS**: Configure for production domains
 
-### Web Crawler Security
-- **Robots.txt Respect**: Honors website crawling rules
-- **Rate Limiting**: Prevents aggressive crawling
-- **Domain Whitelist**: Optional domain restrictions
-- **Authentication**: Secure handling of auth cookies/tokens
+## Monitoring & Logging
 
-### API Security
-- **Environment Variables**: Sensitive data in `.env` (not committed)
-- **API Key Isolation**: Each service has minimal permissions
-- **Network Isolation**: Services communicate on private Docker network
+### Log Levels
 
----
+```python
+gateway.routers.chat: INFO
+  - "Loaded X previous messages"
+  - "Including crawl tool (forced)"
+  - "First LLM response has tool_calls: True"
 
-## Performance Characteristics
+crawler.main: INFO
+  - "FireCrawl search completed"
+  - "Playwright fallback triggered"
 
-### Latency Breakdown (Typical Query)
-
-```
-Total: ~8-15 seconds for web RAG query
-
-Gateway Processing:       100-200ms
-├─ Load conversation:     50ms
-├─ Tool selection:        50ms
-└─ Response formatting:   50ms
-
-Crawler Execution:        5-10 seconds
-├─ FireCrawl search:      2-3s
-├─ Playwright render:     3-5s
-└─ Trafilatura extract:   1-2s
-
-Indexer Processing:       2-3 seconds
-├─ Chunking:              100ms
-├─ Embedding generation:  1-2s
-└─ Vector storage:        500ms
-
-Retrieval:                500ms-1s
-├─ Semantic search:       200-500ms
-└─ Ranking:               100ms
-
-LLM Response Generation:  2-5 seconds
-├─ First LLM call:        1-2s
-└─ Second LLM call:       1-3s
+indexer.main: INFO
+  - "Indexed X documents"
 ```
 
-### Throughput
-- **Gateway**: 50-100 requests/minute
-- **Crawler**: 10-20 pages/minute (sequential Playwright)
-- **Indexer**: 100+ documents/minute
-- **MCP Server**: 1000+ file ops/minute
+### Key Metrics to Monitor
 
-### Resource Usage (Typical)
-- **Memory**: 2-4 GB total
-  - Gateway: 200-400 MB
-  - Crawler: 500-1000 MB (Playwright)
-  - Indexer: 300-500 MB
-  - MCP Server: 100-200 MB
-  - Vector DB: 500-1000 MB
-- **CPU**: 1-2 cores for normal load
-- **Disk**: 1-5 GB (vector DB + logs)
-
----
-
-## Scalability
-
-### Horizontal Scaling
-- **Gateway**: Multiple instances with load balancer
-- **Crawler**: Multiple instances (sequential rendering per instance)
-- **Indexer**: Multiple instances (stateless)
-- **MCP Server**: Multiple instances (read-only operations)
-
-### Vertical Scaling
-- **Vector DB**: Increase RAM for larger document corpus
-- **Crawler**: More CPU/RAM for complex JavaScript pages
-
-### Bottlenecks
-1. **Playwright Rendering**: CPU-intensive, scales with instances
-2. **Embedding Generation**: API rate limits (OpenAI)
-3. **Vector Search**: DB size impacts query time
-
----
-
-## Monitoring and Observability
-
-### Health Checks
-- All services expose `/health` endpoint
-- Docker healthcheck configuration
-- Automatic restart on failure
-
-### Metrics (Prometheus)
-- Request rates and latencies
-- Tool call distributions
-- Cache hit rates
-- Error rates
-
-### Logging
-- Structured JSON logs
-- Request ID tracing
-- Tool execution tracking
-- Conversation flow logging
-
-### Grafana Dashboards
-- Service health overview
-- Request latency distribution
-- Tool usage analytics
-- Error rate trends
-
----
-
-## Technology Stack Summary
-
-| Component | Technology | Version | Purpose |
-|-----------|-----------|---------|---------|
-| Gateway | FastAPI | 0.104+ | API orchestration |
-| Crawler | Playwright | Latest | JavaScript rendering |
-| Indexer | LlamaIndex | 0.9+ | Document chunking |
-| MCP Server | FastAPI | 0.104+ | File operations |
-| Vector DB | Qdrant | 1.7+ | Embedding storage |
-| Cache | Redis | 7 | Rate limiting |
-| LLM | OpenAI/Azure | GPT-4 | Response generation |
-| Embeddings | OpenAI | text-embedding-3 | Semantic search |
-| Container | Docker | 20+ | Service isolation |
-| Orchestration | Docker Compose | 2.0+ | Multi-service management |
-| Monitoring | Prometheus | Latest | Metrics collection |
-| Visualization | Grafana | Latest | Dashboards |
-
----
-
-## Related Documentation
-
-- [Main README](../README.md) - Quick start and overview
-- [MCP Server](../mcp_server/README.md) - Detailed MCP documentation
-- [MCP Quickstart](../mcp_server/QUICKSTART.md) - Getting started with file operations
-- [Authentication Setup](AUTHENTICATION_SETUP.md) - Crawler authentication
-- [Development Guide](DEVELOPMENT.md) - Developer setup
-- [Monitoring Guide](MONITORING.md) - Observability setup
+- Conversation store size (memory usage)
+- Tool call success rate
+- Average response time
+- FireCrawl timeout frequency
+- Playwright fallback rate
