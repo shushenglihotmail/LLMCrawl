@@ -89,7 +89,7 @@ Add to your **mcp.json** file in VS Code user folder (typically `%APPDATA%\Code\
       "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
       "args": [
         "-m",
-        "azure_devops_mcp_server",
+        "azure_devops_client",
         "--mode",
         "stdio",
         "--organization",
@@ -203,7 +203,7 @@ curl -X POST http://localhost:8004/invoke \
 **Interactive Auth (stdio mode):**
 
 ```bash
-python -m azure_devops_mcp_server \
+python -m azure_devops_client \
   --mode stdio \
   --organization microsoft \
   --project OS \
@@ -216,7 +216,7 @@ python -m azure_devops_mcp_server \
 ```bash
 export AZURE_DEVOPS_PAT=your-pat-token
 
-python -m azure_devops_mcp_server \
+python -m azure_devops_client \
   --mode http \
   --port 8004 \
   --organization microsoft \

@@ -22,7 +22,7 @@
             "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
             "args": [
                 "-m",
-                "azure_devops_mcp_server",
+                "azure_devops_client",
                 "--mode",
                 "stdio",
                 "--organization",

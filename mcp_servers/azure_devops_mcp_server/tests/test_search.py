@@ -17,7 +17,7 @@ import sys
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from azure_devops_mcp_server.azure_client import AzureDevOpsClient
+from azure_devops_client.azure_client import AzureDevOpsClient
 
 
 def parse_filter(filter_str: str) -> dict:

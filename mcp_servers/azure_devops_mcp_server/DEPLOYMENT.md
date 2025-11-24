@@ -111,7 +111,7 @@ cd azure_devops_mcp_server
 pip install -e .
 
 # Run with interactive auth
-python -m azure_devops_mcp_server \
+python -m azure_devops_client \
   --mode stdio \
   --organization microsoft \
   --project OS \
@@ -120,7 +120,7 @@ python -m azure_devops_mcp_server \
 
 # Or run HTTP mode with PAT
 export AZURE_DEVOPS_PAT=your-pat
-python -m azure_devops_mcp_server \
+python -m azure_devops_client \
   --mode http \
   --port 8004 \
   --auth-mode pat

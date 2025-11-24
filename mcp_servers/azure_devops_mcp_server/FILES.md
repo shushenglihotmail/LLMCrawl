@@ -272,7 +272,7 @@ azure_devops_mcp_server/
 1. **From Source**: `pip install -e .`
 2. **From Package**: `pip install azure-devops-mcp-server` (future)
 3. **Docker**: `docker-compose up azure-devops-mcp-server`
-4. **Standalone**: `python -m azure_devops_mcp_server`
+4. **Standalone**: `python -m azure_devops_client`
 
 ## Usage Modes
 

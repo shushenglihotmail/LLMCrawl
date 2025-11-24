@@ -158,7 +158,7 @@ python test_integration.py --help
 ```bash
 # Start HTTP server
 cd azure_devops_mcp_server
-python -m azure_devops_mcp_server --mode http --auth-mode pat
+python -m azure_devops_client --mode http --auth-mode pat
 
 # In another terminal, run tests
 cd tests

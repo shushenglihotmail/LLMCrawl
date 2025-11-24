@@ -5,7 +5,7 @@ This guide will help you set up a complete development environment for the LLMCr
 ## Prerequisites
 
 - **Python 3.10+** - Required for all services
-- **Docker & Docker Compose** - For containerized services  
+- **Docker & Docker Compose** - For containerized services
 - **Git** - For version control
 - **PowerShell** (Windows) - For setup scripts
 
@@ -36,7 +36,7 @@ python scripts/setup_dev.py
    # Windows
    python -m venv venv
    venv\Scripts\activate
-   
+
    # Unix/Linux/macOS
    python -m venv venv
    source venv/bin/activate
@@ -64,6 +64,7 @@ python scripts/setup_dev.py
 
 6. **Configure environment:**
    ```bash
+   cd deploy
    cp .env.example .env
    # Edit .env with your API keys and configuration
    ```

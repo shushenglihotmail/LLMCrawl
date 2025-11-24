@@ -8,7 +8,7 @@ Created a standalone Azure DevOps MCP server that provides code search and file 
 
 ### Core Implementation
 
-1. **azure_devops_mcp_server/azure_client.py** (500+ lines)
+1. **azure_devops_client/azure_client.py** (500+ lines)
    - `AzureDevOpsClient` class with MSAL authentication
    - Interactive OAuth using device code flow (opens browser)
    - PAT (Personal Access Token) authentication support
@@ -24,7 +24,7 @@ Created a standalone Azure DevOps MCP server that provides code search and file 
    - Token caching in `~/.mcp_cache/azure_devops_token.bin`
    - Connection testing and error handling
 
-2. **azure_devops_mcp_server/server.py** (200+ lines)
+2. **azure_devops_client/server.py** (200+ lines)
    - `AzureDevOpsMCPServer` class implementing MCP protocol
    - Tool definitions for OpenAI function calling format
    - JSON-RPC message handling for stdio mode
@@ -34,7 +34,7 @@ Created a standalone Azure DevOps MCP server that provides code search and file 
      - `search_azure_devops_code` - Search with filters
      - `get_azure_devops_file` - Get file content
 
-3. **azure_devops_mcp_server/http_server.py** (120+ lines)
+3. **azure_devops_client/http_server.py** (120+ lines)
    - FastAPI HTTP server for LLMCrawl integration
    - Endpoints:
      - `GET /health` - Health check
@@ -44,7 +44,7 @@ Created a standalone Azure DevOps MCP server that provides code search and file 
    - CORS middleware for browser access
    - Startup authentication handling
 
-4. **azure_devops_mcp_server/__main__.py** (150+ lines)
+4. **azure_devops_client/__main__.py** (150+ lines)
    - Command-line entry point
    - Argument parsing for dual mode
    - Environment variable configuration
@@ -56,13 +56,13 @@ Created a standalone Azure DevOps MCP server that provides code search and file 
      - `--auth-mode interactive|pat`
      - `--pat` (PAT token)
 
-5. **azure_devops_mcp_server/__init__.py**
+5. **azure_devops_client/__init__.py**
    - Package initialization
    - Version and exports
 
 ### Configuration & Deployment
 
-6. **azure_devops_mcp_server/pyproject.toml**
+6. **azure_devops_client/pyproject.toml**
    - Python package configuration
    - Dependencies:
      - httpx, pydantic, python-dotenv
@@ -71,7 +71,7 @@ Created a standalone Azure DevOps MCP server that provides code search and file 
    - Dev dependencies: pytest, black, isort, mypy
    - Entry point: `azure-devops-mcp-server` command
 
-7. **azure_devops_mcp_server/Dockerfile**
+7. **azure_devops_client/Dockerfile**
    - Python 3.11-slim base image
    - Package installation with pip
    - Token cache directory
@@ -88,7 +88,7 @@ Created a standalone Azure DevOps MCP server that provides code search and file 
 
 ### Documentation
 
-9. **azure_devops_mcp_server/README.md** (250+ lines)
+9. **azure_devops_client/README.md** (250+ lines)
    - Complete feature overview
    - Dual transport architecture explanation
    - Authentication methods (MSAL + PAT)
@@ -98,7 +98,7 @@ Created a standalone Azure DevOps MCP server that provides code search and file 
    - Environment variables reference
    - Security considerations
 
-10. **azure_devops_mcp_server/QUICKSTART.md** (200+ lines)
+10. **azure_devops_client/QUICKSTART.md** (200+ lines)
     - Installation instructions
     - VS Code setup (stdio mode)
     - LLMCrawl integration (HTTP mode)
@@ -108,14 +108,14 @@ Created a standalone Azure DevOps MCP server that provides code search and file 
     - Configuration table
     - Example tool calls
 
-11. **azure_devops_mcp_server/vscode-settings.example.jsonc**
+11. **azure_devops_client/vscode-settings.example.jsonc**
     - Example VS Code MCP configuration
     - Command and arguments for stdio mode
     - Environment variable examples
 
 ### Testing
 
-12. **azure_devops_mcp_server/test_azure_devops_mcp.py** (200+ lines)
+12. **azure_devops_client/test_azure_devops_mcp.py** (200+ lines)
     - HTTP mode test suite
     - Gateway integration tests
     - Test cases:
@@ -267,7 +267,7 @@ docker-compose up -d azure-devops-mcp-server
 
 ```bash
 # Interactive auth
-python -m azure_devops_mcp_server \
+python -m azure_devops_client \
   --mode stdio \
   --organization microsoft \
   --project OS \
@@ -276,7 +276,7 @@ python -m azure_devops_mcp_server \
 
 # HTTP mode with PAT
 export AZURE_DEVOPS_PAT=your-pat
-python -m azure_devops_mcp_server --mode http --auth-mode pat
+python -m azure_devops_client --mode http --auth-mode pat
 ```
 
 ## Key Features
@@ -339,8 +339,8 @@ python test_azure_devops_mcp.py gateway
 ## Repository Structure
 
 ```
-azure_devops_mcp_server/
-├── azure_devops_mcp_server/
+azure_devops_client/
+├── azure_devops_client/
 │   ├── __init__.py
 │   ├── __main__.py         # Entry point
 │   ├── azure_client.py     # Azure DevOps API client

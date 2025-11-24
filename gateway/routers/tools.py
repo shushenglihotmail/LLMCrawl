@@ -77,7 +77,11 @@ class ToolHandler:
             elif tool_name in self.mcp_tools:
                 result = await self._handle_mcp_tool(tool_name, arguments, request_id)
                 success = True
-            elif tool_name in ["search_azure_devops_code", "get_azure_devops_file"]:
+            elif tool_name in [
+                "search_azure_devops_code",
+                "search_azure_devops_files",
+                "get_azure_devops_file",
+            ]:
                 result = await self._handle_azure_devops_tool(
                     tool_name, arguments, request_id
                 )
@@ -403,6 +407,13 @@ class ToolHandler:
         azure_devops_mcp_url = os.getenv(
             "AZURE_DEVOPS_MCP_URL", "http://azure-devops-mcp-server:8004"
         )
+
+        # Add branch parameter if not provided and environment variable exists
+        if tool_name == "get_azure_devops_file" and "branch" not in arguments:
+            branch = os.getenv("AZURE_DEVOPS_BRANCH")
+            if branch:
+                arguments["branch"] = branch
+                logger.debug(f"Added branch from environment: {branch}")
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:

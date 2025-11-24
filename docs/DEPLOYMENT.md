@@ -69,6 +69,7 @@ cd LLMCrawl
 
 ```bash
 # Copy template
+cd deploy
 cp .env.example .env
 
 # Edit with your preferred editor

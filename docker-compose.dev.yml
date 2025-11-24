@@ -17,6 +17,7 @@ services:
       - LOG_LEVEL=DEBUG
       - RELOAD=true
       - MCP_SERVER_URL=http://web-rag-mcp-server:8003
+      - AZURE_DEVOPS_MCP_URL=http://web-rag-azure-devops-mcp:8004
     networks:
       - webrag-network
     depends_on:
@@ -110,7 +111,7 @@ services:
     ports:
       - "8003:8003"
     volumes:
-      - ./mcp_server:/app/mcp_server:rw
+      - ./mcp_servers/local_access_mcp_server:/app/mcp_server:rw
       - C:/os:/data/files  # Mount local C:\os folder
       - mcp_vector_db:/data/mcp_vector_db
     environment:

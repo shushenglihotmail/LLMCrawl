@@ -38,7 +38,7 @@ class AzureDevOpsMCPServer:
             max_results: Default max results per query (default: 50)
         """
         self.client = AzureDevOpsClient(
-            organization, project, repository, pat, branch, max_results
+            organization, project, repository, branch, pat, max_results
         )
         self.tools = self._define_tools()
 
@@ -192,8 +192,9 @@ class AzureDevOpsMCPServer:
                         "file_path": {
                             "type": "string",
                             "description": (
-                                "Path to the file in repository "
-                                "(e.g., 'src/main.cpp', '.gitignore')"
+                                "Absolute path to the file in repository, "
+                                "MUST start with forward slash. "
+                                "Examples: '/src/main.cpp', '/Nanoserver/merged/pkggen/file.json', '/.gitignore'"
                             ),
                         },
                         "branch": {

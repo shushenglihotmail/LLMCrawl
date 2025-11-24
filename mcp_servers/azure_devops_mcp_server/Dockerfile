@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
 
 # Copy package files
 COPY pyproject.toml ./
-COPY azure_devops_mcp_server ./azure_devops_mcp_server
+COPY azure_devops_client ./azure_devops_client
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -e .
@@ -34,4 +34,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8004/health')" || exit 1
 
 # Run server
-CMD ["python", "-m", "azure_devops_mcp_server"]
+CMD ["python", "-m", "azure_devops_client"]

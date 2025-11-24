@@ -1,0 +1,161 @@
+{
+    "targetPathExamples": {
+        "categories": [
+            {
+                "name": "Local Files",
+                "description": "Regular paths without prefix",
+                "examples": [
+                    {
+                        "title": "Single local file",
+                        "paths": "src/service.py",
+                        "description": "Read a single local Python file"
+                    },
+                    {
+                        "title": "Multiple local files",
+                        "paths": "src/service.py\nsrc/utils/helpers.py\ntests/test_service.py",
+                        "description": "Read multiple local files (one per line)"
+                    },
+                    {
+                        "title": "Local folder",
+                        "paths": "src/models/",
+                        "description": "List all files in a folder"
+                    }
+                ]
+            },
+            {
+                "name": "Azure DevOps Files",
+                "description": "Paths with azdo: prefix",
+                "examples": [
+                    {
+                        "title": "Single Azure DevOps file",
+                        "paths": "azdo:MergedComponents/pkggen/Microsoft-NanoServer-PowerShell.json",
+                        "description": "Read a specific file from Azure DevOps repository"
+                    },
+                    {
+                        "title": "Multiple Azure DevOps files",
+                        "paths": "azdo:src/onecore/vm/compute/dll/ComputeServiceModule.cpp\nazdo:src/onecore/vm/compute/dll/ComputeService.h\nazdo:docs/ARCHITECTURE.md",
+                        "description": "Read multiple Azure DevOps files"
+                    },
+                    {
+                        "title": "Azure DevOps folder",
+                        "paths": "azdo:MergedComponents/pkggen/",
+                        "description": "List files in Azure DevOps folder"
+                    }
+                ]
+            },
+            {
+                "name": "Azure DevOps Queries",
+                "description": "Search patterns with filters",
+                "examples": [
+                    {
+                        "title": "Keyword + file pattern",
+                        "paths": "azdo:Microsoft-NanoServer-PowerShell AND file:*.json",
+                        "description": "Find all JSON files matching keyword"
+                    },
+                    {
+                        "title": "Extension filter",
+                        "paths": "azdo:Microsoft-NanoServer-PowerShell ext:man",
+                        "description": "Find all .man files with keyword"
+                    },
+                    {
+                        "title": "Path filter",
+                        "paths": "azdo:path:/MergedComponents Microsoft-NanoServer-PowerShell",
+                        "description": "Search only within specific folder"
+                    },
+                    {
+                        "title": "Advanced query",
+                        "paths": "azdo:branch:official/rs_sparc_ctr; path:/MergedComponents; Microsoft-NanoServer-PowerShell AND file:*.json",
+                        "description": "Full query with branch, path, keyword, and file pattern"
+                    },
+                    {
+                        "title": "Multiple queries",
+                        "paths": "azdo:compute ext:cpp\nazdo:network ext:h\nazdo:pipeline file:*.yml",
+                        "description": "Run multiple search queries"
+                    }
+                ]
+            },
+            {
+                "name": "Mixed Sources",
+                "description": "Combine local and Azure DevOps",
+                "examples": [
+                    {
+                        "title": "Local tests + Azure DevOps code",
+                        "paths": "tests/test_service.py\nazdo:src/services/NetworkService.cpp\nazdo:src/services/NetworkService.h",
+                        "description": "Mix local test files with remote source files"
+                    },
+                    {
+                        "title": "Query + local reference",
+                        "paths": "azdo:Microsoft-NanoServer-PowerShell ext:json\ndocs/local-notes.md\nexamples/sample-config.json",
+                        "description": "Azure DevOps query with local documentation"
+                    }
+                ]
+            }
+        ],
+        "quickReference": {
+            "syntax": {
+                "localFile": "path/to/file",
+                "azureDevOpsFile": "azdo:path/to/file",
+                "azureDevOpsQuery": "azdo:keyword filters"
+            },
+            "filters": [
+                {
+                    "name": "file",
+                    "syntax": "file:*.ext",
+                    "example": "file:*.json",
+                    "description": "Match filename pattern"
+                },
+                {
+                    "name": "ext",
+                    "syntax": "ext:type",
+                    "example": "ext:cpp",
+                    "description": "Match file extension (no dot)"
+                },
+                {
+                    "name": "path",
+                    "syntax": "path:/folder",
+                    "example": "path:/src",
+                    "description": "Search within folder"
+                },
+                {
+                    "name": "branch",
+                    "syntax": "branch:name",
+                    "example": "branch:main",
+                    "description": "Use specific branch"
+                }
+            ],
+            "operators": [
+                {
+                    "name": "AND",
+                    "description": "All conditions must match",
+                    "example": "compute AND network"
+                },
+                {
+                    "name": "OR",
+                    "description": "Any condition can match",
+                    "example": "network OR socket"
+                }
+            ],
+            "tips": [
+                "Always use azdo: prefix for Azure DevOps files/queries",
+                "One path per line for multiple files",
+                "Queries return up to 10 matching files",
+                "Mix local and Azure DevOps freely",
+                "Use ext:cpp not ext:.cpp (no dot in extension)"
+            ]
+        },
+        "troubleshooting": [
+            {
+                "error": "Could not read any target files",
+                "solution": "Check azdo: prefix is present for Azure DevOps files and paths are correct"
+            },
+            {
+                "error": "No files found for query",
+                "solution": "Query too specific - try broader keywords or check path/branch"
+            },
+            {
+                "error": "Azure DevOps MCP URL not configured",
+                "solution": "Set AZURE_DEVOPS_MCP_URL environment variable and verify server is running"
+            }
+        ]
+    }
+}

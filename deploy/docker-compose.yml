@@ -77,7 +77,7 @@ services:
   # Gateway Service
   gateway:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile.gateway
     container_name: web-rag-gateway
     ports:
@@ -88,6 +88,7 @@ services:
       - CRAWLER_URL=http://crawler:8001
       - INDEXER_URL=http://indexer:8002
       - MCP_SERVER_URL=http://mcp-server:8003
+      - AZURE_DEVOPS_BRANCH=official/rs_sparc_ctr_exp
     env_file:
       - .env
     volumes:
@@ -108,7 +109,7 @@ services:
   # Crawler Service
   crawler:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile.crawler
     container_name: web-rag-crawler
     ports:
@@ -137,7 +138,7 @@ services:
   # Indexer Service
   indexer:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile.indexer
     container_name: web-rag-indexer
     ports:
@@ -192,7 +193,7 @@ services:
   # Azure DevOps MCP Server
   azure-devops-mcp-server:
     build:
-      context: ../azure_devops_mcp_server
+      context: ../mcp_servers/azure_devops_mcp_server
       dockerfile: Dockerfile
     container_name: web-rag-azure-devops-mcp
     ports:
@@ -204,6 +205,8 @@ services:
       - AZURE_DEVOPS_ORG=microsoft
       - AZURE_DEVOPS_PROJECT=OS
       - AZURE_DEVOPS_REPO=os.2020
+      - AZURE_DEVOPS_BRANCH=official/rs_sparc_ctr_exp
+      - AZURE_DEVOPS_MAX_RESULTS=50
       - AZURE_DEVOPS_AUTH_MODE=pat
       # Set AZURE_DEVOPS_PAT in .env file
     env_file:
@@ -223,7 +226,7 @@ services:
   # Demo Web Client (optional)
   demo-client:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile.demo
     container_name: web-rag-demo
     ports:
@@ -246,7 +249,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -268,7 +271,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./deploy/grafana-provisioning:/etc/grafana/provisioning
+      - ./grafana-provisioning:/etc/grafana/provisioning
     networks:
       - webrag-network
     depends_on:
@@ -287,4 +290,6 @@ volumes:
 
 networks:
   webrag-network:
+    external: true
+    name: webrag-network
     driver: bridge

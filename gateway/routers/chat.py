@@ -31,6 +31,37 @@ router = APIRouter()
 _mcp_tools_cache: Optional[List[Dict[str, Any]]] = None
 
 
+def convert_mcp_tool_to_openai(mcp_tool: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert MCP tool format to OpenAI function calling format.
+
+    MCP format:
+    {
+        "name": "tool_name",
+        "description": "...",
+        "inputSchema": {...}
+    }
+
+    OpenAI format:
+    {
+        "type": "function",
+        "function": {
+            "name": "tool_name",
+            "description": "...",
+            "parameters": {...}
+        }
+    }
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": mcp_tool.get("name"),
+            "description": mcp_tool.get("description"),
+            "parameters": mcp_tool.get("inputSchema", {}),
+        },
+    }
+
+
 def _get_default_model() -> str:
     """Get the first available model from LLM_MODELS config."""
     try:
@@ -43,7 +74,7 @@ def _get_default_model() -> str:
 
 
 async def get_mcp_tools() -> List[Dict[str, Any]]:
-    """Fetch MCP tools from the MCP server."""
+    """Fetch MCP tools from the MCP server and convert to OpenAI format."""
     global _mcp_tools_cache
 
     if _mcp_tools_cache is not None:
@@ -56,8 +87,10 @@ async def get_mcp_tools() -> List[Dict[str, Any]]:
             response = await client.get(f"{mcp_server_url}/tools")
             response.raise_for_status()
             data = response.json()
-            _mcp_tools_cache = data.get("tools", [])
-            logger.info(f"Loaded {len(_mcp_tools_cache)} MCP tools")
+            mcp_tools = data.get("tools", [])
+            # Convert MCP format to OpenAI format
+            _mcp_tools_cache = [convert_mcp_tool_to_openai(tool) for tool in mcp_tools]
+            logger.info(f"Loaded and converted {len(_mcp_tools_cache)} MCP tools")
             return _mcp_tools_cache
     except Exception as e:
         logger.warning(f"Failed to load MCP tools: {e}")
@@ -65,7 +98,7 @@ async def get_mcp_tools() -> List[Dict[str, Any]]:
 
 
 async def get_azure_devops_tools() -> List[Dict[str, Any]]:
-    """Fetch tools from Azure DevOps MCP server."""
+    """Fetch tools from Azure DevOps MCP server and convert to OpenAI format."""
     global _mcp_tools_cache
 
     azure_mcp_url = os.getenv(
@@ -77,8 +110,10 @@ async def get_azure_devops_tools() -> List[Dict[str, Any]]:
             response = await client.get(f"{azure_mcp_url}/tools")
             response.raise_for_status()
             data = response.json()
-            tools = data.get("tools", [])
-            logger.info(f"Loaded {len(tools)} Azure DevOps MCP tools")
+            mcp_tools = data.get("tools", [])
+            # Convert MCP format to OpenAI format
+            tools = [convert_mcp_tool_to_openai(tool) for tool in mcp_tools]
+            logger.info(f"Loaded and converted {len(tools)} Azure DevOps MCP tools")
             return tools
     except Exception as e:
         logger.warning(f"Failed to load Azure DevOps MCP tools: {e}")

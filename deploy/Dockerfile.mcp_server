@@ -7,7 +7,7 @@ COPY requirements/mcp_server.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy MCP server code
-COPY mcp_server/ /app/mcp_server/
+COPY mcp_servers/local_access_mcp_server/ /app/mcp_server/
 
 # Create data directories
 RUN mkdir -p /data/files /data/mcp_vector_db

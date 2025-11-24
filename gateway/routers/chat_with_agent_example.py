@@ -26,6 +26,9 @@ class ChatRouterWithAgent:
             crawler_url=os.getenv("CRAWLER_URL", "http://crawler:8001"),
             indexer_url=os.getenv("INDEXER_URL", "http://indexer:8002"),
             llm_client=self.llm_client,
+            azure_devops_mcp_url=os.getenv(
+                "AZURE_DEVOPS_MCP_URL", "http://azure-devops-mcp-server:8004"
+            ),
         )
 
         self.detector = WorkflowDetector(

@@ -40,8 +40,10 @@ class CodeIntelligenceAgent:
         crawler_url: str,
         indexer_url: str,
         llm_client,
+        azure_devops_mcp_url: Optional[str] = None,
     ):
         self.mcp_url = mcp_url
+        self.azure_devops_mcp_url = azure_devops_mcp_url
         self.crawler_url = crawler_url
         self.indexer_url = indexer_url
         self.llm_client = llm_client
@@ -77,10 +79,17 @@ class CodeIntelligenceAgent:
         try:
             # Step 1: Read target files (expand folders to files if needed)
             target_contents = []
+            logger.info(f"Processing {len(target_files)} target file paths")
+
             for file_path in target_files:
+                logger.info(f"Processing path: {file_path}")
+
                 # Check if it's a folder - if so, list files in it
                 if not file_path or "/" not in file_path and "\\" not in file_path:
                     # Could be folder without path separator
+                    logger.debug(
+                        f"Path has no separator, trying as folder: {file_path}"
+                    )
                     files_in_folder = await self._list_files(file_path)
                     if files_in_folder:
                         logger.info(
@@ -96,6 +105,7 @@ class CodeIntelligenceAgent:
                                 )
                     else:
                         # Try as file
+                        logger.debug(f"Not a folder, trying as file: {file_path}")
                         content = await self._read_file(file_path)
                         if content:
                             target_contents.append(
@@ -104,12 +114,15 @@ class CodeIntelligenceAgent:
                         else:
                             logger.warning(f"Could not read file: {file_path}")
                 else:
-                    # Has path separator, treat as file
+                    # Has path separator, treat as file first
+                    logger.debug(f"Path has separator, trying as file: {file_path}")
                     content = await self._read_file(file_path)
                     if content:
                         target_contents.append({"file": file_path, "content": content})
+                        logger.info(f"Successfully added file: {file_path}")
                     else:
                         # Maybe it's a folder path?
+                        logger.debug(f"Failed as file, trying as folder: {file_path}")
                         files_in_folder = await self._list_files(file_path)
                         if files_in_folder:
                             logger.info(
@@ -128,8 +141,16 @@ class CodeIntelligenceAgent:
                                 f"Could not read file or list folder: {file_path}"
                             )
 
+            logger.info(f"Successfully read {len(target_contents)} files")
+
             if not target_contents:
-                return {"error": "Could not read any target files"}
+                # Provide more specific error message
+                if len(target_files) == 1 and target_files[0].startswith("azdo:"):
+                    error_msg = f"No files found matching: {target_files[0]}. Check that the path and pattern are correct."
+                else:
+                    error_msg = f"Could not read any of the {len(target_files)} target file(s). Check that the paths exist and are accessible."
+                logger.error(error_msg)
+                return {"error": error_msg}
 
             # Estimate total input tokens
             total_chars = sum(len(tc["content"]) for tc in target_contents)
@@ -247,7 +268,49 @@ class CodeIntelligenceAgent:
             return {"error": str(e)}
 
     async def _read_file(self, file_path: str) -> Optional[str]:
-        """Read file from MCP server."""
+        """
+        Read file from MCP server (local or Azure DevOps).
+
+        If file_path starts with 'azdo:', use Azure DevOps MCP server.
+        Otherwise, use local file MCP server.
+
+        Args:
+            file_path: File path (e.g., "src/main.py" or "azdo:MergedComponents/file.json")
+
+        Returns:
+            File content or None on error
+        """
+        # Check if this is an Azure DevOps file
+        if file_path.startswith("azdo:"):
+            if not self.azure_devops_mcp_url:
+                logger.error(
+                    f"Azure DevOps file requested ({file_path}) but "
+                    f"azure_devops_mcp_url is not configured. "
+                    f"Set AZURE_DEVOPS_MCP_URL environment variable."
+                )
+                return None
+
+            # Strip prefix and normalize backslashes to forward slashes (preserve case)
+            clean_path = file_path[5:].strip()  # Remove "azdo:"
+            clean_path = clean_path.replace(
+                "\\", "/"
+            )  # Normalize backslashes only, preserve case
+
+            logger.info(
+                f"Processing Azure DevOps path after normalization: {clean_path}"
+            )
+
+            # Check if this is a query pattern (contains keywords like 'file:', 'ext:', 'path:', 'branch:', 'AND')
+            if self._is_azure_devops_query(clean_path):
+                logger.info(f"Detected query pattern, executing search: {clean_path}")
+                return await self._read_azure_devops_query(clean_path)
+            else:
+                # Single file path
+                logger.info(f"Reading Azure DevOps file: {clean_path}")
+                return await self._read_azure_devops_file(clean_path)
+
+        # Use local file MCP server
+        logger.info(f"Reading local file: {file_path}")
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 response = await client.post(
@@ -261,11 +324,395 @@ class CodeIntelligenceAgent:
                 result = response.json()
 
                 if result.get("success"):
-                    return result["result"].get("content", "")
+                    content = result["result"].get("content", "")
+                    logger.info(
+                        f"Successfully read local file: {file_path} ({len(content)} chars)"
+                    )
+                    return content
+                else:
+                    error_msg = result.get("error", "Unknown error")
+                    logger.error(f"Failed to read local file {file_path}: {error_msg}")
+                    return None
+
+            except Exception as e:
+                logger.error(f"Failed to read local file {file_path}: {e}")
+                return None
+
+    def _is_azure_devops_query(self, path: str) -> bool:
+        """Check if path is an Azure DevOps query pattern rather than a simple file path."""
+        query_keywords = ["file:", "ext:", "path:", "branch:", " AND ", " OR "]
+        # Also treat paths with wildcards, folders, or recursive patterns as queries
+        has_wildcard = "*" in path or "?" in path
+        is_folder = path.endswith("/") or path.endswith("/**")
+        return (
+            any(keyword in path for keyword in query_keywords)
+            or has_wildcard
+            or is_folder
+        )
+
+    async def _read_azure_devops_query(self, query: str) -> Optional[str]:
+        """
+        Execute Azure DevOps query pattern and read matching files.
+
+        Supports patterns like:
+        - "Microsoft-NanoServer-PowerShell AND file:*.json"
+        - "Microsoft-NanoServer-PowerShell ext:man"
+        - "branch:official/rs_sparc_ctr; path:/MergedComponents; Microsoft-NanoServer-PowerShell AND file:*.json"
+
+        Returns:
+            Combined content of all matching files (up to 10) or None on error
+        """
+        if not self.azure_devops_mcp_url:
+            logger.error("Azure DevOps MCP URL not configured")
+            return None
+
+        # Parse query to extract components
+        query_parts = self._parse_azure_devops_query(query)
+        logger.info(f"Parsed Azure DevOps query parts: {query_parts}")
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                logger.info(f"Searching Azure DevOps with query: {query_parts}")
+                response = await client.post(
+                    f"{self.azure_devops_mcp_url}/invoke",
+                    json={
+                        "tool_name": "search_azure_devops_files",
+                        "arguments": query_parts,
+                    },
+                )
+                response.raise_for_status()
+                result = response.json()
+
+                if not result.get("success"):
+                    error_msg = result.get("error", "Unknown error")
+                    logger.error(f"Azure DevOps query failed: {error_msg}")
+                    return None
+
+                files = result["result"].get("results", [])
+                if not files:
+                    logger.warning(
+                        f"No files found matching pattern. "
+                        f"Path: {query_parts.get('path_pattern', 'N/A')}, "
+                        f"File pattern: {query_parts.get('file_pattern', 'N/A')}, "
+                        f"Recursive: {query_parts.get('recursive', False)}"
+                    )
+                    return None
+
+                logger.info(f"Found {len(files)} files, reading up to 10...")
+
+                # Read content of matching files (limit to 10)
+                contents = []
+                for file_info in files[:10]:
+                    file_path = (
+                        file_info.get("path")
+                        if isinstance(file_info, dict)
+                        else file_info
+                    )
+                    content = await self._read_azure_devops_file(file_path)
+                    if content:
+                        contents.append(f"=== File: {file_path} ===\n{content}\n")
+
+                if not contents:
+                    logger.warning("Could not read any files from query results")
+                    return None
+
+                combined = "\n".join(contents)
+                logger.info(
+                    f"Read {len(contents)} files from query ({len(combined)} chars total)"
+                )
+                return combined
+
+            except Exception as e:
+                logger.error(f"Failed to execute Azure DevOps query: {e}")
+                return None
+
+    def _parse_azure_devops_query(self, query: str) -> Dict[str, Any]:
+        """
+        Parse Azure DevOps query pattern into search arguments.
+
+        Examples:
+        - "Nanoserver/merged/pkggen/Microsoft-NanoServer-Network.json" (single file)
+          -> Direct file read (not a query)
+        - "Nanoserver/merged/pkggen/Microsoft-NanoServer-Net*.json" (wildcard)
+          -> {"path_pattern": "Nanoserver/merged/pkggen", "file_pattern": "Microsoft-NanoServer-Net*.json", "recursive": False}
+        - "Nanoserver/merged/pkggen/" (folder, non-recursive)
+          -> {"path_pattern": "Nanoserver/merged/pkggen", "recursive": False}
+        - "Nanoserver/merged/pkggen/**" (folder, recursive)
+          -> {"path_pattern": "Nanoserver/merged/pkggen", "recursive": True}
+        - "Microsoft-NanoServer-PowerShell AND file:*.json"
+          -> {"keyword": "Microsoft-NanoServer-PowerShell", "file_pattern": "*.json", "recursive": True}
+        """
+        import re
+
+        has_keywords = any(
+            kw in query for kw in ["file:", "ext:", "path:", "branch:", " AND ", " OR "]
+        )
+
+        # Handle simple path patterns (no explicit keywords)
+        if not has_keywords:
+            # Check for recursive folder pattern (ends with /**)
+            if query.endswith("/**"):
+                folder = query[:-3]  # Remove /**
+                return {"path_pattern": folder, "recursive": True}
+
+            # Check for non-recursive folder pattern (ends with /)
+            elif query.endswith("/"):
+                folder = query[:-1]  # Remove trailing /
+                return {"path_pattern": folder, "recursive": False}
+
+            # Check for wildcard pattern in filename
+            elif "*" in query or "?" in query:
+                # Parse wildcard patterns:
+                # "/path/file*.json" -> search only in /path/ (recursive=False)
+                # "/path/**/file*.json" -> search recursively under /path/ (recursive=True)
+
+                # Check for /** pattern indicating recursive search
+                recursive = "**" in query
+
+                # Remove /** from path if present
+                clean_query = query.replace("/**", "/") if "**" in query else query
+
+                path_parts = clean_query.rsplit("/", 1)
+                if len(path_parts) == 2:
+                    # e.g., "/Nanoserver/merged/pkggen" + "Microsoft-NanoServer-Net*.json"
+                    path = path_parts[0]
+                    file_pattern = path_parts[1]
+
+                    # Extract extension (e.g., ".json" -> "json")
+                    extension = None
+                    if "." in file_pattern:
+                        extension = (
+                            file_pattern.rsplit(".", 1)[1]
+                            .replace("*", "")
+                            .replace("?", "")
+                        )
+
+                    # Use "file:" prefix for filename pattern search in Azure DevOps Code Search
+                    # This tells the API to search by filename, not file content
+                    result = {
+                        "path_pattern": path,  # Directory path for Path filter
+                        "keyword": f"file:{file_pattern}",  # Use file: prefix for filename search
+                        "recursive": recursive,  # False for /path/file*.json, True for /path/**/file*.json
+                    }
+                    # Don't send extension separately when using file: prefix
+                    # The file pattern already includes the extension
+                    return result
+                else:
+                    # No directory, just filename pattern
+                    result = {
+                        "keyword": f"file:{query}",  # Use file: prefix for filename search
+                        "recursive": False,  # No path specified, search in root only
+                    }
+                    return result
+                    return result
+
+            # If we get here with no keywords and no patterns, it's a single file
+            # This shouldn't happen as single files are handled by _read_azure_devops_file
+            # But just in case, treat it as a search by filename
+            return {"keyword": query, "recursive": True}
+
+        # Handle explicit keyword-based queries
+        args = {"recursive": True}  # Default to recursive for keyword searches
+
+        # Split by semicolon for explicit parameters
+        parts = [p.strip() for p in query.split(";")]
+        keyword_parts = []
+
+        for part in parts:
+            if part.startswith("branch:"):
+                args["branch"] = part[7:].strip()
+            elif part.startswith("path:"):
+                args["path_pattern"] = part[5:].strip()
+            elif part.startswith("ext:"):
+                args["extension"] = part[4:].strip()
+            elif part.startswith("file:"):
+                args["file_pattern"] = part[5:].strip()
+            else:
+                # Part of keyword search
+                keyword_parts.append(part)
+
+        # Process keyword parts for inline patterns (space-separated)
+        if keyword_parts:
+            combined = " ".join(keyword_parts)
+
+            # Extract inline patterns
+            import re
+
+            # Extract file: pattern
+            file_match = re.search(r"\bfile:(\S+)", combined)
+            if file_match and "file_pattern" not in args:
+                args["file_pattern"] = file_match.group(1)
+                combined = re.sub(r"\bfile:\S+", "", combined)
+
+            # Extract ext: pattern
+            ext_match = re.search(r"\bext:(\S+)", combined)
+            if ext_match and "extension" not in args:
+                args["extension"] = ext_match.group(1)
+                combined = re.sub(r"\bext:\S+", "", combined)
+
+            # Extract path: pattern
+            path_match = re.search(r"\bpath:(\S+)", combined)
+            if path_match and "path_pattern" not in args:
+                args["path_pattern"] = path_match.group(1)
+                combined = re.sub(r"\bpath:\S+", "", combined)
+
+            # Remaining text is keyword (remove AND/OR operators)
+            keyword = re.sub(r"\b(AND|OR)\b", "", combined).strip()
+            if keyword:
+                args["keyword"] = keyword
+
+        return args
+
+    async def _read_azure_devops_file(self, file_path: str) -> Optional[str]:
+        """Read file from Azure DevOps MCP server."""
+        if not self.azure_devops_mcp_url:
+            logger.error("Azure DevOps MCP URL not configured")
+            return None
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                # Get branch from environment if available
+                branch = os.getenv("AZURE_DEVOPS_BRANCH")
+                logger.debug(
+                    f"Calling Azure DevOps MCP: {self.azure_devops_mcp_url}/invoke (branch={branch})"
+                )
+
+                arguments = {"file_path": file_path}
+                if branch:
+                    arguments["branch"] = branch
+
+                response = await client.post(
+                    f"{self.azure_devops_mcp_url}/invoke",
+                    json={
+                        "tool_name": "get_azure_devops_file",
+                        "arguments": arguments,
+                    },
+                )
+                response.raise_for_status()
+                result = response.json()
+
+                if result.get("success"):
+                    content = result["result"].get("content", "")
+                    logger.info(
+                        f"Successfully read Azure DevOps file: {file_path} ({len(content)} chars)"
+                    )
+                    return content
+                else:
+                    error_msg = result.get("error", "Unknown error")
+                    logger.error(
+                        f"Azure DevOps MCP returned error for {file_path}: {error_msg}"
+                    )
+                    return None
+
+            except httpx.HTTPStatusError as e:
+                logger.error(
+                    f"HTTP error reading Azure DevOps file {file_path}: {e.response.status_code} - {e.response.text}"
+                )
+                return None
+            except Exception as e:
+                logger.error(f"Failed to read Azure DevOps file {file_path}: {e}")
+                return None
+
+    async def _list_files(
+        self, folder_path: str, extension: str = "", recursive: bool = False
+    ) -> Optional[List[Dict]]:
+        """
+        List files in a folder via MCP server (local or Azure DevOps).
+
+        If folder_path starts with 'azdo:' or 'azure-devops:', use Azure DevOps MCP server.
+        Otherwise, use local file MCP server.
+
+        Args:
+            folder_path: Path to folder
+            extension: Optional file extension filter
+            recursive: Whether to search subdirectories
+
+        Returns:
+            List of file info dicts with 'path' key, or None on error
+        """
+        # Check if this is an Azure DevOps path
+        is_azure_devops = folder_path.startswith(("azdo:", "azure-devops:"))
+
+        if is_azure_devops and self.azure_devops_mcp_url:
+            # Strip prefix and use Azure DevOps MCP server
+            clean_path = (
+                folder_path.split(":", 1)[1] if ":" in folder_path else folder_path
+            )
+            return await self._list_azure_devops_files(clean_path, extension, recursive)
+
+        # Use local file MCP server
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.post(
+                    f"{self.mcp_url}/invoke",
+                    json={
+                        "tool_name": "list_files",
+                        "arguments": {
+                            "folder_path": folder_path,
+                            "extension": extension,
+                            "recursive": recursive,
+                        },
+                    },
+                )
+                response.raise_for_status()
+                result = response.json()
+
+                if result.get("success"):
+                    files = result["result"].get("files", [])
+                    # Ensure each file has a 'path' key
+                    return [
+                        {"path": f if isinstance(f, str) else f.get("path", f)}
+                        for f in files
+                    ]
                 return None
 
             except Exception as e:
-                logger.error(f"Failed to read file {file_path}: {e}")
+                logger.error(f"Failed to list files in {folder_path}: {e}")
+                return None
+
+    async def _list_azure_devops_files(
+        self, path_pattern: str = "/", extension: str = "", recursive: bool = False
+    ) -> Optional[List[Dict]]:
+        """List files from Azure DevOps MCP server."""
+        if not self.azure_devops_mcp_url:
+            logger.error("Azure DevOps MCP URL not configured")
+            return None
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                # Build arguments for search_azure_devops_files
+                arguments = {
+                    "path_pattern": path_pattern,
+                    "recursive": recursive,
+                }
+
+                if extension:
+                    # Remove leading dot if present
+                    ext = extension.lstrip(".")
+                    arguments["extension"] = ext
+
+                response = await client.post(
+                    f"{self.azure_devops_mcp_url}/invoke",
+                    json={
+                        "tool_name": "search_azure_devops_files",
+                        "arguments": arguments,
+                    },
+                )
+                response.raise_for_status()
+                result = response.json()
+
+                if result.get("success"):
+                    files = result["result"].get("results", [])
+                    # Convert to expected format with 'path' key
+                    return [
+                        {"path": f["path"] if isinstance(f, dict) else f} for f in files
+                    ]
+                return None
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to list Azure DevOps files in {path_pattern}: {e}"
+                )
                 return None
 
     async def _search_web(self, query: str) -> tuple[str, List[Dict]]:

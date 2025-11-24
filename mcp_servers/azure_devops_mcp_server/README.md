@@ -66,7 +66,7 @@ Add to your **mcp.json** file (located in `%APPDATA%\Code\User\mcp.json` on Wind
       "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
       "args": [
         "-m",
-        "azure_devops_mcp_server",
+        "azure_devops_client",
         "--mode",
         "stdio",
         "--organization",
@@ -178,7 +178,7 @@ Add to your VS Code MCP configuration (`mcp.json` in `%APPDATA%\Code\User\` on W
       "command": "C:\\path\\to\\python.exe",
       "args": [
         "-m",
-        "azure_devops_mcp_server",
+        "azure_devops_client",
         "--mode",
         "stdio",
         "--organization",
@@ -205,7 +205,7 @@ Add to your VS Code MCP configuration (`mcp.json` in `%APPDATA%\Code\User\` on W
 
 ```bash
 # Start the server
-python -m azure_devops_mcp_server --mode http --port 8004
+python -m azure_devops_client --mode http --port 8004
 
 # Or with Docker
 docker run -p 8004:8004 \
@@ -218,7 +218,7 @@ docker run -p 8004:8004 \
 ### Programmatic Usage
 
 ```python
-from azure_devops_mcp_server.azure_client import AzureDevOpsClient
+from azure_devops_client.azure_client import AzureDevOpsClient
 
 # Create client instance
 client = AzureDevOpsClient(
@@ -490,7 +490,7 @@ Retrieve the full content of a specific file from the repository.
 The server will open a browser window for you to sign in with your Microsoft account.
 
 ```bash
-python -m azure_devops_mcp_server --mode http --auth interactive
+python -m azure_devops_client --mode http --auth interactive
 ```
 
 ### Personal Access Token (PAT)
@@ -501,7 +501,7 @@ Generate a PAT from Azure DevOps with "Code (Read)" permission:
 
 ```bash
 export AZURE_DEVOPS_PAT=your_pat_token
-python -m azure_devops_mcp_server --mode http
+python -m azure_devops_client --mode http
 ```
 
 ## Integration with LLMCrawl
@@ -545,7 +545,7 @@ AZURE_DEVOPS_MCP_URL=http://azure-devops-mcp:8004
 rm -rf ~/.azure/mcp_cache
 
 # Test authentication
-python -m azure_devops_mcp_server --test-auth
+python -m azure_devops_client --test-auth
 ```
 
 ### Connection Issues
@@ -615,7 +615,7 @@ black .
 isort .
 
 # Type checking
-mypy azure_devops_mcp_server/
+mypy azure_devops_client/
 ```
 
 ## Filter Syntax Guide

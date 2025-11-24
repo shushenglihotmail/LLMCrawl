@@ -66,7 +66,7 @@ Azure DevOps REST API
       "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
       "args": [
         "-m",
-        "azure_devops_mcp_server",
+        "azure_devops_client",
         "--mode",
         "stdio",
         "--organization",
@@ -116,7 +116,7 @@ When you add `"servers"` to your mcp.json:
   "servers": {
     "azure-devops": {
       "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
-      "args": ["-m", "azure_devops_mcp_server", "--mode", "stdio"],
+      "args": ["-m", "azure_devops_client", "--mode", "stdio"],
       "env": {},
       "type": "stdio"
     }
@@ -156,7 +156,7 @@ $env:AZURE_DEVOPS_PAT = "your-pat-token"
 ```bash
 # Test manually
 cd azure_devops_mcp_server
-python -m azure_devops_mcp_server --mode stdio --organization microsoft --project OS --repository os.2020 --auth-mode pat
+python -m azure_devops_client --mode stdio --organization microsoft --project OS --repository os.2020 --auth-mode pat
 
 # Check VS Code Output > MCP for errors
 ```

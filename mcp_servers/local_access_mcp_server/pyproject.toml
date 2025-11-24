@@ -3,14 +3,14 @@ requires = ["setuptools>=65.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "azure-devops-mcp-server"
+name = "local-access-mcp-server"
 version = "1.0.0"
-description = "MCP server for Azure DevOps code search and file retrieval"
+description = "MCP server for local file access, search, and indexing"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Your Name", email = "your.email@example.com" }]
-keywords = ["mcp", "azure-devops", "code-search", "model-context-protocol"]
+keywords = ["mcp", "file-server", "local-access", "model-context-protocol"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -22,14 +22,13 @@ classifiers = [
 ]
 
 dependencies = [
-    "httpx>=0.25.0",
-    "pydantic>=2.0.0",
-    "python-dotenv>=1.0.0",
-    "azure-devops>=7.1.0b3",
-    "msal>=1.24.0",
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "aiofiles>=23.0.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "llama-index>=0.9.0",
+    "openai>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -44,17 +43,26 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/azure-devops-mcp-server"
-Documentation = "https://github.com/yourusername/azure-devops-mcp-server/blob/main/README.md"
-Repository = "https://github.com/yourusername/azure-devops-mcp-server"
-Issues = "https://github.com/yourusername/azure-devops-mcp-server/issues"
+Homepage = "https://github.com/yourusername/local-access-mcp-server"
+Documentation = "https://github.com/yourusername/local-access-mcp-server/blob/main/README.md"
+Repository = "https://github.com/yourusername/local-access-mcp-server"
+Issues = "https://github.com/yourusername/local-access-mcp-server/issues"
 
 [project.scripts]
-azure-devops-mcp-server = "azure_devops_mcp_server.__main__:main"
+local-access-mcp-server = "__main__:main"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["azure_devops_mcp_server*"]
+[tool.setuptools]
+py-modules = [
+    "__init__",
+    "__main__",
+    "main",
+    "file_indexer",
+    "file_reader",
+    "stdio_server",
+]
+
+[tool.setuptools.package-data]
+"*" = ["*.md", "*.jsonc"]
 
 [tool.black]
 line-length = 88

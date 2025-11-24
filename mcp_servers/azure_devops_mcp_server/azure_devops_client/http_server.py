@@ -72,11 +72,15 @@ def create_http_app() -> FastAPI:
         use_interactive = (
             os.getenv("AZURE_DEVOPS_AUTH_MODE", "interactive") == "interactive"
         )
-        if not await mcp_server.initialize(use_interactive_auth=use_interactive):
-            logger.error("Failed to initialize server")
-            raise RuntimeError("Server initialization failed")
-
-        logger.info("Server started successfully")
+        # In HTTP mode, allow server to start even if connection test fails
+        # The actual requests will handle auth errors
+        init_result = await mcp_server.initialize(use_interactive_auth=use_interactive)
+        if not init_result:
+            logger.warning(
+                "Failed to initialize server - authentication may be required for requests"
+            )
+        else:
+            logger.info("Server started successfully")
 
     @app.get("/health")
     async def health_check():

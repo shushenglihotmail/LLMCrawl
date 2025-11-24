@@ -1,10 +1,14 @@
 """
 MCP Server for local file operations.
 Provides tools to read, search, and index files under a configured root directory.
+Supports both stdio transport (for VS Code) and HTTP REST API (for LLMCrawl).
 """
 
+import argparse
+import asyncio
 import logging
 import os
+import sys
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -15,7 +19,10 @@ from .file_indexer import FileIndexer
 from .file_reader import FileReader
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 # Configuration
@@ -277,9 +284,3 @@ async def invoke_tool(request: ToolRequest):
     except Exception as e:
         logger.error(f"Tool execution error: {e}")
         return ToolResponse(success=False, result=None, error=str(e))
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8003)

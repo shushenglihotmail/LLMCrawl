@@ -35,11 +35,14 @@
     "makefile.configureOnOpen": true,
     "vscode-nmake-tools.workspaceBuildDirectories": [],
     "yaml.schemas": {
-        "none": [
-            "**/grafana-provisioning/**/*.yml",
-            "**/grafana-provisioning/**/*.yaml"
+        "https://json.schemastore.org/grafana-datasource": [
+            "**/grafana-provisioning/datasources/*.yml",
+            "**/grafana-provisioning/datasources/*.yaml"
         ]
     },
+    "yaml.customTags": [
+        "!vault"
+    ],
     "python-envs.pythonProjects": [
         {
             "path": "",

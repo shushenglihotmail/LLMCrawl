@@ -1,0 +1,54 @@
+{
+    // Example VS Code mcp.json for using Local File MCP Server
+    // Location: %APPDATA%\Code\User\mcp.json (Windows)
+    //           ~/Library/Application Support/Code/User/mcp.json (macOS)
+    //           ~/.config/Code/User/mcp.json (Linux)
+    //
+    // This server provides tools to read, search, and index local files
+    // in a configured root folder.
+    //
+    "inputs": [],
+    "servers": {
+        "local-files": {
+            "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
+            "args": [
+                "-m",
+                "mcp_server.main",
+                "--mode",
+                "stdio",
+                "--root-folder",
+                "C:\\data\\files",
+                "--vector-db-path",
+                "C:\\data\\mcp_vector_db"
+            ],
+            "env": {
+                // Optional: Set OpenAI API key for semantic search
+                "OPENAI_API_KEY": "YOUR_OPENAI_API_KEY_HERE"
+            },
+            "type": "stdio"
+        },
+        "azure-devops": {
+            "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
+            "args": [
+                "-m",
+                "azure_devops_mcp_server",
+                "--mode",
+                "stdio",
+                "--organization",
+                "microsoft",
+                "--project",
+                "OS",
+                "--repository",
+                "os.2020",
+                "--branch",
+                "official/rs_sparc_ctr_exp",
+                "--auth-mode",
+                "pat"
+            ],
+            "env": {
+                "AZURE_DEVOPS_PAT": "YOUR_PAT_TOKEN_HERE"
+            },
+            "type": "stdio"
+        }
+    }
+}

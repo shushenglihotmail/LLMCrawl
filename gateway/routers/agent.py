@@ -39,6 +39,7 @@ async def _expand_paths(
 ) -> List[str]:
     """
     Expand path list to actual file paths using conventions:
+    - 'azdo:...' = Azure DevOps path (pass through, no expansion)
     - 'file.cpp' = direct file
     - '*.cpp' or 'x*.json' = wildcard pattern
     - 'folder/' or 'folder\\' = folder (non-recursive)
@@ -47,6 +48,12 @@ async def _expand_paths(
     expanded_files = []
 
     for path in path_list:
+        # Azure DevOps paths (azdo:) - pass through without expansion
+        # The agent will handle wildcards via Azure DevOps search API
+        if path.startswith("azdo:"):
+            expanded_files.append(path)
+            continue
+
         # Normalize backslashes to forward slashes (Windows paths)
         path_normalized = path.replace("\\", "/")
 
@@ -114,6 +121,9 @@ def get_agent() -> CodeIntelligenceAgent:
             crawler_url=os.getenv("CRAWLER_URL", "http://crawler:8001"),
             indexer_url=os.getenv("INDEXER_URL", "http://indexer:8002"),
             llm_client=LLMClient(),
+            azure_devops_mcp_url=os.getenv(
+                "AZURE_DEVOPS_MCP_URL", "http://azure-devops-mcp-server:8004"
+            ),
         )
     return _agent
 

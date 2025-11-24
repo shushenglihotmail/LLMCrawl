@@ -2,6 +2,8 @@
 
 A production-ready, containerized Python web RAG system that enables LLMs to trigger web crawling, index results, and answer questions with citations. Features conversation memory, intelligent tool calling, and multi-source web scraping.
 
+> **⚙️ Configuration:** All environment variables are in **`deploy/.env`**. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for complete guide.
+
 ## 🏗️ Architecture
 
 The system consists of five main services with conversation state management:
@@ -120,8 +122,8 @@ graph TB
 - **Integrated Tool Calling**: LLM automatically chooses between web crawl and file operations
 
 📖 **MCP Server Documentation**:
-- **Quick Start**: [mcp_server/QUICKSTART.md](mcp_server/QUICKSTART.md) - Get started in 5 minutes
-- **Full Documentation**: [mcp_server/README.md](mcp_server/README.md) - Comprehensive guide
+- **Quick Start**: [mcp_servers/local_access_mcp_server/QUICKSTART.md](mcp_servers/local_access_mcp_server/QUICKSTART.md) - Get started in 5 minutes
+- **Full Documentation**: [mcp_servers/local_access_mcp_server/README.md](mcp_servers/local_access_mcp_server/README.md) - Comprehensive guide
 - **Architecture**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design and data flows
 
 ### Azure DevOps Code Search (Azure DevOps MCP Server)
@@ -133,8 +135,8 @@ graph TB
 - **Docker Ready**: Containerized for easy deployment
 
 📖 **Azure DevOps MCP Server Documentation**:
-- **Quick Start**: [azure_devops_mcp_server/QUICKSTART.md](azure_devops_mcp_server/QUICKSTART.md) - Setup in 5 minutes
-- **Full Documentation**: [azure_devops_mcp_server/README.md](azure_devops_mcp_server/README.md) - Complete guide
+- **Quick Start**: [mcp_servers/azure_devops_mcp_server/QUICKSTART.md](mcp_servers/azure_devops_mcp_server/QUICKSTART.md) - Setup in 5 minutes
+- **Full Documentation**: [mcp_servers/azure_devops_mcp_server/README.md](mcp_servers/azure_devops_mcp_server/README.md) - Complete guide
 - **VS Code Integration**: Configure as MCP client for Copilot tool use
 
 ## 🚀 Quick Start
@@ -143,15 +145,17 @@ graph TB
 
 ```bash
 git clone <repository-url>
-cd LLMCrawl
+cd LLMCrawl/deploy
 
 # Copy environment template
 cp .env.example .env
 ```
 
+> **📖 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for complete configuration guide
+
 ### 2. Configure Environment Variables
 
-Edit `.env` file with your API keys and preferences:
+Edit `deploy/.env` file with your API keys and preferences:
 
 ```bash
 # Required: OpenAI Configuration
@@ -255,8 +259,9 @@ docker-compose restart crawler
 # Stop services
 .\scripts\stop-services.ps1
 
-# Restart after .env changes
-.\scripts\restart-services.ps1
+# Restart after .env changes (use --force-recreate to reload environment)
+cd deploy
+docker compose up -d --force-recreate
 ```
 
 **Unix/Linux/macOS:**
@@ -1278,7 +1283,9 @@ llmcrawl/
 │   ├── unit/        # Unit tests
 │   ├── integration/ # Integration tests
 │   └── load/        # Load testing
-├── mcp_server/      # Model Context Protocol server for local files
+├── mcp_servers/              # Model Context Protocol servers
+│   ├── local_access_mcp_server/    # MCP server for local file operations
+│   └── azure_devops_mcp_server/    # MCP server for Azure DevOps integration
 │   ├── file_reader.py   # Secure file operations
 │   ├── file_indexer.py  # Semantic search with LlamaIndex
 │   └── main.py          # MCP server application entry point
@@ -1305,9 +1312,9 @@ llmcrawl/
 - **[Monitoring Guide](docs/MONITORING.md)** - Observability, metrics, and dashboards
 
 ### MCP Server (Local File Operations)
-- **[Quick Start](mcp_server/QUICKSTART.md)** - Get started with file operations in 5 minutes
-- **[Full MCP Documentation](mcp_server/README.md)** - Complete guide with API reference
-- **[API Examples](mcp_server/README.md#api-reference)** - Direct API usage examples
+- **[Quick Start](mcp_servers/local_access_mcp_server/QUICKSTART.md)** - Get started with file operations in 5 minutes
+- **[Full MCP Documentation](mcp_servers/local_access_mcp_server/README.md)** - Complete guide with API reference
+- **[API Examples](mcp_servers/local_access_mcp_server/README.md#api-reference)** - Direct API usage examples
 
 ### Authentication & Crawling
 - **[Authentication Setup](docs/AUTHENTICATION_SETUP.md)** - Crawl authenticated internal sites
