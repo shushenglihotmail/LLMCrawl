@@ -135,7 +135,23 @@ services:
 
 ### Step 4: Start Development Environment
 
-**Option A: Using Scripts (Recommended)**
+**Option A: Using Makefile (Recommended)**
+
+```bash
+# Start all development services
+make dev-up
+
+# View logs
+make dev-logs
+
+# Stop services
+make dev-down
+
+# Rebuild and restart
+make dev-rebuild
+```
+
+**Option B: Using Scripts**
 
 ```powershell
 # Windows PowerShell
@@ -149,7 +165,7 @@ python scripts/setup_dev.py  # First time setup
 ./scripts/start_dev.sh       # Start services
 ```
 
-**Option B: Manual Docker Compose**
+**Option C: Manual Docker Compose**
 
 ```bash
 # Build images
@@ -272,6 +288,24 @@ networks:
 
 ### Step 3: Build Production Images
 
+**Option A: Using Makefile (Recommended)**
+
+```bash
+# Build all images
+make build
+
+# Start production services
+make up
+
+# View logs
+make logs
+
+# Stop services
+make down
+```
+
+**Option B: Manual Docker Compose**
+
 ```bash
 cd deploy/
 
@@ -294,6 +328,21 @@ Each Dockerfile should:
 - Set proper working directory
 
 ### Step 4: Deploy Services
+
+**Option A: Using Makefile (Recommended)**
+
+```bash
+# Start all services
+make up
+
+# View logs
+make logs
+
+# Check service health
+make health
+```
+
+**Option B: Manual Docker Compose**
 
 ```bash
 # Start all services in background
