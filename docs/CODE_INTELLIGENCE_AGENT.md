@@ -9,6 +9,12 @@ Three specialized workflows for different code tasks:
 - **Inspect & Analyze**: Find bugs and vulnerabilities
 - **Generate from Examples**: Create new code following patterns
 
+**Architecture:**
+- **Iterative Tool Calling**: Agent can call MCP tools multiple times (max 20 iterations)
+- **Azure DevOps Integration**: Search and read files from Azure DevOps repositories
+- **Local File Access**: Read files from mounted volumes via MCP server
+- **Intelligent Search**: LLM decides which tools to use and when to stop
+
 ## Quick Start
 
 ### API Endpoint

@@ -319,7 +319,9 @@ class AzureDevOpsMCPServer:
     async def _handle_get_file(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Handle get file tool."""
         file_path = arguments.get("file_path")
-        branch = arguments.get("branch", "main")
+        branch = (
+            arguments.get("branch") or self.client.branch
+        )  # Use configured branch if not specified
 
         if not file_path:
             return {"error": "file_path parameter is required"}

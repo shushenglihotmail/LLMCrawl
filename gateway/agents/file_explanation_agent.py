@@ -15,11 +15,14 @@ This agent orchestrates data gathering WITHOUT multiple LLM rounds:
 Cost: 1-2 LLM calls (vs 5+ with dynamic tool calling)
 """
 
+import json
 import logging
 import os
 from typing import Any, Dict, List, Literal, Optional
 
 import httpx
+
+from gateway.routers.chat import convert_mcp_tool_to_openai
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,93 @@ class CodeIntelligenceAgent:
         self.crawler_url = crawler_url
         self.indexer_url = indexer_url
         self.llm_client = llm_client
+        self._mcp_tools_cache: Optional[List[Dict[str, Any]]] = None
+        self._azure_devops_tools_cache: Optional[List[Dict[str, Any]]] = None
+
+    async def _get_mcp_tools(self) -> List[Dict[str, Any]]:
+        """Fetch MCP tools from the MCP server and convert to OpenAI format."""
+        if self._mcp_tools_cache is not None:
+            return self._mcp_tools_cache
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{self.mcp_url}/tools")
+                response.raise_for_status()
+                data = response.json()
+                mcp_tools = data.get("tools", [])
+                self._mcp_tools_cache = [
+                    convert_mcp_tool_to_openai(tool) for tool in mcp_tools
+                ]
+                logger.info(f"Loaded {len(self._mcp_tools_cache)} MCP tools")
+                return self._mcp_tools_cache
+        except Exception as e:
+            logger.warning(f"Failed to load MCP tools: {e}")
+            return []
+
+    async def _get_azure_devops_tools(self) -> List[Dict[str, Any]]:
+        """Fetch tools from Azure DevOps MCP server and convert to OpenAI format."""
+        if not self.azure_devops_mcp_url:
+            return []
+
+        if self._azure_devops_tools_cache is not None:
+            return self._azure_devops_tools_cache
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{self.azure_devops_mcp_url}/tools")
+                response.raise_for_status()
+                data = response.json()
+                mcp_tools = data.get("tools", [])
+                self._azure_devops_tools_cache = [
+                    convert_mcp_tool_to_openai(tool) for tool in mcp_tools
+                ]
+                logger.info(
+                    f"Loaded {len(self._azure_devops_tools_cache)} Azure DevOps MCP tools"
+                )
+                return self._azure_devops_tools_cache
+        except Exception as e:
+            logger.warning(f"Failed to load Azure DevOps MCP tools: {e}")
+            return []
+
+    async def _handle_tool_call(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle a tool call from the LLM."""
+        tool_name = tool_call["function"]["name"]
+        arguments = json.loads(tool_call["function"]["arguments"])
+
+        logger.info(f"Handling tool call: {tool_name}")
+        logger.debug(f"Tool arguments: {arguments}")
+
+        try:
+            # Determine which MCP server to call
+            azure_devops_tools = [
+                "search_azure_devops_code",
+                "search_azure_devops_files",
+                "get_azure_devops_file",
+            ]
+
+            if tool_name in azure_devops_tools:
+                mcp_url = self.azure_devops_mcp_url
+            else:
+                mcp_url = self.mcp_url
+
+            if not mcp_url:
+                return {"error": f"MCP server not configured for tool: {tool_name}"}
+
+            # Call MCP server
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{mcp_url}/invoke",
+                    json={"tool_name": tool_name, "arguments": arguments},
+                )
+                response.raise_for_status()
+                result = response.json()
+
+            logger.info(f"Tool call {tool_name} succeeded")
+            return result
+
+        except Exception as e:
+            logger.error(f"Tool call {tool_name} failed: {e}")
+            return {"error": str(e)}
 
     async def execute_workflow(
         self,
@@ -231,10 +321,22 @@ class CodeIntelligenceAgent:
                 web_context=web_context,
             )
 
-            # Step 5: Single LLM call for execution
+            # Step 5: Fetch available tools
+            mcp_tools = await self._get_mcp_tools()
+            azure_devops_tools = await self._get_azure_devops_tools()
+            all_tools = mcp_tools + azure_devops_tools
+
+            if all_tools:
+                logger.info(
+                    f"Providing {len(all_tools)} tools to LLM "
+                    f"({len(mcp_tools)} MCP + {len(azure_devops_tools)} Azure DevOps)"
+                )
+            else:
+                logger.warning("No tools available for LLM")
+
+            # Step 6: LLM call with tools - may require multiple iterations if LLM calls tools
             logger.info(
-                f"Making single LLM {workflow} call "
-                f"(~{len(prompt) // 4} tokens context)"
+                f"Making LLM {workflow} call " f"(~{len(prompt) // 4} tokens context)"
             )
 
             # Adjust temperature based on workflow
@@ -244,12 +346,62 @@ class CodeIntelligenceAgent:
                 "generate": 0.3,  # Creative code generation
             }.get(workflow, 0.1)
 
-            response = await self.llm_client.chat_completion(
-                messages=[{"role": "user", "content": prompt}],
-                model=model,
-                temperature=temperature,
-                max_tokens=4000,
+            messages = [{"role": "user", "content": prompt}]
+            max_iterations = (
+                20  # Prevent infinite loops - allow more for complex searches
             )
+            iteration = 0
+
+            while iteration < max_iterations:
+                iteration += 1
+                logger.debug(f"LLM iteration {iteration}")
+
+                response = await self.llm_client.chat_completion(
+                    messages=messages,
+                    model=model,
+                    tools=all_tools if all_tools else None,
+                    tool_choice="auto",
+                    temperature=temperature,
+                    max_tokens=4000,
+                )
+
+                # Check if LLM wants to call tools
+                if response.get("tool_calls"):
+                    logger.info(
+                        f"LLM requested {len(response['tool_calls'])} tool call(s)"
+                    )
+
+                    # Add assistant message with tool calls
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": response.get("content") or "",
+                            "tool_calls": response["tool_calls"],
+                        }
+                    )
+
+                    # Execute each tool call
+                    for tool_call in response["tool_calls"]:
+                        tool_result = await self._handle_tool_call(tool_call)
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call["id"],
+                                "content": json.dumps(tool_result),
+                            }
+                        )
+
+                    # Continue loop to get next LLM response with tool results
+                    continue
+                else:
+                    # No tool calls - we have the final response
+                    logger.info(f"LLM completed after {iteration} iteration(s)")
+                    break
+
+            if iteration >= max_iterations:
+                logger.warning(
+                    f"Reached max iterations ({max_iterations}), returning last response"
+                )
 
             return {
                 "workflow": workflow,

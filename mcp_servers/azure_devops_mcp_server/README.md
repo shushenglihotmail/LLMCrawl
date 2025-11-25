@@ -26,6 +26,8 @@ Your Workspace (any language) → VS Code Copilot → MCP Server (Python) → Az
 - **PAT Support**: Personal Access Token authentication
 - **Dual Transport**: Supports both stdio (for VS Code) and HTTP (for LLMCrawl)
 - **Command-Line Testing**: Standalone test utility for quick queries
+- **Configurable Branch**: Defaults to configured branch instead of hardcoded 'main'
+- **Query Parameter Support**: Direct query pass-through for advanced filtering (e.g., `keyword ext:json`)
 
 ## Performance
 
