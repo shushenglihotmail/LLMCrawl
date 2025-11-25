@@ -58,11 +58,10 @@ class UnderstandWorkflowRequest(BaseModel):
 
     workflow: Literal["understand"] = "understand"
 
-    # Required: Files/folders to analyze
+    # Optional: Files/folders to analyze
     target_paths: List[str] = Field(
-        ...,
-        description="Paths to analyze. Use conventions: 'file.cpp'=file, 'folder\\'=folder, 'folder\\**'=recursive, '*.cpp'=wildcard",
-        min_items=1,
+        default_factory=list,
+        description="Paths to analyze (optional). Use conventions: 'file.cpp'=file, 'folder\\'=folder, 'folder\\**'=recursive, '*.cpp'=wildcard",
         examples=[
             [
                 "src/service/main.cpp",
@@ -130,11 +129,10 @@ class InspectWorkflowRequest(BaseModel):
 
     workflow: Literal["inspect"] = "inspect"
 
-    # Required: Files/folders to inspect
+    # Optional: Files/folders to inspect
     target_paths: List[PathItem] = Field(
-        ...,
-        description="Files (with wildcards like *.cpp) or folders to inspect",
-        min_items=1,
+        default_factory=list,
+        description="Files (with wildcards like *.cpp) or folders to inspect (optional)",
     )
 
     # Required: What to look for

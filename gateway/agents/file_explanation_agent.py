@@ -233,7 +233,8 @@ class CodeIntelligenceAgent:
 
             logger.info(f"Successfully read {len(target_contents)} files")
 
-            if not target_contents:
+            # Allow empty target_contents if there are reference files or web context
+            if not target_contents and len(target_files) > 0:
                 # Provide more specific error message
                 if len(target_files) == 1 and target_files[0].startswith("azdo:"):
                     error_msg = f"No files found matching: {target_files[0]}. Check that the path and pattern are correct."
