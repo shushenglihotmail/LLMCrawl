@@ -691,6 +691,11 @@ async def execute_unified_workflow(request: UnifiedWorkflowRequest):
             system_prompt += "\n".join(tool_descriptions) + "\n\n"
 
         system_prompt += (
+            "CONVERSATION HANDLING:\n"
+            "- The conversation may contain multiple user messages from previous interactions.\n"
+            "- **ALWAYS focus on answering the LATEST user message only** - this is the PRIMARY ASK.\n"
+            "- Previous messages are provided as CONTEXT/BACKGROUND only - do NOT re-answer old questions.\n"
+            "- If the latest question relates to a previous topic, use history for context but answer ONLY the new question.\n\n"
             "CRITICAL RULES FOR TOOL USAGE:\n"
             "1. You MUST use the function calling mechanism to invoke tools - DO NOT output JSON or describe tool calls as text.\n"
             "2. When the user asks about packages, dependencies, or code files, immediately call search_azure_devops_code or search_azure_devops_files.\n"
