@@ -564,7 +564,7 @@ async def auth_status():
                         "auth_type": auth_type,
                         "test_url": test_url,
                         "message": "Authentication appears to be expired (login page detected)",
-                        "action_required": "Run: python tools/refresh_auth.py --name www_osgwiki_com --force",
+                        "action_required": "Run: python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page",
                     }
                 else:
                     return {
@@ -580,7 +580,7 @@ async def auth_status():
                     "test_url": test_url,
                     "status_code": 401,
                     "message": "Authentication expired (401 Unauthorized)",
-                    "action_required": "Run: python tools/refresh_auth.py --name www_osgwiki_com --force",
+                    "action_required": "Run: python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page",
                 }
             else:
                 return {

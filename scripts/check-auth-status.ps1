@@ -29,7 +29,7 @@ if (-not (Test-Path $authFile)) {
         }
     }
 
-    Write-Host "`nRun: .\venv\Scripts\python.exe tools\msauth\interactive_auth.py" -ForegroundColor Yellow
+    Write-Host "`nRun: python tools/msauth/authenticate.py $SiteUrl" -ForegroundColor Yellow
     exit 1
 }
 
@@ -105,19 +105,16 @@ if ($logs) {
 }
 
 Write-Host "`n=== AUTHENTICATION REFRESH NEEDED ===" -ForegroundColor Red
-Write-Host "`nQuick Fix - Copy/Paste these commands:" -ForegroundColor Yellow
+Write-Host "`nQuick Fix - Run this command:" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "# Step 1: Refresh authentication (browser will open)" -ForegroundColor Cyan
-Write-Host ".\venv\Scripts\python.exe tools\msauth\interactive_auth.py $SiteUrl" -ForegroundColor White
+Write-Host "# Authenticate (browser opens, sign in, press ENTER when done)" -ForegroundColor Cyan
+Write-Host "python tools/msauth/authenticate.py $SiteUrl" -ForegroundColor White
 Write-Host ""
-Write-Host "# Step 2: Recreate crawler to reload .env with new cookies" -ForegroundColor Cyan
-Write-Host "cd deploy; docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate crawler" -ForegroundColor White
-Write-Host ""
-Write-Host "# Step 3: Verify auth is working" -ForegroundColor Cyan
-Write-Host ".\scripts\check-auth-status.ps1 $SiteUrl" -ForegroundColor White
-Write-Host ""
-Write-Host "`nOr use manual method (if interactive fails):" -ForegroundColor Yellow
-Write-Host ".\tools\msauth\scripts\add_cookie_manual.ps1" -ForegroundColor White
+Write-Host "# The script will automatically:" -ForegroundColor Gray
+Write-Host "#   - Extract cookies after you sign in" -ForegroundColor Gray
+Write-Host "#   - Update .env with new credentials" -ForegroundColor Gray
+Write-Host "#   - Restart crawler container" -ForegroundColor Gray
+Write-Host "#   - Test authentication" -ForegroundColor Gray
 Write-Host ""
 
 exit 1

@@ -228,32 +228,24 @@ The mounted folder becomes the "root" for all MCP file operations. Users cannot 
 
 For internal sites requiring SSO authentication (e.g., Microsoft OSGWiki):
 
-**🎯 Quick Setup**
+**🎯 Quick Setup (One Command)**
 ```powershell
-# See detailed guide: docs/AUTHENTICATION_SETUP.md
+# Activate virtual environment first
+.\venv\Scripts\Activate.ps1
 
-# For standard OAuth sites (automated):
-.\venv\Scripts\python.exe tools\msauth\interactive_auth.py https://internal-site.com --name mysite
-.\venv\Scripts\python.exe tools\msauth\interactive_auth.py --apply mysite
-docker-compose restart crawler
-
-# For Azure App Service Easy Auth sites (manual cookie required):
-# 1. Run auth capture
-.\venv\Scripts\python.exe tools\msauth\interactive_auth.py https://www.osgwiki.com/wiki/Main_Page --name www_osgwiki_com
-# 2. Get AppServiceAuthSession cookie from browser:
-#    F12 > Network tab > Click any www.osgwiki.com request > Cookies section
-#    (Or: Application tab > Cookies > www.osgwiki.com)
-# 3. Add cookie manually
-.\tools\msauth\scripts\add_cookie_manual.ps1 -ProfileName www_osgwiki_com -CookieValue "YOUR_COOKIE_VALUE"
-# 4. Apply and restart
-.\venv\Scripts\python.exe tools\msauth\interactive_auth.py --apply www_osgwiki_com
-docker-compose restart crawler
+# Run authentication - fully automated!
+python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page
 ```
 
-📚 **Authentication Documentation**:
-- **⭐ Setup Guide**: [`docs/AUTHENTICATION_SETUP.md`](docs/AUTHENTICATION_SETUP.md) - **Start Here**
-- **Quick Reference**: [`tools/msauth/README.md`](tools/msauth/README.md)
-- **Advanced Guide**: [`tools/msauth/docs/AUTHENTICATION.md`](tools/msauth/docs/AUTHENTICATION.md)
+**What happens:**
+1. ✅ Edge browser opens with debugging enabled
+2. ⏸️ You sign in with Microsoft credentials
+3. ✅ Cookies extracted automatically (including AppServiceAuthSession)
+4. ✅ Applied to deploy/.env
+5. ✅ Crawler container restarted
+6. ✅ Authentication tested
+
+📚 **Full Documentation**: [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md)
 
 ### Quick Setup (Recommended)
 
