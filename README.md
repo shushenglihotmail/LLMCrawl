@@ -202,7 +202,7 @@ MAX_INPUT_TOKENS=100000       # Maximum input tokens (~75k words)
 MCP_ROOT_FOLDER=/data/files  # Inside container (mounted from host)
 MCP_SERVER_URL=http://mcp-server:8003  # Service name in Docker network
 
-# For Internal Sites (optional): See docs/AUTHENTICATION_QUICKSTART.md
+# For Internal Sites (optional): See docs/AUTHENTICATION.md
 # FIRECRAWL_AUTH_TYPE=headers  # or cookies, basic, bearer
 # FIRECRAWL_AUTH_HEADERS={"X-API-Key": "your-key"}
 ```
@@ -1327,9 +1327,8 @@ llmcrawl/
   - [Integration Guide](mcp_servers/azure_devops_mcp_server/INTEGRATION.md) - VS Code Copilot and LLMCrawl setup
 
 ### Authentication & Crawling
-- **[Authentication Setup](docs/AUTHENTICATION_SETUP.md)** - Crawl authenticated internal sites
-- **[Quick Auth Guide](docs/AUTHENTICATION_QUICKSTART.md)** - 5-minute auth setup
-- **[Azure AD Auth](docs/AZURE_AD_AUTH.md)** - Microsoft SSO authentication
+- **[Authentication Guide](docs/AUTHENTICATION.md)** - Crawl authenticated internal sites (SSO, cookies)
+- **[MS Auth Tools](tools/msauth/README.md)** - One-command authentication setup
 - **[Crawling Limitations](docs/CRAWLING_LIMITATIONS.md)** - Known issues with news sites
 
 ### Testing
