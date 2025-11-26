@@ -182,7 +182,16 @@ class LLMClient:
             return self._stream_completion(**kwargs)
         else:
             response = await self.openai_client.chat.completions.create(**kwargs)
-            return self._parse_response(response)
+            parsed = self._parse_response(response)
+
+            # Log if tools were passed but no tool_calls in response
+            if tools and not parsed.get("tool_calls"):
+                logger.warning(
+                    f"Tools were provided but LLM did not use them. "
+                    f"Response content preview: {parsed.get('content', '')[:200]}"
+                )
+
+            return parsed
 
     async def _anthropic_chat_completion(
         self,

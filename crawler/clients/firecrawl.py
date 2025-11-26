@@ -129,9 +129,6 @@ class FirecrawlClient:
             search_params = {
                 "query": query,
                 "limit": max_results,
-                "include_domains": (
-                    self._extract_domains(seed_urls) if seed_urls else None
-                ),
             }
 
             # Remove None values

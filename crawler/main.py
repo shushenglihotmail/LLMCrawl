@@ -6,10 +6,12 @@ Provides endpoints for crawling, rendering, and extracting web content.
 import asyncio
 import logging
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urljoin, urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,6 +37,9 @@ class CrawlRequest(BaseModel):
     freshness_days: int = Field(7, description="How recent content should be")
     depth: int = Field(1, description="Crawl depth")
     max_results: int = Field(10, description="Maximum number of results")
+    allow_web_search: bool = Field(
+        True, description="Allow crawling public internet via Firecrawl"
+    )
 
 
 class RenderRequest(BaseModel):
@@ -107,6 +112,130 @@ firecrawl_client: Optional[FirecrawlClient] = None
 Instrumentator().instrument(app).expose(app)
 
 
+def extract_links_from_html(html: str, base_url: str) -> List[str]:
+    """Extract all links from HTML content."""
+    links = []
+    try:
+        # Extract href attributes from <a> tags
+        pattern = r'<a[^>]+href=["\'](.*?)["\']'
+        matches = re.findall(pattern, html, re.IGNORECASE)
+
+        base_domain = urlparse(base_url).netloc
+
+        for match in matches:
+            # Skip anchors, javascript, and mailto links
+            if match.startswith(("#", "javascript:", "mailto:")):
+                continue
+
+            # Convert relative URLs to absolute
+            absolute_url = urljoin(base_url, match)
+
+            # Only include links from the same domain
+            if urlparse(absolute_url).netloc == base_domain:
+                links.append(absolute_url)
+    except Exception as e:
+        logger.error(f"Failed to extract links from HTML: {e}")
+
+    return links
+
+
+async def crawl_with_depth(
+    seed_urls: List[str],
+    depth: int,
+    max_results: int,
+    robots_checker,
+    renderer,
+    extractor,
+    seen_urls: Set[str],
+) -> List[Dict[str, Any]]:
+    """
+    Recursively crawl pages up to specified depth.
+
+    Args:
+        seed_urls: Starting URLs
+        depth: Maximum depth to crawl (1 = seed URLs only)
+        max_results: Maximum total documents to collect
+        robots_checker: Robots.txt checker
+        renderer: Playwright renderer
+        extractor: Content extractor
+        seen_urls: Set of already processed URLs
+
+    Returns:
+        List of crawled documents
+    """
+    documents = []
+    current_level_urls = seed_urls.copy()
+
+    for current_depth in range(depth):
+        if not current_level_urls or len(documents) >= max_results:
+            break
+
+        logger.info(
+            f"Crawling depth {current_depth + 1}/{depth} with {len(current_level_urls)} URLs"
+        )
+
+        # Limit URLs to crawl at this level
+        urls_to_crawl = []
+        for url in current_level_urls:
+            if url in seen_urls:
+                continue
+            if len(urls_to_crawl) >= max_results - len(documents):
+                break
+            urls_to_crawl.append(url)
+            seen_urls.add(url)
+
+        if not urls_to_crawl:
+            break
+
+        # Render pages at current depth
+        rendered_docs = await renderer.render_multiple(urls_to_crawl)
+
+        # Collect links for next depth level
+        next_level_urls = []
+
+        for rendered_doc in rendered_docs:
+            if not rendered_doc or rendered_doc.get("error"):
+                continue
+
+            # Extract content
+            extraction = await extractor.extract_content(
+                rendered_doc["html"], rendered_doc["url"]
+            )
+
+            if not extraction.get("error"):
+                doc = {
+                    "url": extraction["url"],
+                    "title": extraction.get("title", ""),
+                    "markdown": extraction.get("markdown", ""),
+                    "published_at": extraction.get("published_at"),
+                    "metadata": extraction.get("metadata", {}),
+                    "fetched_at": datetime.now().isoformat(),
+                    "source": "playwright+trafilatura",
+                    "crawl_depth": current_depth + 1,
+                }
+                documents.append(doc)
+
+                # Extract links for next depth (if not at max depth)
+                if current_depth + 1 < depth and len(documents) < max_results:
+                    links = extract_links_from_html(
+                        rendered_doc["html"], rendered_doc["url"]
+                    )
+                    for link in links:
+                        if link not in seen_urls:
+                            next_level_urls.append(link)
+
+        logger.info(
+            f"Depth {current_depth + 1} completed: {len(rendered_docs)} documents crawled, {len(next_level_urls)} links found"
+        )
+
+        # Prepare for next depth
+        current_level_urls = next_level_urls[
+            : max_results * 2
+        ]  # Limit to avoid explosion
+
+    return documents
+
+
 @app.post("/crawl", response_model=CrawlResponse)
 async def crawl_endpoint(request: CrawlRequest, req: Request):
     """
@@ -132,9 +261,9 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
                 request.seed_urls
             )
 
-        # Step 1: Try Firecrawl first
+        # Step 1: Try Firecrawl first (only if allow_web_search=True)
         documents = []
-        if firecrawl_client:
+        if firecrawl_client and request.allow_web_search:
             try:
                 firecrawl_docs = await firecrawl_client.search_and_crawl(
                     query=request.query,
@@ -146,19 +275,29 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
                 logger.info(f"Firecrawl found {len(firecrawl_docs)} documents")
             except Exception as e:
                 logger.error(f"Firecrawl failed: {e}")
+        elif not request.allow_web_search:
+            logger.info(f"Skipping Firecrawl - allow_web_search=False")
 
-        # Step 2: Playwright fallback for insufficient results
+        # Step 2: Playwright fallback for insufficient results or depth > 1 or seed URLs provided
         logger.info(
             f"Documents found: {len(documents)}, max_results: {request.max_results}"
         )
         threshold = max(1, request.max_results // 2)
         logger.info(f"Fallback threshold: {threshold}")
 
-        if len(documents) < threshold:
-            logger.info("Attempting Playwright fallback")
-            renderer = await get_playwright_renderer()
+        # Use Playwright if we need more results OR if depth > 1 OR seed URLs provided
+        needs_playwright = (
+            len(documents) < threshold or request.depth > 1 or bool(request.seed_urls)
+        )
 
-            # If we have seed URLs, try rendering them
+        if needs_playwright:
+            logger.info(
+                f"Attempting Playwright fallback (depth={request.depth}, seed_urls={len(request.seed_urls) if request.seed_urls else 0})"
+            )
+            renderer = await get_playwright_renderer()
+            extractor = get_trafilatura_extractor()
+
+            # If we have seed URLs, crawl them with depth
             fallback_urls = request.seed_urls[:3] if request.seed_urls else []
 
             # If no seed URLs provided, use test URLs based on query content
@@ -195,37 +334,57 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
 
             if fallback_urls:
                 try:
-                    rendered_docs = await renderer.render_multiple(fallback_urls)
-
-                    # Extract content from rendered pages
-                    extractor = get_trafilatura_extractor()
-                    for rendered_doc in rendered_docs:
-                        if rendered_doc and not rendered_doc.get("error"):
-                            extraction = await extractor.extract_content(
-                                rendered_doc["html"], rendered_doc["url"]
-                            )
-
-                            if not extraction.get("error"):
-                                # Convert to standard format
-                                doc = {
-                                    "url": extraction["url"],
-                                    "title": extraction.get("title", ""),
-                                    "markdown": extraction.get("markdown", ""),
-                                    "published_at": extraction.get("published_at"),
-                                    "metadata": extraction.get("metadata", {}),
-                                    "fetched_at": datetime.now().isoformat(),
-                                    "source": "playwright+trafilatura",
-                                }
-                                documents.append(doc)
-
-                    logger.info(
-                        f"Playwright fallback added {len(rendered_docs)} documents"
+                    seen_urls = set(
+                        doc.get("url") for doc in documents if doc.get("url")
                     )
+
+                    # Use depth-based crawling if depth > 1
+                    if request.depth > 1:
+                        depth_docs = await crawl_with_depth(
+                            seed_urls=fallback_urls,
+                            depth=request.depth,
+                            max_results=request.max_results,
+                            robots_checker=robots_checker,
+                            renderer=renderer,
+                            extractor=extractor,
+                            seen_urls=seen_urls,
+                        )
+                        documents.extend(depth_docs)
+                        logger.info(
+                            f"Playwright depth crawl added {len(depth_docs)} documents"
+                        )
+                    else:
+                        # Original single-level crawling
+                        rendered_docs = await renderer.render_multiple(fallback_urls)
+
+                        for rendered_doc in rendered_docs:
+                            if rendered_doc and not rendered_doc.get("error"):
+                                extraction = await extractor.extract_content(
+                                    rendered_doc["html"], rendered_doc["url"]
+                                )
+
+                                if not extraction.get("error"):
+                                    doc = {
+                                        "url": extraction["url"],
+                                        "title": extraction.get("title", ""),
+                                        "markdown": extraction.get("markdown", ""),
+                                        "published_at": extraction.get("published_at"),
+                                        "metadata": extraction.get("metadata", {}),
+                                        "fetched_at": datetime.now().isoformat(),
+                                        "source": "playwright+trafilatura",
+                                        "crawl_depth": 1,
+                                    }
+                                    documents.append(doc)
+
+                        logger.info(
+                            f"Playwright fallback added {len(rendered_docs)} documents"
+                        )
 
                 except Exception as e:
                     logger.error(f"Playwright fallback failed: {e}")
 
         # Step 3: Final robots.txt filtering and deduplication
+        # Skip robots.txt filtering for authenticated sites (already successfully crawled)
         filtered_docs = []
         seen_urls = set()
 
@@ -234,7 +393,11 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
             if not url or url in seen_urls:
                 continue
 
-            if await robots_checker.can_crawl(url):
+            # If document was successfully crawled with Playwright+auth, trust it
+            # Otherwise, check robots.txt
+            if doc.get(
+                "source"
+            ) == "playwright+trafilatura" or await robots_checker.can_crawl(url):
                 filtered_docs.append(doc)
                 seen_urls.add(url)
 

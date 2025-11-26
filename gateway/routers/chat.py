@@ -138,6 +138,9 @@ class ChatRequest(BaseModel):
         None, description="Seed URLs to crawl for context"
     )
     depth: int = Field(1, description="Crawl depth for seed URLs")
+    allow_web_search: bool = Field(
+        True, description="Allow crawling public internet via Firecrawl"
+    )
     skip_embedding: bool = Field(
         False,
         description="Skip embedding/indexing and pass raw crawled content to LLM",
@@ -184,6 +187,12 @@ async def chat_endpoint(request: ChatRequest, req: Request):
 
         # Generate or use existing conversation ID
         conversation_id = request.conversation_id or str(uuid.uuid4())
+
+        # Log allow_web_search value for debugging
+        logger.info(
+            f"Request allow_web_search: {request.allow_web_search}, "
+            f"seed_urls: {request.seed_urls}"
+        )
 
         # Load conversation history if continuing an existing conversation
         previous_messages = []
@@ -422,6 +431,7 @@ async def _complete_chat_response(
                 request.seed_urls,
                 request.depth,
                 request.skip_embedding,
+                request.allow_web_search,
             )
             messages.append(tool_result)
 

@@ -23,9 +23,9 @@ class ToolHandler:
         self.crawler_url = "http://crawler:8001"
         self.indexer_url = "http://indexer:8002"
         self.mcp_server_url = os.getenv("MCP_SERVER_URL", "http://mcp-server:8003")
-        # Increased from 30s to allow for slower FireCrawl
-        # + Playwright fallback
-        self.timeout = 45.0
+        # Increased to 90s to allow for depth crawling with Playwright
+        # which can take 60-70s for depth=2 with authentication
+        self.timeout = 90.0
         self.mcp_tools = [
             "read_local_file",
             "list_files",
@@ -40,6 +40,7 @@ class ToolHandler:
         seed_urls: Optional[List[str]] = None,
         depth: Optional[int] = None,
         skip_embedding: bool = False,
+        allow_web_search: bool = True,
     ) -> Dict[str, Any]:
         """
         Handle a tool function call and return the result.
@@ -50,6 +51,7 @@ class ToolHandler:
             seed_urls: Optional seed URLs to override tool arguments
             depth: Optional crawl depth to override tool arguments
             skip_embedding: Skip embedding/indexing, return raw content
+            allow_web_search: Allow crawling public internet via Firecrawl
 
         Returns:
             Tool result for LLM context
@@ -57,13 +59,15 @@ class ToolHandler:
         tool_name = tool_call["function"]["name"]
         arguments = json.loads(tool_call["function"]["arguments"])
 
-        # Override arguments with user-provided seed_urls and depth
+        # Override arguments with user-provided seed_urls, depth, and allow_web_search
         if seed_urls:
             arguments["seed_urls"] = seed_urls
             logger.info(f"Overriding seed_urls with user-provided: {seed_urls}")
         if depth is not None:
             arguments["depth"] = depth
             logger.info(f"Overriding depth with user-provided: {depth}")
+        arguments["allow_web_search"] = allow_web_search
+        logger.info(f"Setting allow_web_search: {allow_web_search}")
 
         log_tool_call(logger, request_id, tool_name, arguments)
         start_time = datetime.now()
@@ -131,6 +135,7 @@ class ToolHandler:
         seed_urls = arguments.get("seed_urls", [])
         freshness_days = arguments.get("freshness_days", 7)
         depth = arguments.get("depth", 1)
+        allow_web_search = arguments.get("allow_web_search", True)
 
         logger.info(f"Starting crawl_and_refresh for query: {query}")
 
@@ -140,6 +145,7 @@ class ToolHandler:
             seed_urls=seed_urls,
             freshness_days=freshness_days,
             depth=depth,
+            allow_web_search=allow_web_search,
             request_id=request_id,
         )
 
@@ -287,6 +293,7 @@ class ToolHandler:
         seed_urls: List[str],
         freshness_days: int,
         depth: int,
+        allow_web_search: bool,
         request_id: str,
     ) -> Dict[str, Any]:
         """Call the crawler service to fetch web content."""
@@ -299,6 +306,7 @@ class ToolHandler:
                         "seed_urls": seed_urls,
                         "freshness_days": freshness_days,
                         "depth": depth,
+                        "allow_web_search": allow_web_search,
                     },
                     headers={"X-Request-ID": request_id},
                 )
@@ -434,9 +442,14 @@ class ToolHandler:
 
                 return result.get("result", {})
 
+            except httpx.TimeoutException as e:
+                logger.error(f"Azure DevOps MCP tool '{tool_name}' timed out: {e}")
+                return {
+                    "error": f"Tool '{tool_name}' timed out. Try using search_azure_devops_code instead of search_azure_devops_files for large directories."
+                }
             except httpx.RequestError as e:
                 logger.error(f"Azure DevOps MCP server request failed: {e}")
-                return {"error": f"Azure DevOps MCP server unavailable: {e}"}
+                return {"error": f"Azure DevOps MCP server connection failed: {e}"}
             except httpx.HTTPStatusError as e:
                 logger.error(
                     f"Azure DevOps MCP server HTTP error: {e.response.status_code}"
