@@ -300,7 +300,15 @@ class FirecrawlClient:
         """Check if Firecrawl service is healthy."""
         try:
             # FireCrawl doesn't have /health, use root endpoint instead
-            response = await self.client.get(self.base_url)
+            # Note: Firecrawl redirects root to docs (302), which is expected behavior
+            response = await self.client.get(self.base_url, follow_redirects=False)
+            # Accept 200 OK or 302 redirect (redirect to docs is expected)
+            if response.status_code in (200, 302):
+                return {
+                    "status": "healthy",
+                    "service": "firecrawl",
+                    "url": self.base_url,
+                }
             response.raise_for_status()
 
             return {"status": "healthy", "service": "firecrawl", "url": self.base_url}

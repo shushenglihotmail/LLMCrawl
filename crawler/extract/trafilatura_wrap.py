@@ -113,9 +113,9 @@ class TrafilaturaExtractor:
                     "hostname": metadata.hostname or "",
                     "language": metadata.language or "",
                     "tags": list(metadata.tags) if metadata.tags else [],
-                    "categories": list(metadata.categories)
-                    if metadata.categories
-                    else [],
+                    "categories": (
+                        list(metadata.categories) if metadata.categories else []
+                    ),
                 }
 
             # Calculate content statistics
@@ -241,15 +241,22 @@ class TrafilaturaExtractor:
             }
 
         try:
-            # Test extraction on sample HTML
+            # Test extraction on sample HTML with more substantial content
+            # Trafilatura requires sufficient content to pass quality thresholds
             sample_html = """
+            <!DOCTYPE html>
             <html>
-            <head><title>Test Article</title></head>
+            <head><title>Test Article - Health Check</title></head>
             <body>
                 <article>
-                    <h1>Sample Article</h1>
-                    <p>This is a test paragraph with sample content.</p>
-                    <p>Another paragraph to test extraction.</p>
+                    <h1>Sample Article for Health Check</h1>
+                    <p>This is a comprehensive test paragraph with sample content designed to test the Trafilatura extraction library.
+                    The content needs to be substantial enough to pass the quality thresholds that Trafilatura uses to filter out
+                    low-quality or boilerplate content from web pages.</p>
+                    <p>Another paragraph provides additional context and ensures the extraction process has enough material to work with.
+                    This helps verify that the text extraction pipeline is functioning correctly and can handle real-world web content.</p>
+                    <p>A third paragraph adds even more substance to this test document. Including multiple paragraphs with meaningful
+                    sentences ensures that the health check accurately reflects the library's ability to process actual web pages.</p>
                 </article>
             </body>
             </html>

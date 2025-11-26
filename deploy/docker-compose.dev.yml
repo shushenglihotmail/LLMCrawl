@@ -83,7 +83,7 @@ services:
     depends_on:
       - redis
 
-  # Firecrawl Service - Simplified setup
+  # Firecrawl Service - Configured to use external PostgreSQL
   firecrawl:
     image: ghcr.io/firecrawl/firecrawl:latest
     container_name: web-rag-firecrawl-dev
@@ -91,15 +91,22 @@ services:
       - "3002:3002"
     environment:
       - REDIS_URL=redis://redis:6379
+      - REDIS_RATE_LIMIT_URL=redis://redis:6379
+      - DATABASE_URL=postgres://postgres:password@postgres:5432/firecrawl
       - USE_DB_AUTHENTICATION=false
-      - DISABLE_AUTHENTICATION=true
-      - NODE_ENV=development
-      - NUM_WORKERS=1
+      - NODE_ENV=production
+      - NUM_WORKERS_PER_QUEUE=1
       - PORT=3002
+      - HOST=0.0.0.0
     networks:
       - webrag-network
     depends_on:
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Override the default command - run main API directly, skip harness setup
+    command: ["node", "dist/src/index.js"]
     restart: unless-stopped
 
   # MCP Server for local file operations
