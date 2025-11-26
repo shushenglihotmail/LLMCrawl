@@ -353,9 +353,11 @@ async def execute_unified_workflow(request: UnifiedWorkflowRequest):
     6. LLM can use exposed tools based on expose_to_llm settings
     """
     import uuid
+
     import httpx
-    from gateway.utils.logging import log_request, log_response
+
     from gateway.utils.conversation_store import get_conversation_store
+    from gateway.utils.logging import log_request, log_response
 
     request_id = str(uuid.uuid4())
 

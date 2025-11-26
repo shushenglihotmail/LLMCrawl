@@ -1,5 +1,5 @@
-import sys
 import json
+import sys
 
 data = json.load(sys.stdin)
 print(f'Cookies in container: {len(data["cookies"])}')
