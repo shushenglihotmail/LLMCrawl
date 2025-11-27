@@ -8,6 +8,7 @@ import json
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
@@ -32,9 +33,7 @@ class PlaywrightRenderer:
 
         # Cookie-based authentication configuration
         self.auth_type = os.getenv("FIRECRAWL_AUTH_TYPE", "none")
-        self.auth_storage_state = self._parse_json_env(
-            "FIRECRAWL_AUTH_STORAGE_STATE", None
-        )
+        self.auth_storage_state = self._load_storage_state()
 
         self._browser = None
         self._playwright = None
@@ -52,15 +51,41 @@ class PlaywrightRenderer:
                 f"Playwright renderer configured with storage_state authentication ({storage_cookies} cookies)"
             )
 
-    def _parse_json_env(self, key: str, default: Any) -> Any:
-        """Parse JSON from environment variable."""
-        value = os.getenv(key)
-        if value:
+    def _load_storage_state(self) -> Optional[Dict[str, Any]]:
+        """
+        Load storage_state from env var or file path.
+
+        Tries FIRECRAWL_AUTH_STORAGE_STATE env var first (JSON string),
+        then falls back to STORAGE_STATE_PATH file.
+
+        Returns:
+            Parsed storage_state dict or None
+        """
+        # First try env var with JSON content
+        env_json = os.getenv("FIRECRAWL_AUTH_STORAGE_STATE", "")
+        if env_json:
             try:
-                return json.loads(value)
+                return json.loads(env_json)
             except json.JSONDecodeError:
-                logger.warning(f"Failed to parse {key} as JSON")
-        return default
+                logger.error("Invalid JSON in FIRECRAWL_AUTH_STORAGE_STATE env var")
+
+        # Then try file path
+        file_path = os.getenv("STORAGE_STATE_PATH", "")
+        if file_path:
+            path = Path(file_path)
+            if path.is_file():
+                try:
+                    with open(path, "r") as f:
+                        data = json.load(f)
+                        cookie_count = len(data.get("cookies", []))
+                        logger.info(f"Loaded storage_state from {file_path} ({cookie_count} cookies)")
+                        return data
+                except (json.JSONDecodeError, IOError) as e:
+                    logger.error(f"Failed to load storage_state from {file_path}: {e}")
+            else:
+                logger.warning(f"STORAGE_STATE_PATH set but file not found: {file_path}")
+
+        return None
 
     async def search_google(self, query: str, max_results: int = 5) -> List[str]:
         """

@@ -1301,7 +1301,7 @@ llmcrawl/
     ├── AUTHENTICATION.md           # Full authentication guide
     ├── AUTHENTICATION_QUICKSTART.md # 5-minute setup guide
     ├── AZURE_AD_AUTH.md            # Microsoft AAD/Entra ID guide
-    ├── CRAWLING_LIMITATIONS.md     # News site extraction issues
+    ├── CRAWL_STRATEGY.md           # Crawl strategy & limitations
     ├── MONITORING.md               # Health checks and metrics
     └── TESTING_INDEXING.md         # Testing guide
 ```
@@ -1329,7 +1329,7 @@ llmcrawl/
 ### Authentication & Crawling
 - **[Authentication Guide](docs/AUTHENTICATION.md)** - Crawl authenticated internal sites (SSO, cookies)
 - **[MS Auth Tools](tools/msauth/README.md)** - One-command authentication setup
-- **[Crawling Limitations](docs/CRAWLING_LIMITATIONS.md)** - Known issues with news sites
+- **[Crawl Strategy & Limitations](docs/CRAWL_STRATEGY.md)** - How crawling works, known limitations, workarounds
 
 ### Testing
 - **[Testing Guide](docs/TESTING_INDEXING.md)** - Unit and integration tests

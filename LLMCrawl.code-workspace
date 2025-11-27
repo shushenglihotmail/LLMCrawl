@@ -3,6 +3,9 @@
         {
             "name": "LLMCrawl",
             "path": "."
+        },
+        {
+            "path": "../HiChat"
         }
     ],
     "settings": {
@@ -25,7 +28,14 @@
             "docker-compose.yml": "docker-compose.*.yml",
             "requirements.txt": "requirements/*.txt",
             ".env.example": ".env"
-        }
+        },
+        "vscode-nmake-tools.workspaceBuildDirectories": [
+            ".",
+            "..\\HiChat",
+            "..\\HiChat"
+        ],
+        "sarif-viewer.connectToGithubCodeScanning": "off",
+        "makefile.configureOnOpen": false
     },
     "launch": {
         "version": "0.2.0",

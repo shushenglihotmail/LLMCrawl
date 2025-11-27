@@ -4,9 +4,11 @@ Handles search, crawling, and content processing via Firecrawl API.
 """
 
 import asyncio
+import json
 import logging
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
@@ -27,6 +29,11 @@ class FirecrawlClient:
         # Cookie-based authentication for internal sites (e.g., www.osgwiki.com)
         self.auth_type = os.getenv("FIRECRAWL_AUTH_TYPE", "none")
 
+        # Parse storage_state for cookie-based auth
+        # First try from env var, then from file path
+        self.auth_storage_state = self._load_storage_state()
+        self.auth_cookies = self._build_cookie_map()
+
         # Setup HTTP client
         headers = {}
         if self.api_key:
@@ -38,9 +45,18 @@ class FirecrawlClient:
             limits=httpx.Limits(max_connections=self.max_concurrency),
         )
 
-        logger.info(
-            f"Initialized Firecrawl client: {self.base_url} (auth_type: {self.auth_type})"
-        )
+        # Log authentication status
+        if self.auth_type == "cookies" and self.auth_cookies:
+            domains = list(self.auth_cookies.keys())
+            total_cookies = sum(len(c) for c in self.auth_cookies.values())
+            logger.info(
+                f"Initialized Firecrawl client: {self.base_url} "
+                f"(auth_type: {self.auth_type}, {total_cookies} cookies for {domains})"
+            )
+        else:
+            logger.info(
+                f"Initialized Firecrawl client: {self.base_url} (auth_type: {self.auth_type})"
+            )
 
     async def search_and_crawl(
         self,
@@ -121,6 +137,58 @@ class FirecrawlClient:
         """
         return await self._crawl_single_url({"url": url})
 
+    async def crawl_urls(self, urls: List[str]) -> List[Dict[str, Any]]:
+        """
+        Crawl multiple URLs directly (bypass search).
+
+        Use this for seed URLs that should be scraped directly.
+
+        Args:
+            urls: List of URLs to crawl
+
+        Returns:
+            List of crawled documents
+        """
+        if not urls:
+            return []
+
+        documents = []
+        semaphore = asyncio.Semaphore(self.max_concurrency)
+
+        async def crawl_with_semaphore(url: str):
+            async with semaphore:
+                return await self._crawl_single_url({"url": url})
+
+        tasks = [crawl_with_semaphore(url) for url in urls]
+
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Crawling seed URLs timed out after 30 seconds")
+            results = []
+
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Crawl failed: {result}")
+            elif result:
+                # Filter out login/auth pages that indicate failed authentication
+                title = result.get("title", "").lower()
+                markdown = result.get("markdown", "").lower()
+                if any(indicator in title for indicator in ["sign in", "login", "authenticate", "access denied"]):
+                    logger.warning(f"Skipping login page: {result.get('url')}")
+                    continue
+                if "sign in to your account" in markdown[:500] or "please sign in" in markdown[:500]:
+                    logger.warning(f"Skipping login page (content): {result.get('url')}")
+                    continue
+                result["source"] = "firecrawl"  # Mark as firecrawl source
+                documents.append(result)
+
+        logger.info(f"FireCrawl directly crawled {len(documents)}/{len(urls)} URLs")
+        return documents
+
     async def _search(
         self, query: str, seed_urls: List[str] = None, max_results: int = 10
     ) -> List[Dict[str, Any]]:
@@ -161,18 +229,17 @@ class FirecrawlClient:
             crawl_params = {
                 "url": url,
                 "formats": ["markdown", "html"],
-                "onlyMainContent": True,
-                "includeTags": ["title", "meta"],
-                "excludeTags": ["script", "style", "nav", "footer"],
-                "waitFor": 1000,  # Wait for JavaScript
+                "onlyMainContent": False,  # Get full page for internal wikis
+                "includeTags": ["title", "meta", "article", "main", "div", "p", "h1", "h2", "h3", "ul", "ol", "li", "table"],
+                "excludeTags": ["script", "style"],
+                "waitFor": 3000,  # Wait longer for JavaScript (3 seconds)
             }
 
-            # Add authentication based on configured type
-            auth_config = await self._get_auth_config()
+            # Add authentication headers (cookies passed as Cookie header)
+            auth_config = await self._get_auth_config(url)
             if auth_config.get("headers"):
                 crawl_params["headers"] = auth_config["headers"]
-            # Note: Cookies are handled via httpx client session, not in crawl_params
-            # Firecrawl API doesn't support cookies parameter in scrape endpoint
+                logger.info(f"Using cookie auth for {url}")
 
             response = await self.client.post(
                 urljoin(self.base_url, "/v1/scrape"), json=crawl_params
@@ -273,28 +340,127 @@ class FirecrawlClient:
 
         return hashlib.md5(content.encode("utf-8")).hexdigest()
 
-    def _parse_json_env(self, key: str, default: dict) -> dict:
-        """Parse JSON from environment variable."""
-        import json
-
-        value = os.getenv(key, "")
-        if not value:
-            return default
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError:
-            logger.error(f"Invalid JSON in environment variable {key}")
-            return default
-
-    async def _get_auth_config(self) -> Dict[str, Any]:
+    def _load_storage_state(self) -> Optional[Dict[str, Any]]:
         """
-        Get authentication configuration.
-        Note: Cookies are handled via storage_state in Playwright, not here.
+        Load storage_state from env var or file path.
+
+        Tries FIRECRAWL_AUTH_STORAGE_STATE env var first (JSON string),
+        then falls back to STORAGE_STATE_PATH file.
 
         Returns:
-            Empty dict (auth handled by Playwright storage_state)
+            Parsed storage_state dict or None
         """
-        return {}
+        # First try env var with JSON content
+        env_json = os.getenv("FIRECRAWL_AUTH_STORAGE_STATE", "")
+        if env_json:
+            try:
+                return json.loads(env_json)
+            except json.JSONDecodeError:
+                logger.error("Invalid JSON in FIRECRAWL_AUTH_STORAGE_STATE env var")
+
+        # Then try file path
+        file_path = os.getenv("STORAGE_STATE_PATH", "")
+        if file_path:
+            path = Path(file_path)
+            if path.is_file():
+                try:
+                    with open(path, "r") as f:
+                        data = json.load(f)
+                        cookie_count = len(data.get("cookies", []))
+                        logger.info(f"Loaded storage_state from {file_path} ({cookie_count} cookies)")
+                        return data
+                except (json.JSONDecodeError, IOError) as e:
+                    logger.error(f"Failed to load storage_state from {file_path}: {e}")
+            else:
+                logger.warning(f"STORAGE_STATE_PATH set but file not found: {file_path}")
+
+        return None
+
+    def _build_cookie_map(self) -> Dict[str, Dict[str, str]]:
+        """
+        Build a map of domain -> {cookie_name: cookie_value} from storage_state.
+
+        Returns:
+            Dict mapping domains to their cookies
+        """
+        cookie_map = {}
+        if not self.auth_storage_state:
+            return cookie_map
+
+        cookies = self.auth_storage_state.get("cookies", [])
+        for cookie in cookies:
+            domain = cookie.get("domain", "").lstrip(".")
+            name = cookie.get("name", "")
+            value = cookie.get("value", "")
+            if domain and name:
+                if domain not in cookie_map:
+                    cookie_map[domain] = {}
+                cookie_map[domain][name] = value
+
+        return cookie_map
+
+    def _get_cookie_header_for_url(self, url: str) -> Optional[str]:
+        """
+        Get Cookie header string for a given URL based on stored cookies.
+
+        Args:
+            url: The URL to get cookies for
+
+        Returns:
+            Cookie header string or None if no matching cookies
+        """
+        if not self.auth_cookies:
+            return None
+
+        try:
+            parsed = urlparse(url)
+            host = parsed.netloc.lower()
+
+            # Find matching cookies for this domain
+            matching_cookies = {}
+            for domain, cookies in self.auth_cookies.items():
+                # Match exact domain or subdomain
+                if host == domain or host.endswith("." + domain):
+                    matching_cookies.update(cookies)
+
+            if matching_cookies:
+                # Build cookie header string: "name1=value1; name2=value2"
+                cookie_str = "; ".join(
+                    f"{name}={value}" for name, value in matching_cookies.items()
+                )
+                return cookie_str
+
+        except Exception as e:
+            logger.error(f"Error building cookie header for {url}: {e}")
+
+        return None
+
+    async def _get_auth_config(self, url: str = None) -> Dict[str, Any]:
+        """
+        Get authentication configuration for FireCrawl API.
+
+        For cookie-based auth, builds a Cookie header from storage_state
+        that FireCrawl will use when scraping the page.
+
+        Args:
+            url: The URL being crawled (used to match domain-specific cookies)
+
+        Returns:
+            Dict with 'headers' key containing auth headers for FireCrawl API
+        """
+        config = {}
+
+        if self.auth_type == "cookies" and url:
+            cookie_header = self._get_cookie_header_for_url(url)
+            if cookie_header:
+                config["headers"] = {
+                    "Cookie": cookie_header,
+                    # Match browser User-Agent to avoid being blocked
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                }
+                logger.debug(f"Added Cookie header for {url}")
+
+        return config
 
     async def health_check(self) -> Dict[str, Any]:
         """Check if Firecrawl service is healthy."""
