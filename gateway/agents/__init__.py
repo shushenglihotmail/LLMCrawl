@@ -1,37 +1,16 @@
 """
-Gateway Agents - Specialized workflow agents for efficient LLM operations.
+Gateway Agents - Code Intelligence Agent for LLM-powered code analysis.
 
-Agents orchestrate data gathering WITHOUT multiple LLM rounds, reducing costs by 80%.
+The agent gathers all context (files, Azure DevOps content, web crawl) in a single
+round before calling the LLM, reducing costs by ~80% compared to multi-round tool calling.
 
-Two invocation methods:
-
-1. Template-based (recommended for clients):
-   - GET /agent/templates → Discover workflows
-   - GET /agent/templates/{workflow} → Get parameter schema
-   - POST /agent/execute → Execute with filled template
-
-2. Prompt-based (for advanced users):
-   - "run code analysis workflow on *.cpp files under /src/"
-   - Falls back to dynamic tool calling for non-explicit queries
+Usage:
+    POST /agent/chat - Execute chat with optional target files, reference files, and seed URLs
 """
 
-from gateway.agents.file_explanation_agent import CodeIntelligenceAgent
-from gateway.agents.templates import (
-    GenerateWorkflowRequest,
-    InspectWorkflowRequest,
-    UnderstandWorkflowRequest,
-    get_all_templates,
-    get_template,
-)
-from gateway.agents.workflow_detector import WorkflowDetector, WorkflowRequest
+from gateway.agents.agent_config import AgentConfig, convert_mcp_tool_to_openai
 
 __all__ = [
-    "CodeIntelligenceAgent",
-    "WorkflowDetector",
-    "WorkflowRequest",
-    "UnderstandWorkflowRequest",
-    "InspectWorkflowRequest",
-    "GenerateWorkflowRequest",
-    "get_all_templates",
-    "get_template",
+    "AgentConfig",
+    "convert_mcp_tool_to_openai",
 ]
