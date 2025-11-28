@@ -157,6 +157,8 @@ class AzureDevOpsClient:
         max_results: int = 20,
         branch: str = "",
         path: str = "/",
+        project: Optional[str] = None,
+        repository: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search for code in the repository.
@@ -167,6 +169,8 @@ class AzureDevOpsClient:
             max_results: Maximum number of results
             branch: Branch to search (uses configured branch if empty string)
             path: Path filter (default: "/" for root)
+            project: Project name override (default: use configured project)
+            repository: Repository name override (default: use configured repository)
 
         Returns:
             List of search results with file path, content preview, etc.
@@ -174,10 +178,11 @@ class AzureDevOpsClient:
         if not self._access_token:
             raise RuntimeError("Not authenticated")
 
-        # Use provided branch or fall back to configured branch (always set)
+        # Use provided values or fall back to configured defaults
         search_branch = branch or self.branch
-        # Use root path if not specified
         search_path = path or "/"
+        search_project = project or self.project
+        search_repository = repository or self.repository
 
         try:
             # Build search request
@@ -190,8 +195,8 @@ class AzureDevOpsClient:
 
             # Build filters - always include Repository, Project, Branch, and Path
             filters = {
-                "Repository": [self.repository],
-                "Project": [self.project],
+                "Repository": [search_repository],
+                "Project": [search_project],
                 "Branch": [search_branch],  # Always include branch filter
                 "Path": [search_path],  # Always include path filter
             }
@@ -249,6 +254,8 @@ class AzureDevOpsClient:
         branch: Optional[str] = None,
         max_results: Optional[int] = None,
         recursive: bool = False,
+        project: Optional[str] = None,
+        repository: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search for files in the repository with flexible filtering.
@@ -271,6 +278,8 @@ class AzureDevOpsClient:
             branch: Branch to search (default: configured branch)
             max_results: Max results to return (default: configured max_results)
             recursive: If True, search subdirectories recursively (default: False for safety)
+            project: Project name override (default: use configured project)
+            repository: Repository name override (default: use configured repository)
 
         Returns:
             List of matching files with path and metadata
@@ -280,6 +289,8 @@ class AzureDevOpsClient:
 
         branch = branch or self.branch
         max_results = max_results or self.max_results
+        search_project = project or self.project
+        search_repository = repository or self.repository
 
         try:
             # If keyword or file_pattern with recursive search, use Code Search API (fast & indexed)
@@ -321,6 +332,8 @@ class AzureDevOpsClient:
                     max_results=max_results,
                     branch=branch,
                     path=search_path,
+                    project=search_project,
+                    repository=search_repository,
                 )
 
                 # Convert code search results to file search format
@@ -349,7 +362,7 @@ class AzureDevOpsClient:
                 return results
 
             # Otherwise use Git Items API to list files with filters (for non-recursive or no pattern searches)
-            url = f"{self.base_url}/{self.project}/_apis/git/repositories/{self.repository}/items"
+            url = f"{self.base_url}/{search_project}/_apis/git/repositories/{search_repository}/items"
             params = {
                 "recursionLevel": "Full" if recursive else "OneLevel",
                 "api-version": "7.0",
@@ -445,7 +458,11 @@ class AzureDevOpsClient:
         return ""
 
     async def get_file_content(
-        self, file_path: str, branch: Optional[str] = None
+        self,
+        file_path: str,
+        branch: Optional[str] = None,
+        project: Optional[str] = None,
+        repository: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Get file content from repository.
@@ -453,6 +470,8 @@ class AzureDevOpsClient:
         Args:
             file_path: Path to file in repository
             branch: Branch name (default: use configured branch or repository default)
+            project: Project name override (default: use configured project)
+            repository: Repository name override (default: use configured repository)
 
         Returns:
             Dict with file content and metadata
@@ -460,13 +479,22 @@ class AzureDevOpsClient:
         if not self._access_token:
             raise RuntimeError("Not authenticated")
 
-        # Use configured branch if not specified
-        branch = branch or self.branch
+        # Use configured values if not specified
+        # Only use default branch if we're also using default project/repo
+        get_project = project or self.project
+        get_repository = repository or self.repository
+
+        # If project or repo is overridden, don't use the default branch
+        # (let Azure DevOps use the repo's default branch instead)
+        if project or repository:
+            get_branch = branch  # Use provided branch or None (repo default)
+        else:
+            get_branch = branch or self.branch  # Use provided or configured default
 
         try:
             url = (
-                f"{self.base_url}/{self.project}/_apis/git/repositories/"
-                f"{self.repository}/items"
+                f"{self.base_url}/{get_project}/_apis/git/repositories/"
+                f"{get_repository}/items"
             )
             params = {
                 "path": file_path,
@@ -474,8 +502,8 @@ class AzureDevOpsClient:
             }
 
             # Only add version descriptor if branch is specified
-            if branch:
-                params["versionDescriptor.version"] = branch
+            if get_branch:
+                params["versionDescriptor.version"] = get_branch
                 params["versionDescriptor.versionType"] = "branch"
 
             async with httpx.AsyncClient(timeout=30.0) as client:

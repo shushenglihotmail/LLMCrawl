@@ -270,11 +270,15 @@ class AzureDevOpsMCPServer:
         query = arguments.get("query")
         file_type = arguments.get("file_type")
         max_results = arguments.get("max_results", 20)
+        project = arguments.get("project")
+        repository = arguments.get("repository")
 
         if not query:
             return {"error": "query parameter is required"}
 
-        results = await self.client.search_code(query, file_type, max_results)
+        results = await self.client.search_code(
+            query, file_type, max_results, project=project, repository=repository
+        )
 
         return {
             "success": True,
@@ -292,6 +296,8 @@ class AzureDevOpsMCPServer:
         branch = arguments.get("branch")
         max_results = arguments.get("max_results")
         recursive = arguments.get("recursive", False)
+        project = arguments.get("project")
+        repository = arguments.get("repository")
 
         results = await self.client.search_files(
             path_pattern=path_pattern,
@@ -301,6 +307,8 @@ class AzureDevOpsMCPServer:
             branch=branch,
             max_results=max_results,
             recursive=recursive,
+            project=project,
+            repository=repository,
         )
 
         return {
@@ -322,11 +330,15 @@ class AzureDevOpsMCPServer:
         branch = (
             arguments.get("branch") or self.client.branch
         )  # Use configured branch if not specified
+        project = arguments.get("project")
+        repository = arguments.get("repository")
 
         if not file_path:
             return {"error": "file_path parameter is required"}
 
-        result = await self.client.get_file_content(file_path, branch)
+        result = await self.client.get_file_content(
+            file_path, branch, project=project, repository=repository
+        )
 
         return {"success": True, **result}
 

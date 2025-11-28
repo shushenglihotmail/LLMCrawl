@@ -32,6 +32,7 @@ from gateway.agents.unified_workflow import (
 )
 from gateway.llm.client import LLMClient
 from gateway.routers.tools import get_tool_handler
+from gateway.utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 
 logger = logging.getLogger(__name__)
 
@@ -507,25 +508,60 @@ async def execute_unified_workflow(request: UnifiedWorkflowRequest):
             except Exception as e:
                 logger.error(f"Failed to gather target paths: {e}", exc_info=True)
 
-        # Step 2: Gather context from local reference files
+        # Step 2: Gather context from reference files (local or Azure DevOps)
         reference_content = []
+        azure_devops_mcp_url = os.getenv(
+            "AZURE_DEVOPS_MCP_URL", "http://azure-devops-mcp-server:8004"
+        )
         if request.reference_files:
             logger.info(
-                f"Gathering {len(request.reference_files)} reference files from local MCP"
+                f"Gathering {len(request.reference_files)} reference files"
             )
             try:
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     for file_path in request.reference_files:
-                        logger.info(
-                            f"Reading reference file: {file_path} from {agent.mcp_url}"
-                        )
-                        response = await client.post(
-                            f"{agent.mcp_url}/invoke",
-                            json={
-                                "tool_name": "read_local_file",
-                                "arguments": {"file_path": file_path},
-                            },
-                        )
+                        # Check if this is an Azure DevOps file
+                        if is_azdo_uri(file_path):
+                            # Parse the azdo:// URI
+                            parsed = parse_azdo_uri(file_path)
+                            if not parsed:
+                                logger.error(f"Failed to parse azdo URI: {file_path}")
+                                continue
+
+                            logger.info(
+                                f"Reading Azure DevOps reference file: {file_path} -> "
+                                f"project={parsed.project}, repo={parsed.repository}, "
+                                f"path={parsed.path}, branch={parsed.branch}"
+                            )
+
+                            # Build arguments for get_azure_devops_file
+                            arguments = {"file_path": parsed.path}
+                            if parsed.project:
+                                arguments["project"] = parsed.project
+                            if parsed.repository:
+                                arguments["repository"] = parsed.repository
+                            if parsed.branch:
+                                arguments["branch"] = parsed.branch
+
+                            response = await client.post(
+                                f"{azure_devops_mcp_url}/invoke",
+                                json={
+                                    "tool_name": "get_azure_devops_file",
+                                    "arguments": arguments,
+                                },
+                            )
+                        else:
+                            # Local file - use local MCP server
+                            logger.info(
+                                f"Reading local reference file: {file_path} from {agent.mcp_url}"
+                            )
+                            response = await client.post(
+                                f"{agent.mcp_url}/invoke",
+                                json={
+                                    "tool_name": "read_local_file",
+                                    "arguments": {"file_path": file_path},
+                                },
+                            )
                         logger.info(f"Response status: {response.status_code}")
                         if response.status_code == 200:
                             file_data = response.json()

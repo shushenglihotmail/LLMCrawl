@@ -9,7 +9,28 @@ The Code Intelligence Agent (template agent) now supports both local files and A
 To tell the agent which MCP server to use, prefix your file paths:
 
 - **Local files**: Use regular paths (e.g., `src/main.py`, `/data/files/readme.md`)
-- **Azure DevOps files**: Use `azdo:` or `azure-devops:` prefix (e.g., `azdo:src/main.cpp`, `azure-devops:readme.md`)
+- **Azure DevOps files**: Use `azdo:` prefix with optional project/repo override
+
+### Azure DevOps URI Format
+
+```
+azdo://[<project>/<repo>/]<path>[?branch=<branch_name>]
+```
+
+**Examples:**
+
+| URI | Description |
+|-----|-------------|
+| `azdo:/src/main.cpp` | Default project, repo, and branch |
+| `azdo:/src/main.cpp?branch=main` | Default project/repo, specific branch |
+| `azdo://OS/os.2020/src/main.cpp` | Specific project and repo |
+| `azdo://OneCore/WindowsCompositionData/path/file.xml` | Different project/repo |
+| `azdo://OneCore/WindowsCompositionData/path?branch=main` | Full override |
+
+**Rules:**
+- Project and repo must appear together or both be absent
+- Branch is always optional (defaults to configured branch)
+- Path must start with `/` after the repo name
 
 ## Examples
 
@@ -60,7 +81,7 @@ To tell the agent which MCP server to use, prefix your file paths:
 {
   "workflow": "inspect",
   "target_paths": [
-    "azdo:src/service.cpp",
+    "azdo:/src/service.cpp",
     "local/tests/test_service.py"
   ],
   "request": "Check for security issues and test coverage gaps",
@@ -68,7 +89,24 @@ To tell the agent which MCP server to use, prefix your file paths:
 }
 ```
 
-### 5. Generate Code from Azure DevOps Examples
+### 5. Multiple Azure DevOps Repositories
+
+```json
+{
+  "workflow": "understand",
+  "target_paths": [
+    "azdo:/src/onecore/vm/compute/ComputeService.cpp",
+    "azdo://OneCore/WindowsCompositionData/manifests/service.xml"
+  ],
+  "reference_files": [
+    "azdo://OneCore/WindowsCompositionData/docs/README.md"
+  ],
+  "request": "Explain how the service integrates with composition data",
+  "model": "gpt-4o"
+}
+```
+
+### 6. Generate Code from Azure DevOps Examples
 
 ```json
 {

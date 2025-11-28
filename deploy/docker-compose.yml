@@ -55,6 +55,24 @@ services:
       timeout: 5s
       retries: 3
 
+  # Playwright/Browserless Service - fallback for JS-heavy pages
+  playwright:
+    image: ghcr.io/browserless/chromium
+    container_name: web-rag-playwright
+    ports:
+      - "3000:3000"
+    environment:
+      - CONCURRENT=5
+      - TIMEOUT=300000
+    networks:
+      - webrag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/json/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
   # Firecrawl Service
   firecrawl:
     image: ghcr.io/firecrawl/firecrawl:latest
@@ -68,6 +86,7 @@ services:
       - webrag-network
     depends_on:
       - redis
+      - playwright
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
       interval: 30s

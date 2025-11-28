@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from ..utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from ..utils.logging import log_tool_call, log_tool_result
 
 logger = logging.getLogger(__name__)
@@ -404,6 +405,12 @@ class ToolHandler:
         """
         Handle Azure DevOps MCP server tool calls.
 
+        Supports azdo:// URI format for multi-repository access:
+          azdo:/path/to/file.cpp              - Use default project, repo, and branch
+          azdo:/path/to/file.cpp?branch=main  - Use default project, repo; override branch
+          azdo://Project/repo/path/to/file.cpp  - Use specified project, repo; default branch
+          azdo://Project/repo/path/to/file.cpp?branch=main  - Fully specified
+
         Args:
             tool_name: Name of the Azure DevOps tool
             arguments: Tool arguments
@@ -415,6 +422,23 @@ class ToolHandler:
         azure_devops_mcp_url = os.getenv(
             "AZURE_DEVOPS_MCP_URL", "http://azure-devops-mcp-server:8004"
         )
+
+        # Check for azdo:// URI in file_path argument
+        file_path = arguments.get("file_path", "")
+        if file_path and is_azdo_uri(file_path):
+            parsed = parse_azdo_uri(file_path)
+            if parsed:
+                logger.info(f"Parsed azdo URI: {file_path} -> {parsed}")
+                # Update arguments with parsed values
+                arguments["file_path"] = parsed.path
+                if parsed.project:
+                    arguments["project"] = parsed.project
+                if parsed.repository:
+                    arguments["repository"] = parsed.repository
+                if parsed.branch:
+                    arguments["branch"] = parsed.branch
+            else:
+                logger.warning(f"Failed to parse azdo URI: {file_path}")
 
         # Add branch parameter if not provided and environment variable exists
         if tool_name == "get_azure_devops_file" and "branch" not in arguments:
