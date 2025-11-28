@@ -384,12 +384,12 @@ curl http://your-domain:8002/health
 curl http://your-domain:8003/health
 
 # Functional test (web RAG)
-curl -X POST http://your-domain:8000/api/v1/chat \
+curl -X POST http://your-domain:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What are the latest tech news?"}'
 
 # Functional test (MCP file operations)
-curl -X POST http://your-domain:8000/api/v1/chat \
+curl -X POST http://your-domain:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "List files in the documents folder"}'
 ```

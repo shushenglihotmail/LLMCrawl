@@ -32,7 +32,7 @@ The system automatically triggers crawling and indexing when your message contai
 
 ```bash
 # Test with a query that triggers indexing
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "What are the latest NVIDIA earnings?",
@@ -76,7 +76,7 @@ $body = @{
     stream = $false
 } | ConvertTo-Json
 
-$response = Invoke-RestMethod -Uri "http://localhost:8000/api/v1/chat" `
+$response = Invoke-RestMethod -Uri "http://localhost:8000/agent/chat" `
     -Method Post `
     -ContentType "application/json" `
     -Body $body
@@ -103,7 +103,7 @@ Run it:
 If you want to force crawling/indexing even for general questions, use `force_refresh: true`:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Tell me about Python programming",
@@ -173,7 +173,7 @@ $body = @{
     stream = $false
 } | ConvertTo-Json
 
-$response = Invoke-RestMethod -Uri "http://localhost:8000/api/v1/chat" `
+$response = Invoke-RestMethod -Uri "http://localhost:8000/agent/chat" `
     -Method Post `
     -ContentType "application/json" `
     -Body $body

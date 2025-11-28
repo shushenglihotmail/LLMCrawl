@@ -312,7 +312,7 @@ Service              | URL                              | Purpose
 ─────────────────────────────────────────────────────────────────────
 Gateway              | http://localhost:8000            | Main API
 Gateway Health       | http://localhost:8000/health     | Health check
-Gateway Chat         | http://localhost:8000/api/v1/chat| Chat endpoint
+Gateway Chat         | http://localhost:8000/agent/chat| Chat endpoint
 Crawler              | http://localhost:8001            | Crawl service
 Indexer              | http://localhost:8002            | Index service
 MCP Server           | http://localhost:8003            | File operations
@@ -336,7 +336,7 @@ cd deploy && docker-compose logs -f gateway
 curl http://localhost:8000/health
 
 # Test web RAG
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Latest tech news"}'
 

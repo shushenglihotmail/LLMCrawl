@@ -385,7 +385,7 @@ import httpx
 async def test_chat():
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            "http://localhost:8000/api/v1/chat",
+            "http://localhost:8000/agent/chat",
             json={
                 "messages": [
                     {

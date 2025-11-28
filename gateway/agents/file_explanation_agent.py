@@ -22,11 +22,26 @@ from typing import Any, Dict, List, Literal, Optional
 
 import httpx
 
-from gateway.routers.chat import convert_mcp_tool_to_openai
-
 logger = logging.getLogger(__name__)
 
 WorkflowType = Literal["understand", "inspect", "generate"]
+
+
+def _convert_mcp_tool_to_openai(mcp_tool: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert MCP tool format to OpenAI function calling format.
+
+    MCP format: {"name": "...", "description": "...", "inputSchema": {...}}
+    OpenAI format: {"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": mcp_tool.get("name"),
+            "description": mcp_tool.get("description"),
+            "parameters": mcp_tool.get("inputSchema", {}),
+        },
+    }
 
 
 def estimate_tokens(text: str) -> int:
@@ -65,7 +80,7 @@ class CodeIntelligenceAgent:
                 data = response.json()
                 mcp_tools = data.get("tools", [])
                 self._mcp_tools_cache = [
-                    convert_mcp_tool_to_openai(tool) for tool in mcp_tools
+                    _convert_mcp_tool_to_openai(tool) for tool in mcp_tools
                 ]
                 logger.info(f"Loaded {len(self._mcp_tools_cache)} MCP tools")
                 return self._mcp_tools_cache
@@ -88,7 +103,7 @@ class CodeIntelligenceAgent:
                 data = response.json()
                 mcp_tools = data.get("tools", [])
                 self._azure_devops_tools_cache = [
-                    convert_mcp_tool_to_openai(tool) for tool in mcp_tools
+                    _convert_mcp_tool_to_openai(tool) for tool in mcp_tools
                 ]
                 logger.info(
                     f"Loaded {len(self._azure_devops_tools_cache)} Azure DevOps MCP tools"

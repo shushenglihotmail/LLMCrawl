@@ -340,7 +340,7 @@ async def execute_workflow_with_seed_urls(
     return await execute_workflow(request)
 
 
-@router.post("/unified", response_model=UnifiedWorkflowResponse)
+@router.post("/chat", response_model=UnifiedWorkflowResponse)
 async def execute_unified_workflow(request: UnifiedWorkflowRequest):
     """
     Execute unified workflow - single endpoint for all use cases.
@@ -366,7 +366,7 @@ async def execute_unified_workflow(request: UnifiedWorkflowRequest):
         logger,
         request_id,
         "POST",
-        "/agent/unified",
+        "/agent/chat",
         message_length=len(request.user_message),
         stream=False,
         conversation_id=request.conversation_id,
@@ -826,7 +826,7 @@ async def execute_unified_workflow(request: UnifiedWorkflowRequest):
 
         if request.expose_to_llm.get("crawler", False):
             # Add crawler tool
-            from gateway.routers.chat import CRAWL_AND_REFRESH_TOOL
+            from gateway.llm.prompts import CRAWL_AND_REFRESH_TOOL
 
             tools.append(CRAWL_AND_REFRESH_TOOL)
             logger.info("Exposed crawler tool to LLM")

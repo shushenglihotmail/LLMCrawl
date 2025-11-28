@@ -135,16 +135,16 @@ make metrics-all
 
 ```promql
 # Total requests by handler, method, and status
-http_requests_total{handler="/api/v1/chat", method="POST", status="2xx"}
+http_requests_total{handler="/agent/chat", method="POST", status="2xx"}
 
 # Request duration histogram
-http_request_duration_seconds_bucket{handler="/api/v1/chat", le="1.0"}
+http_request_duration_seconds_bucket{handler="/agent/chat", le="1.0"}
 
 # Request size
-http_request_size_bytes_sum{handler="/api/v1/chat"}
+http_request_size_bytes_sum{handler="/agent/chat"}
 
 # Response size
-http_response_size_bytes_sum{handler="/api/v1/chat"}
+http_response_size_bytes_sum{handler="/agent/chat"}
 ```
 
 #### System Metrics

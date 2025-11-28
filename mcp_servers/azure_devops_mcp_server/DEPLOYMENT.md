@@ -227,7 +227,7 @@ Expected: File content
 
 ```bash
 # Send chat message to gateway
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Search for authentication code in the OS repository",

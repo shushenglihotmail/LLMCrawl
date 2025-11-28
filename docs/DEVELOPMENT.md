@@ -267,21 +267,21 @@ docker-compose logs -f indexer
 
 **Basic chat:**
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Hello, what can you help me with?"}'
 ```
 
 **Web search query:**
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What are the latest NVIDIA earnings?"}'
 ```
 
 **Streaming response:**
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Latest Tesla news?", "stream": true}'
 ```

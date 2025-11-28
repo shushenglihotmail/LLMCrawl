@@ -349,7 +349,7 @@ curl http://localhost:8003/health  # MCP Server
 
 **Test Web RAG (Web Crawling):**
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What are the latest NVIDIA earnings?"}'
 ```
@@ -357,12 +357,12 @@ curl -X POST http://localhost:8000/api/v1/chat \
 **Test MCP Server (Local File Operations):**
 ```bash
 # List files in root directory
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "List files in the root folder"}'
 
 # Read a specific file
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Read the README.md file"}'
 ```
@@ -892,7 +892,7 @@ Expected response:
 
 #### Test 5: End-to-End Chat with Tool Calling
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "What are the latest NVIDIA earnings results?",
@@ -925,7 +925,7 @@ Expected response structure:
 
 #### Test 6: General Chat (No Tool Calling)
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Explain how neural networks work in general.",
@@ -940,14 +940,14 @@ Expected: Response should NOT include tool_calls (empty array).
 ```bash
 # Test concurrent requests
 for i in {1..5}; do
-  curl -X POST http://localhost:8000/api/v1/chat \
+  curl -X POST http://localhost:8000/agent/chat \
     -H "Content-Type: application/json" \
     -d '{"message": "What is machine learning?"}' &
 done
 wait
 
 # Monitor response times
-time curl -X POST http://localhost:8000/api/v1/chat \
+time curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Latest AI news?"}'
 ```
@@ -956,7 +956,7 @@ time curl -X POST http://localhost:8000/api/v1/chat \
 
 ### Example 1: Financial News Query
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "What are the latest Apple earnings and guidance?",
@@ -994,7 +994,7 @@ Management provided conservative guidance for Q1 2025 (sec.gov, 2024-11-01), cit
 
 ### Example 2: Technology News Query
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Any recent breakthroughs in quantum computing this month?",
@@ -1011,7 +1011,7 @@ curl -X POST http://localhost:8000/api/v1/chat \
 
 ### Example 3: Stock Market Query
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "What happened to Tesla stock today? Any news driving the movement?",
@@ -1027,7 +1027,7 @@ curl -X POST http://localhost:8000/api/v1/chat \
 
 ### Example 4: Research Paper Query
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "What are the latest papers on large language models published this week?",
@@ -1037,7 +1037,7 @@ curl -X POST http://localhost:8000/api/v1/chat \
 
 ### Example 5: General Knowledge (No Crawling)
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Explain the concept of transformer architectures in machine learning."
@@ -1052,7 +1052,7 @@ curl -X POST http://localhost:8000/api/v1/chat \
 
 ### Example 6: Streaming Response
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Latest developments in autonomous vehicles?",
@@ -1067,7 +1067,7 @@ curl -X POST http://localhost:8000/api/v1/chat \
 
 ### Example 7: Force Refresh
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Tell me about the history of the internet.",

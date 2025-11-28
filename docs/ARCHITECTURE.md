@@ -15,7 +15,7 @@ LLMCrawl is a production-grade Web RAG system that combines LLM chat capabilitie
          │                     │                 │
          └─────────────────────┼─────────────────┘
                                │
-                    HTTP POST /api/v1/chat
+                    HTTP POST /agent/chat
                                │
 ┌──────────────────────────────▼──────────────────────────────────┐
 │                    GATEWAY SERVICE (Port 8000)                   │

@@ -71,7 +71,7 @@ LLM_MODELS=[
 Specify the model in your chat request:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat \
+curl -X POST http://localhost:8000/agent/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Explain quantum computing",
