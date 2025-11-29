@@ -368,6 +368,14 @@ class AzureDevOpsClient:
                 "api-version": "7.0",
             }
 
+            # Add scopePath if path_pattern is a simple folder path (not a glob pattern)
+            if path_pattern:
+                pattern = path_pattern.replace("path:", "").strip().strip('"')
+                # If it's a simple path (no wildcards), use it as scopePath for efficient API query
+                if "**" not in pattern and "*" not in pattern and "?" not in pattern:
+                    scope_path = pattern if pattern.startswith("/") else "/" + pattern
+                    params["scopePath"] = scope_path
+
             # Only add version descriptor if branch is specified
             if branch:
                 params["versionDescriptor.version"] = branch

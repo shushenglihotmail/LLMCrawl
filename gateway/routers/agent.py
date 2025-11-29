@@ -41,57 +41,96 @@ _agent_config: Optional[AgentConfig] = None
 # =============================================================================
 
 
-async def _expand_paths(
-    agent: AgentConfig, path_list: List[str]
-) -> List[str]:
+async def _expand_paths(agent: AgentConfig, path_list: List[str]) -> List[str]:
     """
     Expand path list to actual file paths using conventions:
-    - 'azdo:...' = Azure DevOps path (pass through, no expansion)
+    - 'azdo:...' = Azure DevOps path (use Azure DevOps MCP for expansion)
     - 'file.cpp' = direct file
     - '*.cpp' or 'x*.json' = wildcard pattern
     - 'folder/' or 'folder\\' = folder (non-recursive)
     - 'folder/**' = folder (recursive)
+
+    Both local and Azure DevOps paths support folder expansion and wildcards.
     """
     expanded_files = []
 
     for path in path_list:
-        # Azure DevOps paths (azdo:) - pass through without expansion
-        if path.startswith("azdo:"):
-            expanded_files.append(path)
-            continue
+        # Check if this is an Azure DevOps path
+        if is_azdo_uri(path):
+            # Parse the azdo URI to get components
+            parsed = parse_azdo_uri(path)
+            if not parsed:
+                # Can't parse, pass through as-is
+                expanded_files.append(path)
+                continue
 
-        # Normalize backslashes to forward slashes (Windows paths)
-        path_normalized = path.replace("\\", "/")
+            azdo_path = parsed.path
 
-        # Check for recursive folder pattern
-        if path_normalized.endswith("/**"):
-            folder = path_normalized[:-3]
-            files = await _list_folder_files(agent, folder, recursive=True)
-            expanded_files.extend(files)
-        # Check for folder (ends with slash)
-        elif path_normalized.endswith("/"):
-            folder = path_normalized[:-1]
-            files = await _list_folder_files(agent, folder, recursive=False)
-            expanded_files.extend(files)
-        # Check for wildcard pattern
-        elif "*" in path_normalized:
-            parts = path_normalized.split("/")
-            pattern = parts[-1]
-            folder = "/".join(parts[:-1]) if len(parts) > 1 else "."
-            files = await _list_folder_files(agent, folder, False)
-            matching = [f for f in files if fnmatch.fnmatch(f.split("/")[-1], pattern)]
-            expanded_files.extend(matching)
+            # Check for recursive folder pattern
+            if azdo_path.endswith("/**"):
+                folder = azdo_path[:-3]
+                files = await _list_azdo_folder_files(
+                    agent, folder, recursive=True, parsed=parsed
+                )
+                expanded_files.extend(files)
+            # Check for folder (ends with slash)
+            elif azdo_path.endswith("/"):
+                folder = azdo_path[:-1]
+                files = await _list_azdo_folder_files(
+                    agent, folder, recursive=False, parsed=parsed
+                )
+                expanded_files.extend(files)
+            # Check for wildcard pattern
+            elif "*" in azdo_path:
+                parts = azdo_path.split("/")
+                pattern = parts[-1]
+                folder = "/".join(parts[:-1]) if len(parts) > 1 else "/"
+                files = await _list_azdo_folder_files(
+                    agent, folder, recursive=False, parsed=parsed
+                )
+                matching = [
+                    f for f in files if fnmatch.fnmatch(f.split("/")[-1], pattern)
+                ]
+                expanded_files.extend(matching)
+            else:
+                # Direct azdo file path - keep original URI format
+                expanded_files.append(path)
         else:
-            # Direct file path
-            expanded_files.append(path_normalized)
+            # Local file path
+            # Normalize backslashes to forward slashes (Windows paths)
+            path_normalized = path.replace("\\", "/")
+
+            # Check for recursive folder pattern
+            if path_normalized.endswith("/**"):
+                folder = path_normalized[:-3]
+                files = await _list_local_folder_files(agent, folder, recursive=True)
+                expanded_files.extend(files)
+            # Check for folder (ends with slash)
+            elif path_normalized.endswith("/"):
+                folder = path_normalized[:-1]
+                files = await _list_local_folder_files(agent, folder, recursive=False)
+                expanded_files.extend(files)
+            # Check for wildcard pattern
+            elif "*" in path_normalized:
+                parts = path_normalized.split("/")
+                pattern = parts[-1]
+                folder = "/".join(parts[:-1]) if len(parts) > 1 else "."
+                files = await _list_local_folder_files(agent, folder, recursive=False)
+                matching = [
+                    f for f in files if fnmatch.fnmatch(f.split("/")[-1], pattern)
+                ]
+                expanded_files.extend(matching)
+            else:
+                # Direct file path
+                expanded_files.append(path_normalized)
 
     return expanded_files
 
 
-async def _list_folder_files(
+async def _list_local_folder_files(
     agent: AgentConfig, folder_path: str, recursive: bool
 ) -> List[str]:
-    """List files in a folder via MCP server."""
+    """List files in a local folder via local MCP server."""
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -109,8 +148,115 @@ async def _list_folder_files(
                 return [f["path"] for f in files_data if f.get("type") == "file"]
             return []
     except Exception as e:
-        logger.error(f"Failed to list folder {folder_path}: {e}")
+        logger.error(f"Failed to list local folder {folder_path}: {e}")
         return []
+
+
+async def _list_azdo_folder_files(
+    agent: AgentConfig, folder_path: str, recursive: bool, parsed: Any
+) -> List[str]:
+    """List files in an Azure DevOps folder via Azure DevOps MCP server."""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Use search_azure_devops_files tool with path_pattern
+            arguments = {
+                "path_pattern": folder_path,
+                "recursive": recursive,
+            }
+            if parsed.branch:
+                arguments["branch"] = parsed.branch
+
+            logger.info(
+                f"Listing Azure DevOps folder: {folder_path}, recursive={recursive}, args: {arguments}"
+            )
+            response = await client.post(
+                f"{agent.azure_devops_mcp_url}/invoke",
+                json={
+                    "tool_name": "search_azure_devops_files",
+                    "arguments": arguments,
+                },
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.debug(f"Azure DevOps MCP response: {result}")
+
+            if result.get("success"):
+                # Handle different response formats
+                result_data = result.get("result", {})
+                if isinstance(result_data, dict):
+                    # Check for 'results' (from search API) or 'files' key
+                    files_data = result_data.get(
+                        "results", result_data.get("files", [])
+                    )
+                elif isinstance(result_data, list):
+                    files_data = result_data
+                else:
+                    files_data = []
+
+                # Extract file paths - format may vary
+                file_paths = []
+                for f in files_data:
+                    if isinstance(f, dict):
+                        # Could be {"path": "..."} from search results
+                        path = f.get("path")
+                        if path:
+                            # Filter: only include files directly in the folder if not recursive
+                            if recursive or _is_direct_child(folder_path, path):
+                                file_paths.append(path)
+                    elif isinstance(f, str):
+                        if recursive or _is_direct_child(folder_path, path):
+                            file_paths.append(f)
+
+                logger.info(f"Found {len(file_paths)} files in {folder_path}")
+                # Reconstruct azdo URIs for the files
+                return [_build_azdo_uri(parsed, fp) for fp in file_paths]
+            else:
+                logger.warning(f"Azure DevOps MCP returned success=False: {result}")
+            return []
+    except Exception as e:
+        logger.error(f"Failed to list Azure DevOps folder {folder_path}: {e}")
+        return []
+
+
+def _is_direct_child(folder_path: str, file_path: str) -> bool:
+    """Check if file_path is a direct child of folder_path (not in subdirectory)."""
+    # Normalize paths - remove leading/trailing slashes for comparison
+    folder = folder_path.strip("/")
+    file_p = file_path.strip("/")
+
+    # Check if file is under the folder
+    if not folder:
+        # Root folder - file should have no slashes (direct child of root)
+        return "/" not in file_p
+
+    if not file_p.startswith(folder + "/"):
+        return False
+
+    # Get the relative path after the folder
+    relative = file_p[len(folder) + 1 :]
+    # Direct child has no more slashes
+    return "/" not in relative
+
+
+def _build_azdo_uri(parsed: Any, file_path: str) -> str:
+    """Build an azdo: URI from parsed components and a file path."""
+    # Ensure file_path starts with /
+    if not file_path.startswith("/"):
+        file_path = "/" + file_path
+
+    # If no project/repo specified, use simple format: azdo:/path
+    if not parsed.project and not parsed.repository:
+        uri = f"azdo:{file_path}"
+        if parsed.branch:
+            uri += f"?branch={parsed.branch}"
+        return uri
+
+    # Full format: azdo://project/repo/path or azdo://project/repo@branch/path
+    uri = f"azdo://{parsed.project}/{parsed.repository}"
+    if parsed.branch:
+        uri += f"@{parsed.branch}"
+    uri += file_path
+    return uri
 
 
 # =============================================================================
@@ -139,67 +285,31 @@ def _extract_content_from_response(file_data: Dict[str, Any]) -> str:
 # =============================================================================
 
 
-async def _gather_target_files(
+async def _gather_files(
     agent: AgentConfig,
     paths: List[str],
     context_gathered: Dict[str, int],
+    context_key: str,
+    label: str,
 ) -> List[str]:
-    """Gather content from target files (Azure DevOps)."""
+    """
+    Gather content from files (local or Azure DevOps).
+
+    Args:
+        agent: Agent configuration
+        paths: List of file paths (can be local or azdo: URIs)
+        context_gathered: Dict to track gathered context counts
+        context_key: Key in context_gathered to increment (e.g., "target_files", "reference_files")
+        label: Label for log output (e.g., "File", "Reference File")
+
+    Returns:
+        List of formatted file content strings
+    """
     if not paths:
         return []
 
-    target_content = []
-    logger.info(f"Gathering {len(paths)} target paths from Azure DevOps")
-
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            for path in paths:
-                # Handle azdo: prefixed paths
-                if path.startswith("azdo:"):
-                    file_path = path[5:]
-                    if not file_path.startswith("/"):
-                        file_path = "/" + file_path
-                else:
-                    file_path = path
-
-                logger.info(f"Fetching target file: {file_path}")
-                response = await client.post(
-                    f"{agent.azure_devops_mcp_url}/invoke",
-                    json={
-                        "tool_name": "get_azure_devops_file",
-                        "arguments": {"file_path": file_path},
-                    },
-                )
-
-                if response.status_code == 200:
-                    file_data = response.json()
-                    content = _extract_content_from_response(file_data)
-                    if content:
-                        target_content.append(f"File: {file_path}\n\n{content}")
-                        context_gathered["target_files"] += 1
-                        logger.info(f"Extracted {len(content)} chars from {file_path}")
-                else:
-                    logger.error(f"Failed to fetch {file_path}: HTTP {response.status_code}")
-    except Exception as e:
-        logger.error(f"Failed to gather target paths: {e}", exc_info=True)
-
-    return target_content
-
-
-async def _gather_reference_files(
-    agent: AgentConfig,
-    paths: List[str],
-    context_gathered: Dict[str, int],
-) -> List[str]:
-    """Gather content from reference files (local or Azure DevOps)."""
-    if not paths:
-        return []
-
-    reference_content = []
-    azure_devops_mcp_url = os.getenv(
-        "AZURE_DEVOPS_MCP_URL", "http://azure-devops-mcp-server:8004"
-    )
-    logger.info(f"Gathering {len(paths)} reference files")
+    file_content = []
+    logger.info(f"Gathering {len(paths)} {context_key.replace('_', ' ')}")
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -219,13 +329,17 @@ async def _gather_reference_files(
                     if parsed.branch:
                         arguments["branch"] = parsed.branch
 
+                    logger.info(f"Fetching Azure DevOps file: {file_path}")
                     response = await client.post(
-                        f"{azure_devops_mcp_url}/invoke",
-                        json={"tool_name": "get_azure_devops_file", "arguments": arguments},
+                        f"{agent.azure_devops_mcp_url}/invoke",
+                        json={
+                            "tool_name": "get_azure_devops_file",
+                            "arguments": arguments,
+                        },
                     )
                 else:
                     # Local file
-                    logger.info(f"Reading local reference file: {file_path}")
+                    logger.info(f"Reading local file: {file_path}")
                     response = await client.post(
                         f"{agent.mcp_url}/invoke",
                         json={
@@ -238,15 +352,39 @@ async def _gather_reference_files(
                     file_data = response.json()
                     content = _extract_content_from_response(file_data)
                     if content:
-                        reference_content.append(f"Reference File: {file_path}\n\n{content}")
-                        context_gathered["reference_files"] += 1
+                        file_content.append(f"{label}: {file_path}\n\n{content}")
+                        context_gathered[context_key] += 1
                         logger.info(f"Extracted {len(content)} chars from {file_path}")
                 else:
-                    logger.error(f"Failed to read {file_path}: HTTP {response.status_code}")
+                    logger.error(
+                        f"Failed to fetch {file_path}: HTTP {response.status_code}"
+                    )
     except Exception as e:
-        logger.error(f"Failed to gather reference files: {e}", exc_info=True)
+        logger.error(
+            f"Failed to gather {context_key.replace('_', ' ')}: {e}", exc_info=True
+        )
 
-    return reference_content
+    return file_content
+
+
+async def _gather_target_files(
+    agent: AgentConfig,
+    paths: List[str],
+    context_gathered: Dict[str, int],
+) -> List[str]:
+    """Gather content from target files (local or Azure DevOps)."""
+    return await _gather_files(agent, paths, context_gathered, "target_files", "File")
+
+
+async def _gather_reference_files(
+    agent: AgentConfig,
+    paths: List[str],
+    context_gathered: Dict[str, int],
+) -> List[str]:
+    """Gather content from reference files (local or Azure DevOps)."""
+    return await _gather_files(
+        agent, paths, context_gathered, "reference_files", "Reference File"
+    )
 
 
 async def _crawl_urls(
@@ -260,7 +398,9 @@ async def _crawl_urls(
         return []
 
     crawled_content = []
-    logger.info(f"Crawling {len(request.seed_urls)} seed URLs, browse_web={request.browse_web}")
+    logger.info(
+        f"Crawling {len(request.seed_urls)} seed URLs, browse_web={request.browse_web}"
+    )
 
     try:
         async with httpx.AsyncClient(timeout=90.0) as client:
@@ -410,14 +550,18 @@ def _build_messages(
             if msg.get("role") == "user":
                 messages.append({"role": "user", "content": msg["content"]})
         if history:
-            logger.info(f"Loaded {len([m for m in history if m.get('role') == 'user'])} user messages from history")
+            logger.info(
+                f"Loaded {len([m for m in history if m.get('role') == 'user'])} user messages from history"
+            )
 
     # Add current message with context
     if full_context:
-        messages.append({
-            "role": "user",
-            "content": f"Context:\n\n{full_context}\n\n---\n\nQuestion: {user_message}",
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": f"Context:\n\n{full_context}\n\n---\n\nQuestion: {user_message}",
+            }
+        )
     else:
         messages.append({"role": "user", "content": user_message})
 
@@ -442,7 +586,9 @@ async def _load_tools(
                 response = await client.get(f"{agent.mcp_url}/tools")
                 if response.status_code == 200:
                     mcp_tools = response.json().get("tools", [])
-                    tools.extend([convert_mcp_tool_to_openai(tool) for tool in mcp_tools])
+                    tools.extend(
+                        [convert_mcp_tool_to_openai(tool) for tool in mcp_tools]
+                    )
                     logger.info(f"Exposed {len(mcp_tools)} local MCP tools to LLM")
         except Exception as e:
             logger.error(f"Failed to load local MCP tools: {e}")
@@ -453,13 +599,18 @@ async def _load_tools(
                 response = await client.get(f"{agent.azure_devops_mcp_url}/tools")
                 if response.status_code == 200:
                     az_tools = response.json().get("tools", [])
-                    tools.extend([convert_mcp_tool_to_openai(tool) for tool in az_tools])
-                    logger.info(f"Exposed {len(az_tools)} Azure DevOps MCP tools to LLM")
+                    tools.extend(
+                        [convert_mcp_tool_to_openai(tool) for tool in az_tools]
+                    )
+                    logger.info(
+                        f"Exposed {len(az_tools)} Azure DevOps MCP tools to LLM"
+                    )
         except Exception as e:
             logger.error(f"Failed to load Azure DevOps MCP tools: {e}")
 
     if expose_to_llm.get("crawler", False):
         from gateway.llm.prompts import CRAWL_AND_REFRESH_TOOL
+
         tools.append(CRAWL_AND_REFRESH_TOOL)
         logger.info("Exposed crawler tool to LLM")
 
@@ -486,7 +637,9 @@ async def _execute_llm_with_tools(
 
     # Log tools
     if tools:
-        logger.info(f"Passing {len(tools)} tools to LLM: {[t.get('function', {}).get('name', '?') for t in tools]}")
+        logger.info(
+            f"Passing {len(tools)} tools to LLM: {[t.get('function', {}).get('name', '?') for t in tools]}"
+        )
 
     # Initial LLM call
     response = await llm_client.chat_completion(
@@ -497,7 +650,9 @@ async def _execute_llm_with_tools(
         max_tokens=request.max_tokens,
     )
 
-    logger.info(f"Initial LLM response - has tool_calls: {bool(response.get('tool_calls'))}")
+    logger.info(
+        f"Initial LLM response - has tool_calls: {bool(response.get('tool_calls'))}"
+    )
 
     # Tool execution loop
     while response.get("tool_calls") and tool_round < max_tool_rounds:
@@ -505,11 +660,13 @@ async def _execute_llm_with_tools(
         logger.info(f"Tool execution round {tool_round}/{max_tool_rounds}")
 
         # Add assistant message with tool calls
-        messages.append({
-            "role": "assistant",
-            "content": response.get("content") or "",
-            "tool_calls": response["tool_calls"],
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": response.get("content") or "",
+                "tool_calls": response["tool_calls"],
+            }
+        )
 
         # Execute each tool call
         for tool_call in response["tool_calls"]:
@@ -600,7 +757,10 @@ async def execute(request: UnifiedWorkflowRequest):
     request_id = str(uuid.uuid4())
 
     log_request(
-        logger, request_id, "POST", "/agent/chat",
+        logger,
+        request_id,
+        "POST",
+        "/agent/chat",
         message_length=len(request.user_message),
         stream=False,
         conversation_id=request.conversation_id,
@@ -627,26 +787,43 @@ async def execute(request: UnifiedWorkflowRequest):
 
         # Step 1: Expand paths
         expanded_target_paths = await _expand_paths(agent, request.target_paths or [])
-        expanded_reference_files = await _expand_paths(agent, request.reference_files or [])
+        expanded_reference_files = await _expand_paths(
+            agent, request.reference_files or []
+        )
 
         if request.target_paths:
-            logger.info(f"Expanded {len(request.target_paths)} target paths to {len(expanded_target_paths)} files")
+            logger.info(
+                f"Expanded {len(request.target_paths)} target paths to {len(expanded_target_paths)} files"
+            )
         if request.reference_files:
-            logger.info(f"Expanded {len(request.reference_files)} reference files to {len(expanded_reference_files)} files")
+            logger.info(
+                f"Expanded {len(request.reference_files)} reference files to {len(expanded_reference_files)} files"
+            )
 
         # Step 2: Gather context from all sources
-        target_content = await _gather_target_files(agent, expanded_target_paths, context_gathered)
-        reference_content = await _gather_reference_files(agent, expanded_reference_files, context_gathered)
-        crawled_content = await _crawl_urls(agent, request, request_id, context_gathered)
+        target_content = await _gather_target_files(
+            agent, expanded_target_paths, context_gathered
+        )
+        reference_content = await _gather_reference_files(
+            agent, expanded_reference_files, context_gathered
+        )
+        crawled_content = await _crawl_urls(
+            agent, request, request_id, context_gathered
+        )
 
         # Step 3: Build context and messages
-        full_context = _build_context_string(target_content, reference_content, crawled_content)
+        full_context = _build_context_string(
+            target_content, reference_content, crawled_content
+        )
         logger.info(f"Full context: {len(full_context)} chars")
 
         system_prompt = _build_system_prompt(request.expose_to_llm)
         messages = _build_messages(
-            system_prompt, full_context, request.user_message,
-            request.conversation_id, request.clear_history
+            system_prompt,
+            full_context,
+            request.user_message,
+            request.conversation_id,
+            request.clear_history,
         )
 
         # Step 4: Load tools
@@ -678,7 +855,11 @@ async def execute(request: UnifiedWorkflowRequest):
 
         error_msg = str(e)
         status_code = 500
-        if "rate limit" in error_msg.lower() or "429" in error_msg or "RateLimitReached" in error_msg:
+        if (
+            "rate limit" in error_msg.lower()
+            or "429" in error_msg
+            or "RateLimitReached" in error_msg
+        ):
             status_code = 429
         elif "token" in error_msg.lower() and "exceed" in error_msg.lower():
             status_code = 429
