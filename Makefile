@@ -11,35 +11,19 @@ setup-dev-windows:
 	powershell -ExecutionPolicy Bypass -File scripts/setup_dev.ps1
 
 quick-start:
-	python scripts/start_dev.sh
+	bash scripts/start_dev.sh
 
 quick-start-windows:
 	powershell -ExecutionPolicy Bypass -File scripts/start_dev.ps1
 
-# Development Docker operations (from deploy folder)
-dev-up:
-	cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-	@echo "Development environment is running!"
+# Docker operations (from deploy folder)
+up:
+	cd deploy && docker-compose up -d
+	@echo "Services are running!"
 	@echo "Gateway: http://localhost:8000"
 	@echo "Crawler: http://localhost:8001"
 	@echo "Indexer: http://localhost:8002"
 	@echo "Qdrant Dashboard: http://localhost:6333/dashboard"
-
-dev-down:
-	cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
-
-dev-logs:
-	cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
-
-dev-rebuild:
-	cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-
-# Production Docker operations (from deploy folder)
-build:
-	cd deploy && docker-compose build --no-cache
-
-up:
-	cd deploy && docker-compose up -d
 
 down:
 	cd deploy && docker-compose down
@@ -47,8 +31,28 @@ down:
 logs:
 	cd deploy && docker-compose logs -f
 
-# Development shortcuts
+rebuild:
+	cd deploy && docker-compose up -d --build
+
+build:
+	cd deploy && docker-compose build --no-cache
+
+# Development shortcuts (aliases for up/down/logs)
 dev: dev-up
+
+dev-up:
+	cd deploy && docker-compose up -d
+	@echo "Services are running!"
+	@echo "Gateway: http://localhost:8000"
+	@echo "Crawler: http://localhost:8001"
+	@echo "Indexer: http://localhost:8002"
+	@echo "Qdrant Dashboard: http://localhost:6333/dashboard"
+
+dev-down:
+	cd deploy && docker-compose down
+
+dev-logs:
+	cd deploy && docker-compose logs -f
 
 # Testing
 test:
@@ -119,26 +123,23 @@ clean:
 	docker system prune -f
 	docker volume prune -f
 
-# Health checks
+# Health checks (cross-platform)
+ifeq ($(OS),Windows_NT)
 health:
-	@echo "Checking service health..."
-	@echo "\n=== Gateway Health ==="
-	@curl -s http://localhost:8000/health
-	@echo "\n=== Crawler Health ==="
-	@curl -s http://localhost:8001/health
-	@echo "\n=== Indexer Health ==="
-	@curl -s http://localhost:8002/health
-	@echo "\n=== Qdrant Health ==="
-	@curl -s http://localhost:6333/health
+	@powershell -ExecutionPolicy Bypass -File scripts/health_check.ps1
+else
+health:
+	@bash scripts/health_check.sh
+endif
 
 health-gateway:
-	curl http://localhost:8000/health | jq .
+	@curl -s http://localhost:8000/health | python -m json.tool 2>/dev/null || echo "Service not available"
 
 health-crawler:
-	curl http://localhost:8001/health | jq .
+	@curl -s http://localhost:8001/health | python -m json.tool 2>/dev/null || echo "Service not available"
 
 health-indexer:
-	curl http://localhost:8002/health | jq .
+	@curl -s http://localhost:8002/health | python -m json.tool 2>/dev/null || echo "Service not available"
 
 # Example queries
 test-query:

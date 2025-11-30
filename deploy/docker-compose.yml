@@ -14,7 +14,7 @@ services:
     networks:
       - webrag-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/6333' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -73,7 +73,7 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # Firecrawl Service
+  # Firecrawl Service - Configured to use external PostgreSQL
   firecrawl:
     image: ghcr.io/firecrawl/firecrawl:latest
     container_name: web-rag-firecrawl
@@ -81,17 +81,31 @@ services:
       - "3002:3002"
     environment:
       - REDIS_URL=redis://redis:6379
+      - REDIS_RATE_LIMIT_URL=redis://redis:6379
+      - DATABASE_URL=postgres://postgres:password@postgres:5432/firecrawl
+      - USE_DB_AUTHENTICATION=false
+      - NODE_ENV=production
+      - NUM_WORKERS_PER_QUEUE=1
+      - PORT=3002
+      - HOST=0.0.0.0
       - PLAYWRIGHT_MICROSERVICE_URL=http://playwright:3000
     networks:
       - webrag-network
     depends_on:
-      - redis
-      - playwright
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      playwright:
+        condition: service_healthy
+    # Run main API directly, skip harness setup (avoids docker-in-docker requirement)
+    command: ["node", "dist/src/index.js"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      test: ["CMD-SHELL", "node -e \"const s = require('net').createConnection(3002, 'localhost', () => { s.end(); process.exit(0); }); s.on('error', () => process.exit(1)); setTimeout(() => process.exit(1), 5000);\""]
       interval: 30s
       timeout: 10s
       retries: 3
+    restart: unless-stopped
 
   # Gateway Service
   gateway:
@@ -107,11 +121,16 @@ services:
       - CRAWLER_URL=http://crawler:8001
       - INDEXER_URL=http://indexer:8002
       - MCP_SERVER_URL=http://mcp-server:8003
+      - AZURE_DEVOPS_MCP_URL=http://azure-devops-mcp-server:8004
       - AZURE_DEVOPS_BRANCH=official/rs_sparc_ctr_exp
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - RELOAD=true
     env_file:
       - .env
     volumes:
       - ./logs:/app/logs
+      - ../gateway:/app/gateway:rw
     networks:
       - webrag-network
     depends_on:
@@ -123,6 +142,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    command: uvicorn gateway.main:app --host 0.0.0.0 --port 8000 --reload
     restart: unless-stopped
 
   # Crawler Service
@@ -137,11 +157,15 @@ services:
       - CRAWLER_HOST=0.0.0.0
       - CRAWLER_PORT=8001
       - FIRECRAWL_URL=http://firecrawl:3002
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - RELOAD=true
     env_file:
       - .env
     volumes:
       - ./logs:/app/logs
-      - /tmp:/tmp  # For Playwright downloads
+      - /tmp:/tmp
+      - ../crawler:/app/crawler:rw
     networks:
       - webrag-network
     depends_on:
@@ -152,6 +176,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    command: uvicorn crawler.main:app --host 0.0.0.0 --port 8001 --reload
     restart: unless-stopped
 
   # Indexer Service
@@ -167,10 +192,14 @@ services:
       - INDEXER_PORT=8002
       - QDRANT_URL=http://qdrant:6333
       - PG_DSN=postgresql://postgres:password@postgres:5432/rag_db
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - RELOAD=true
     env_file:
       - .env
     volumes:
       - ./logs:/app/logs
+      - ../indexer:/app/indexer:rw
     networks:
       - webrag-network
     depends_on:
@@ -181,6 +210,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    command: uvicorn indexer.main:app --host 0.0.0.0 --port 8002 --reload
     restart: unless-stopped
 
   # MCP Server for local file operations
@@ -194,17 +224,20 @@ services:
     environment:
       - MCP_ROOT_FOLDER=/data/files
       - MCP_VECTOR_DB_PATH=/data/mcp_vector_db
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
     env_file:
       - .env
     volumes:
       - ./logs:/app/logs
-      - C:/os:/data/files  # Mount local C:\os folder
+      - C:/os:/data/files
       - mcp_vector_db:/data/mcp_vector_db
-    command: uvicorn mcp_server.main:app --host 0.0.0.0 --port 8003
+      - ../mcp_servers/local_access_mcp_server:/app/mcp_server:rw
+    command: uvicorn mcp_server.main:app --host 0.0.0.0 --port 8003 --reload
     networks:
       - webrag-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8003/health')\""]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -237,7 +270,7 @@ services:
     networks:
       - webrag-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8004/health')\""]
       interval: 30s
       timeout: 10s
       retries: 3

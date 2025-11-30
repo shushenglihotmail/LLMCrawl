@@ -77,29 +77,44 @@ try {
     if ($Full) {
         Write-Host "`nMode: FULL REBUILD (no cache)" -ForegroundColor Yellow
         Write-Host "Target: $ServiceDisplay" -ForegroundColor White
-    } elseif ($Build) {
+    }
+    elseif ($Build) {
         Write-Host "`nMode: REBUILD + RESTART" -ForegroundColor Yellow
         Write-Host "Target: $ServiceDisplay" -ForegroundColor White
-    } else {
+    }
+    else {
         Write-Host "`nMode: RECREATE (env reload only)" -ForegroundColor Yellow
         Write-Host "Target: $ServiceDisplay" -ForegroundColor White
         Write-Host "Tip: Use -Build to pick up code changes" -ForegroundColor Gray
     }
 
-    # Build the docker compose command
-    $ComposeCmd = "docker compose -f docker-compose.yml"
+    # For -Full, we need to run build separately with --no-cache
+    # because --no-cache is a build flag, not an up flag
+    if ($Full) {
+        $BuildArgs = @("build", "--no-cache")
+        if ($Services.Count -gt 0) {
+            $BuildArgs += $Services
+        }
 
-    # Build arguments
+        Write-Host "`nExecuting: docker compose -f docker-compose.yml $($BuildArgs -join ' ')" -ForegroundColor Gray
+        Write-Host ""
+
+        & docker compose -f docker-compose.yml @BuildArgs
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "`nFailed to build services" -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    # Build the up arguments
     $Args = @("up", "-d")
 
-    if ($Full) {
-        $Args += "--build"
-        $Args += "--no-cache"
-        $Args += "--force-recreate"
-    } elseif ($Build) {
+    if ($Full -or $Build) {
         $Args += "--build"
         $Args += "--force-recreate"
-    } else {
+    }
+    else {
         $Args += "--force-recreate"
     }
 
@@ -142,7 +157,8 @@ try {
         Write-Host "`nFollowing logs (Ctrl+C to exit)..." -ForegroundColor Yellow
         if ($Services.Count -gt 0) {
             docker compose -f docker-compose.yml logs -f @Services
-        } else {
+        }
+        else {
             docker compose -f docker-compose.yml logs -f gateway crawler indexer mcp-server
         }
     }

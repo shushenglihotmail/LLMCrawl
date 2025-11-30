@@ -84,10 +84,10 @@ For local development with hot-reload:
 
 ```bash
 # Start dev environment
-docker-compose -f docker-compose.dev.yml up -d
+cd deploy && docker-compose up -d
 
 # The local MCP server is mounted with volume for live updates
-# Azure DevOps MCP can be added similarly
+# Hot-reload is enabled by default in docker-compose.yml
 ```
 
 ## VS Code Integration

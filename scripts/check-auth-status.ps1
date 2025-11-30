@@ -2,7 +2,7 @@
 # Usage: .\scripts\check-auth-status.ps1 [site-url]
 
 param(
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string]$SiteUrl = "https://www.osgwiki.com/wiki/Main_Page"
 )
 
@@ -43,9 +43,11 @@ Write-Host "  Age: $hoursOld hours old" -ForegroundColor $(if ($hoursOld -gt 20)
 
 if ($hoursOld -gt 24) {
     Write-Host "  ⚠ Auth likely expired (>24 hours)" -ForegroundColor Red
-} elseif ($hoursOld -gt 20) {
+}
+elseif ($hoursOld -gt 20) {
     Write-Host "  ⚠ Auth expiring soon" -ForegroundColor Yellow
-} else {
+}
+else {
     Write-Host "  ✓ Auth age looks good" -ForegroundColor Green
 }
 
@@ -54,17 +56,17 @@ Write-Host "`nTesting Crawl..." -ForegroundColor Cyan
 
 try {
     $body = @{
-        query = "Test auth"
-        seed_urls = @($SiteUrl)
+        query       = "Test auth"
+        seed_urls   = @($SiteUrl)
         max_results = 1
     } | ConvertTo-Json
 
     $result = Invoke-RestMethod -Uri "http://localhost:8001/crawl" `
-                                -Method Post `
-                                -ContentType "application/json" `
-                                -Body $body `
-                                -TimeoutSec 30 `
-                                -ErrorAction Stop
+        -Method Post `
+        -ContentType "application/json" `
+        -Body $body `
+        -TimeoutSec 30 `
+        -ErrorAction Stop
 
     # API returns "docs" not "documents"
     $docs = $result.docs
@@ -74,13 +76,15 @@ try {
         Write-Host "  Content length: $($docs[0].markdown.Length) chars" -ForegroundColor Gray
         Write-Host "  Source: $($docs[0].source)" -ForegroundColor Gray
         exit 0
-    } else {
+    }
+    else {
         Write-Host "  ✗ Auth failed - no content retrieved" -ForegroundColor Red
         if ($docs -and $docs[0].error) {
             Write-Host "  Error: $($docs[0].error)" -ForegroundColor Gray
         }
     }
-} catch {
+}
+catch {
     Write-Host "  ✗ Crawl request failed: $($_.Exception.Message)" -ForegroundColor Red
 }
 
@@ -90,17 +94,19 @@ $DeployPath = Join-Path $PSScriptRoot "../deploy"
 if (Test-Path $DeployPath) {
     Push-Location $DeployPath
     try {
-        $logs = docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs --tail=100 crawler 2>$null |
-                Select-String -Pattern "401|Unauthorized" |
-                Select-Object -Last 3
-    } finally {
+        $logs = docker-compose -f docker-compose.yml logs --tail=100 crawler 2>$null |
+        Select-String -Pattern "401|Unauthorized" |
+        Select-Object -Last 3
+    }
+    finally {
         Pop-Location
     }
 }
 
 if ($logs) {
     $logs | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
-} else {
+}
+else {
     Write-Host "  (No 401 errors in recent logs)" -ForegroundColor Gray
 }
 

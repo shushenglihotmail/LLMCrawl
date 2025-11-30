@@ -752,17 +752,16 @@ docker stats
    # Only index_files and search_file_content require embeddings
    ```
 
-   **Problem: Different container names in dev vs prod**
+   **Problem: Container naming**
    ```bash
-   # Development uses: web-rag-mcp-server (from docker-compose.dev.yml)
-   # Production uses: mcp-server (from deploy/docker-compose.yml)
+   # All containers use: web-rag-* naming (from deploy/docker-compose.yml)
+   # e.g., web-rag-mcp-server, web-rag-gateway, etc.
 
    # Check which is running
    docker ps --format "{{.Names}}: {{.Image}}" | grep mcp
 
    # Gateway reads from MCP_SERVER_URL environment variable
-   # Dev: http://web-rag-mcp-server:8003
-   # Prod: http://mcp-server:8003
+   # http://mcp-server:8003 (internal docker network name)
    ```
 
 ## 🧪 End-to-End Testing

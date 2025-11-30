@@ -101,12 +101,12 @@ CRAWLER_PORT=8001
 INDEXER_PORT=8002
 MCP_SERVER_PORT=8003
 
-# Hot-reload enabled by default in docker-compose.dev.yml
+# Hot-reload enabled by default
 ```
 
 ### Step 3: Configure MCP Server (Local Files)
 
-Edit `docker-compose.dev.yml` to specify which local folder to mount:
+Edit `docker-compose.yml` to specify which local folder to mount:
 
 ```yaml
 services:
@@ -169,10 +169,10 @@ python scripts/setup_dev.py  # First time setup
 
 ```bash
 # Build images
-cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml build
+cd deploy && docker-compose build
 
 # Start services
-cd deploy && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+cd deploy && docker-compose up -d
 
 # View logs
 cd deploy && docker-compose logs -f
@@ -519,7 +519,7 @@ services:
 
 ### Development Network Setup
 
-Development uses `webrag-network` defined in `docker-compose.dev.yml`:
+Development uses `webrag-network` defined in `docker-compose.yml`:
 
 ```yaml
 networks:

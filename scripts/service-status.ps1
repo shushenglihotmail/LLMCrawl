@@ -54,7 +54,7 @@ function Show-Status {
         @{ Name = "Indexer"; Url = "http://localhost:8002/health" }
         @{ Name = "MCP Server"; Url = "http://localhost:8003/health" }
         @{ Name = "Azure DevOps MCP"; Url = "http://localhost:8004/health" }
-        @{ Name = "Qdrant"; Url = "http://localhost:6333/health" }
+        @{ Name = "Qdrant"; Url = "http://localhost:6333/healthz" }
     )
 
     foreach ($service in $services) {
@@ -63,7 +63,8 @@ function Show-Status {
             $status = if ($response.status -eq "healthy" -or $response.status -eq "ok" -or $response.title) { "✓" } else { "?" }
             Write-Host "  $($service.Name.PadRight(18)): " -NoNewline
             Write-Host "$status Healthy" -ForegroundColor Green
-        } catch {
+        }
+        catch {
             Write-Host "  $($service.Name.PadRight(18)): " -NoNewline
             Write-Host "✗ Unavailable" -ForegroundColor Red
         }
@@ -81,6 +82,7 @@ if ($Watch) {
         Show-Status
         Start-Sleep -Seconds 5
     }
-} else {
+}
+else {
     Show-Status
 }
