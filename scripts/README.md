@@ -2,6 +2,94 @@
 
 This directory contains automated setup and utility scripts for the LLMCrawl development environment.
 
+## Service Management Scripts
+
+### `restart-services.ps1` ⭐ (Most Used)
+**Purpose:** Restart services with optional rebuild for code/env changes
+
+**Usage:**
+```powershell
+# Recreate containers (picks up .env changes)
+.\scripts\restart-services.ps1
+
+# Rebuild and restart (picks up code changes)
+.\scripts\restart-services.ps1 -Build
+
+# Rebuild specific service(s)
+.\scripts\restart-services.ps1 -Service gateway -Build
+.\scripts\restart-services.ps1 -Service gateway,crawler -Build
+
+# Full rebuild with no cache (after requirements.txt changes)
+.\scripts\restart-services.ps1 -Full
+
+# Rebuild and follow logs
+.\scripts\restart-services.ps1 -Build -Logs
+```
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `-Service` | Target specific service(s), comma-separated |
+| `-Build` | Rebuild images (picks up code changes) |
+| `-Full` | Full rebuild with no cache |
+| `-Logs` | Follow logs after restart |
+
+### `start-services.ps1`
+**Purpose:** Start all services (first time or after stop)
+
+**Usage:**
+```powershell
+# Start all services
+.\scripts\start-services.ps1
+
+# Start with build
+.\scripts\start-services.ps1 -Build
+
+# Start only infrastructure (redis, postgres, qdrant)
+.\scripts\start-services.ps1 -Infrastructure
+```
+
+### `stop-services.ps1`
+**Purpose:** Stop services
+
+**Usage:**
+```powershell
+# Stop (preserve containers)
+.\scripts\stop-services.ps1
+
+# Stop and remove containers (keep data)
+.\scripts\stop-services.ps1 -Remove
+
+# Stop specific service(s)
+.\scripts\stop-services.ps1 -Service gateway,crawler
+
+# Full cleanup including data volumes (WARNING!)
+.\scripts\stop-services.ps1 -Remove -Volumes
+```
+
+### `service-status.ps1`
+**Purpose:** Check status and health of all services
+
+**Usage:**
+```powershell
+# Show current status
+.\scripts\service-status.ps1
+
+# Continuously monitor (refresh every 5s)
+.\scripts\service-status.ps1 -Watch
+```
+
+## Quick Reference
+
+| Scenario | Command |
+|----------|---------|
+| Code change in gateway | `.\scripts\restart-services.ps1 -Service gateway -Build` |
+| Changed .env file | `.\scripts\restart-services.ps1` |
+| Changed requirements.txt | `.\scripts\restart-services.ps1 -Full` |
+| View service health | `.\scripts\service-status.ps1` |
+| Stop everything | `.\scripts\stop-services.ps1 -Remove` |
+| Start fresh | `.\scripts\start-services.ps1 -Build` |
+
 ## Setup Scripts
 
 ### `setup_dev.py` (Cross-platform)
@@ -50,6 +138,22 @@ OPTIONS:
 - Creates Docker network for services
 - Validates environment configuration
 
+## Health Check Scripts
+
+### `health-check.ps1`
+**Purpose:** Run health checks against all services
+
+### `check-metrics.ps1`
+**Purpose:** Check Prometheus metrics endpoints
+
+## Test Scripts
+
+### `test-indexing.ps1`
+**Purpose:** Test the indexing pipeline
+
+### `test-auth-config.ps1` / `test-internal-auth.ps1`
+**Purpose:** Test authentication configuration
+
 ## Quick Start Scripts
 
 ### `start_dev.sh` (Unix/Linux/macOS)
@@ -76,111 +180,66 @@ OPTIONS:
 - Run health checks
 - Display service URLs and useful commands
 
-## Makefile Integration
+## Service URLs
 
-The scripts are integrated into the project Makefile for convenience:
-
-```bash
-# Setup commands
-make setup-dev              # Cross-platform setup (uses setup_dev.py)
-make setup-dev-windows       # Windows setup (uses setup_dev.ps1)
-
-# Quick start commands
-make quick-start            # Unix/Linux/macOS quick start
-make quick-start-windows    # Windows quick start
-```
-
-## Prerequisites
-
-### Required
-- **Python 3.10+** - All scripts require Python 3.10 or higher
-- **Git** - For version control and pre-commit hooks
-
-### Optional (can be skipped)
-- **Docker** - For containerized services (can use `-SkipDocker` flag)
-- **Docker Compose** - For multi-service orchestration
-
-## Setup Flow
-
-1. **Run setup script** - Installs dependencies and configures environment
-2. **Edit `.env` file** - Configure your API keys and settings
-3. **Run quick start script** - Start all services and verify setup
-
-## Script Features
-
-### Error Handling
-- Validates prerequisites before starting
-- Provides clear error messages with solutions
-- Exits gracefully on failures
-
-### Cross-Platform Support
-- Detects operating system automatically
-- Uses appropriate commands and paths
-- Handles Windows/Unix path differences
-
-### User Experience
-- Colored output for better readability
-- Progress indicators for long-running tasks
-- Clear instructions for next steps
-- Helpful command suggestions
+| Service | URL |
+|---------|-----|
+| Gateway | http://localhost:8000 |
+| Crawler | http://localhost:8001 |
+| Indexer | http://localhost:8002 |
+| MCP Server | http://localhost:8003 |
+| Azure DevOps MCP | http://localhost:8004 |
+| Qdrant | http://localhost:6333 |
+| Redis | localhost:6379 |
+| PostgreSQL | localhost:5432 |
 
 ## Troubleshooting
 
 ### Common Issues
 
-**Python version errors:**
-```bash
-# Check Python version
-python --version
-
-# Update to Python 3.10+
-# See: https://python.org/downloads
-```
-
-**Permission errors on Windows:**
+**Docker command not found:**
 ```powershell
-# Run PowerShell as Administrator
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+# Make sure Docker Desktop is running
+# Use 'docker compose' (v2) not 'docker-compose' (v1)
 ```
 
-**Docker network conflicts:**
-```bash
-# Remove existing network
+**Network already exists:**
+```powershell
+# Remove and recreate
 docker network rm webrag-network
-
-# Re-run setup
-python scripts/setup_dev.py
+docker network create webrag-network
 ```
 
-**Missing dependencies:**
-```bash
-# Reinstall requirements
-pip install -r requirements/dev.txt
+**Port already in use:**
+```powershell
+# Find what's using the port
+netstat -ano | findstr :8000
+
+# Kill the process or change port in docker-compose.yml
+```
+
+**Service won't start:**
+```powershell
+# Check logs
+docker compose -f deploy/docker-compose.yml logs gateway
+
+# Check if dependencies are up
+.\scripts\service-status.ps1
 ```
 
 ### Getting Help
 
-1. Run script with help flag (where available):
+1. Check service status:
    ```powershell
-   .\scripts\setup_dev.ps1 -Help
+   .\scripts\service-status.ps1
    ```
 
-2. Check the main development guide:
+2. View logs:
+   ```powershell
+   docker compose -f deploy/docker-compose.yml logs -f gateway
+   ```
+
+3. Check the main development guide:
    ```bash
    cat DEVELOPMENT.md
    ```
-
-3. View service logs:
-   ```bash
-   make dev-logs
-   ```
-
-## Contributing
-
-When adding new scripts:
-
-1. **Add documentation** to this README
-2. **Include error handling** with clear messages
-3. **Make cross-platform compatible** where possible
-4. **Test on multiple operating systems**
-5. **Update Makefile** with new targets

@@ -1,211 +1,287 @@
 """
 System and developer prompts for the Web RAG system.
 Contains tool schemas, routing logic, and few-shot examples.
+
+Uses Pydantic for type-safe tool definitions that can be converted to
+different LLM formats (OpenAI, Claude, Gemini).
 """
 
-# Tool schema that gets registered with the LLM
-CRAWL_AND_REFRESH_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "crawl_and_refresh",
-        "description": "Search & crawl the web for up-to-date info; clean, index, and return fresh sources for answering with citations.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "User topic or question"},
-                "seed_urls": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional seed URLs or domains to prefer",
-                },
-                "freshness_days": {
-                    "type": "integer",
-                    "default": 7,
-                    "minimum": 1,
-                    "description": "How recent the content should be (in days)",
-                },
-                "depth": {
-                    "type": "integer",
-                    "default": 1,
-                    "minimum": 1,
-                    "description": "Crawl depth (1 = direct pages only)",
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, Field
+
+# =============================================================================
+# Pydantic Tool Input Models
+# =============================================================================
+
+
+class CrawlAndRefreshInput(BaseModel):
+    """Input schema for the crawl_and_refresh tool.
+
+    This model defines the parameters for web crawling and content refresh.
+    Use .to_openai_tool() or other conversion methods for LLM-specific formats.
+    """
+
+    query: str = Field(description="User topic or question")
+    seed_urls: Optional[List[str]] = Field(
+        default=None, description="Optional seed URLs or domains to prefer"
+    )
+    freshness_days: int = Field(
+        default=7, ge=1, description="How recent the content should be (in days)"
+    )
+    depth: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        description="Crawl depth (1 = direct pages only, max 5). Keep low to avoid query overhead.",
+    )
+
+
+# =============================================================================
+# Tool Schema Conversion Utilities
+# =============================================================================
+
+
+class ToolSchemaConverter:
+    """Utility class to convert Pydantic models to various LLM tool formats."""
+
+    @staticmethod
+    def to_openai_tool(
+        model: type[BaseModel], name: str, description: str
+    ) -> Dict[str, Any]:
+        """Convert a Pydantic model to OpenAI function calling format.
+
+        Args:
+            model: The Pydantic model class defining the input schema
+            name: The function name to use
+            description: Description of what the tool does
+
+        Returns:
+            OpenAI-compatible tool schema dict
+        """
+        schema = model.model_json_schema()
+
+        # Extract properties and required fields from Pydantic schema
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+
+        # Clean up Pydantic-specific fields for OpenAI compatibility
+        cleaned_properties = {}
+        for prop_name, prop_schema in properties.items():
+            cleaned_prop = {}
+
+            # Map Pydantic types to JSON Schema types
+            if "anyOf" in prop_schema:
+                # Handle Optional types - take the non-null type
+                for option in prop_schema["anyOf"]:
+                    if option.get("type") != "null":
+                        cleaned_prop = option.copy()
+                        break
+            else:
+                cleaned_prop = prop_schema.copy()
+
+            # Remove Pydantic-specific keys
+            cleaned_prop.pop("title", None)
+
+            # Convert 'exclusiveMinimum' to 'minimum' for broader compatibility
+            if "exclusiveMinimum" in cleaned_prop:
+                cleaned_prop["minimum"] = cleaned_prop.pop("exclusiveMinimum") + 1
+
+            cleaned_properties[prop_name] = cleaned_prop
+
+        return {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": {
+                    "type": "object",
+                    "properties": cleaned_properties,
+                    "required": required,
                 },
             },
-            "required": ["query"],
-        },
-    },
-}
+        }
 
-# Main system prompt
-SYSTEM_PROMPT = """You are a grounded, up-to-date assistant with access to real-time web information.
+    @staticmethod
+    def to_claude_tool(
+        model: type[BaseModel], name: str, description: str
+    ) -> Dict[str, Any]:
+        """Convert a Pydantic model to Anthropic Claude tool format.
 
-CRITICAL TOOL USAGE RULES:
-- When the `crawl_and_refresh` tool is available, you MUST use it for any question requiring current information, news, recent events, or verification.
-- NEVER say "I'll fetch" or "I'll search" without actually calling the tool. If you mention fetching data, you MUST call the tool in the SAME response.
-- If you don't have current information to answer a question about recent events, you MUST call the tool rather than making up an answer.
-- After the tool returns, answer ONLY using the returned/retrieved sources. Include inline citations with URL + published date for each key claim.
-- If the question is historical or general knowledge where freshness is not required, do NOT call the tool.
-- If the user asks for "details" or "more information" about something you just mentioned from web sources, call the tool again with a more specific query.
+        Claude uses a similar but slightly different format from OpenAI.
+        """
+        schema = model.model_json_schema()
 
-Answer format:
-- Start with a 2–4 bullet executive summary.
-- Then provide short sections with facts, each with inline citations like (site, YYYY-MM-DD).
-- End with a Sources list showing URLs and dates.
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
 
-Quality guidelines:
-- Be concise and factual
-- Never hallucinate sources or dates
-- If sources are limited, acknowledge it
-- Prioritize authoritative sources (SEC filings, official company announcements, major news outlets)"""
+        # Clean up properties for Claude
+        cleaned_properties = {}
+        for prop_name, prop_schema in properties.items():
+            cleaned_prop = {}
 
-# Developer/routing prompt for additional context
-DEVELOPER_PROMPT = """Routing rules (server-enforced):
-- If message contains any of: latest|today|this week|breaking|earnings|guidance|ticker|market|price|launched|announced|filed|SEC|10-K|10-Q|news|recent, prefer calling `crawl_and_refresh` first.
-- If tool fails or times out, answer: "I couldn't fetch fresh sources right now; do you want me to try again or proceed with known background context?"
+            if "anyOf" in prop_schema:
+                for option in prop_schema["anyOf"]:
+                    if option.get("type") != "null":
+                        cleaned_prop = option.copy()
+                        break
+            else:
+                cleaned_prop = prop_schema.copy()
 
-Context: You have access to a sophisticated web crawling system that can fetch, clean, and index recent web content for answering questions."""
+            cleaned_prop.pop("title", None)
 
-# Few-shot examples for better tool usage
-FEW_SHOT_EXAMPLES = [
-    {"role": "user", "content": "What's the latest on NVDA earnings and guidance?"},
-    {
-        "role": "assistant",
-        "content": "I'll search for the latest NVIDIA earnings information.",
-        "tool_calls": [
-            {
-                "id": "call_1",
-                "type": "function",
-                "function": {
-                    "name": "crawl_and_refresh",
-                    "arguments": '{"query": "NVIDIA NVDA earnings guidance latest quarter", "freshness_days": 14}',
-                },
+            if "exclusiveMinimum" in cleaned_prop:
+                cleaned_prop["minimum"] = cleaned_prop.pop("exclusiveMinimum") + 1
+
+            cleaned_properties[prop_name] = cleaned_prop
+
+        return {
+            "name": name,
+            "description": description,
+            "input_schema": {
+                "type": "object",
+                "properties": cleaned_properties,
+                "required": required,
+            },
+        }
+
+    @staticmethod
+    def to_gemini_tool(
+        model: type[BaseModel], name: str, description: str
+    ) -> Dict[str, Any]:
+        """Convert a Pydantic model to Google Gemini tool format.
+
+        Gemini uses function declarations within a tools array.
+        """
+        schema = model.model_json_schema()
+
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+
+        # Clean and convert properties for Gemini
+        cleaned_properties = {}
+        for prop_name, prop_schema in properties.items():
+            cleaned_prop = {}
+
+            if "anyOf" in prop_schema:
+                for option in prop_schema["anyOf"]:
+                    if option.get("type") != "null":
+                        cleaned_prop = option.copy()
+                        break
+            else:
+                cleaned_prop = prop_schema.copy()
+
+            cleaned_prop.pop("title", None)
+
+            # Gemini uses STRING, INTEGER, ARRAY, etc.
+            type_mapping = {
+                "string": "STRING",
+                "integer": "INTEGER",
+                "number": "NUMBER",
+                "boolean": "BOOLEAN",
+                "array": "ARRAY",
+                "object": "OBJECT",
             }
-        ],
-    },
-    {
-        "role": "tool",
-        "tool_call_id": "call_1",
-        "content": '{"count": 3, "hits": [{"url": "https://investor.nvidia.com/news/press-release-details/2023/NVIDIA-Announces-Financial-Results-for-Third-Quarter-Fiscal-2024", "title": "NVIDIA Q3 Results", "published_at": "2023-11-21", "snippet": "Revenue of $18.12 billion, up 206% year-over-year..."}]}',
-    },
-    {
-        "role": "assistant",
-        "content": "Based on the latest information:\n\n• NVIDIA reported record Q3 revenue of $18.12 billion, up 206% year-over-year\n• Data center revenue reached $14.51 billion, driven by AI demand\n• Strong guidance provided for Q4 with continued AI growth expected\n\n**Financial Performance**\nNVIDIA's third quarter showed exceptional growth (investor.nvidia.com, 2023-11-21), with total revenue hitting $18.12 billion compared to $5.93 billion in the prior year.\n\n**Sources:**\n- NVIDIA Q3 Results (investor.nvidia.com, 2023-11-21)",
-    },
-    {"role": "user", "content": "Explain how dividend yield works historically."},
-    {
-        "role": "assistant",
-        "content": "Dividend yield is calculated as the annual dividend per share divided by the stock's current price, expressed as a percentage. Historically, dividend yields have varied significantly across different market periods...\n\n[Continues with explanation without calling tools since this is general financial knowledge]",
-    },
-    {"role": "user", "content": "Any new papers on RISC-V toolchains this month?"},
-    {
-        "role": "assistant",
-        "content": "I'll search for recent RISC-V toolchain research papers.",
-        "tool_calls": [
-            {
-                "id": "call_2",
-                "type": "function",
-                "function": {
-                    "name": "crawl_and_refresh",
-                    "arguments": '{"query": "RISC-V toolchain papers research 2024", "freshness_days": 30}',
-                },
-            }
-        ],
-    },
-    {
-        "role": "tool",
-        "tool_call_id": "call_2",
-        "content": '{"count": 2, "hits": [{"url": "https://arxiv.org/abs/2024.01234", "title": "Enhanced RISC-V Toolchain Optimization", "published_at": "2024-01-15", "snippet": "Novel optimization techniques for RISC-V compilation..."}]}',
-    },
-    {
-        "role": "assistant",
-        "content": "I found some recent RISC-V toolchain research:\n\n• **Enhanced RISC-V Toolchain Optimization** - Novel compilation optimization techniques published in January 2024\n\n**Sources:**\n- Enhanced RISC-V Toolchain Optimization (arxiv.org, 2024-01-15)",
-    },
-]
+
+            if "type" in cleaned_prop:
+                cleaned_prop["type"] = type_mapping.get(
+                    cleaned_prop["type"], cleaned_prop["type"].upper()
+                )
+
+            if "items" in cleaned_prop and "type" in cleaned_prop["items"]:
+                cleaned_prop["items"]["type"] = type_mapping.get(
+                    cleaned_prop["items"]["type"], cleaned_prop["items"]["type"].upper()
+                )
+
+            if "exclusiveMinimum" in cleaned_prop:
+                cleaned_prop["minimum"] = cleaned_prop.pop("exclusiveMinimum") + 1
+
+            cleaned_properties[prop_name] = cleaned_prop
+
+        return {
+            "function_declarations": [
+                {
+                    "name": name,
+                    "description": description,
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": cleaned_properties,
+                        "required": required,
+                    },
+                }
+            ]
+        }
 
 
-def should_trigger_crawl(message: str) -> bool:
+# =============================================================================
+# Pre-built Tool Schemas (OpenAI format for backward compatibility)
+# =============================================================================
+
+
+# Tool schema that gets registered with the LLM (OpenAI format)
+CRAWL_AND_REFRESH_TOOL = ToolSchemaConverter.to_openai_tool(
+    model=CrawlAndRefreshInput,
+    name="crawl_and_refresh",
+    description="Search & crawl the web for up-to-date info; clean, index, and return fresh sources for answering with citations.",
+)
+
+# Claude format (for future use)
+CRAWL_AND_REFRESH_TOOL_CLAUDE = ToolSchemaConverter.to_claude_tool(
+    model=CrawlAndRefreshInput,
+    name="crawl_and_refresh",
+    description="Search & crawl the web for up-to-date info; clean, index, and return fresh sources for answering with citations.",
+)
+
+# Gemini format (for future use)
+CRAWL_AND_REFRESH_TOOL_GEMINI = ToolSchemaConverter.to_gemini_tool(
+    model=CrawlAndRefreshInput,
+    name="crawl_and_refresh",
+    description="Search & crawl the web for up-to-date info; clean, index, and return fresh sources for answering with citations.",
+)
+
+
+# =============================================================================
+# Dynamic Tool Builders
+# =============================================================================
+
+
+def build_crawler_tool_with_seed_urls(
+    seed_urls: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
-    Determine if a message should trigger web crawling based on keywords.
-    This provides server-side routing logic as a backup to LLM decisions.
+    Build crawler tool schema with optional seed URLs included in the description.
+
+    When seed_urls are provided, the tool description tells the LLM to prioritize
+    crawling these URLs first for relevant information.
+
+    Args:
+        seed_urls: Optional list of URLs the user wants the LLM to prioritize
+
+    Returns:
+        OpenAI-compatible tool schema dict with dynamic description
     """
-    # Don't trigger crawl for basic system info questions
-    system_info_patterns = [
-        "what date",
-        "what time",
-        "what day",
-        "current date",
-        "current time",
-        "today's date",
-        "what's the date",
-        "date today",
-    ]
+    base_description = (
+        "Search & crawl the web for up-to-date info; clean, index, and return "
+        "fresh sources for answering with citations. "
+        "**IMPORTANT**: Keep depth low (1-2 recommended, max 5) to avoid high query overhead."
+    )
 
-    message_lower = message.lower()
+    if seed_urls:
+        # Build a description that tells LLM about the priority URLs
+        urls_list = "\n".join(
+            f"  - {url}" for url in seed_urls[:10]
+        )  # Limit to 10 URLs
+        description = (
+            f"{base_description}\n\n"
+            f"**PRIORITY SEED URLs** (user-provided - crawl these FIRST):\n{urls_list}\n\n"
+            f"When calling this tool, include these seed_urls to prioritize crawling them. "
+            f"These URLs are trusted sources the user wants you to search for information."
+        )
+    else:
+        description = base_description
 
-    # Skip crawling for basic system information
-    for pattern in system_info_patterns:
-        if pattern in message_lower:
-            return False
-
-    # Trigger crawling for fresh data needs
-    trigger_words = [
-        "latest",
-        "this week",
-        "this month",
-        "breaking",
-        "recent",
-        "earnings",
-        "guidance",
-        "ticker",
-        "market",
-        "price",
-        "launched",
-        "announced",
-        "filed",
-        "SEC",
-        "10-K",
-        "10-Q",
-        "news",
-        "update",
-        "current",
-        "now",
-        "just",
-        "new",
-        "fresh",
-        "live",
-        "today",
-        "s&p",
-        "sp500",
-        "dow",
-        "nasdaq",
-        "index",
-        "stock",
-        "close",
-        "closing",
-    ]
-
-    # Only trigger if it's about external/fresh information
-    return any(word in message_lower for word in trigger_words)
-
-
-def build_messages_with_examples(user_message: str) -> list:
-    """Build the full message context including system prompt and examples."""
-    from datetime import datetime
-
-    current_date = datetime.now().strftime("%B %d, %Y")
-
-    # Add current date to system prompt
-    system_with_date = f"{SYSTEM_PROMPT}\n\nIMPORTANT: Today's date is {current_date}. Use this when answering date/time questions."
-
-    messages = [
-        {"role": "system", "content": system_with_date},
-        {"role": "system", "content": DEVELOPER_PROMPT},
-    ]
-
-    # Add few-shot examples for better tool usage
-    messages.extend(FEW_SHOT_EXAMPLES)
-
-    # Add the actual user message
-    messages.append({"role": "user", "content": user_message})
-
-    return messages
+    return ToolSchemaConverter.to_openai_tool(
+        model=CrawlAndRefreshInput,
+        name="crawl_and_refresh",
+        description=description,
+    )

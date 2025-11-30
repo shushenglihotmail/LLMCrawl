@@ -16,7 +16,7 @@ The system supports four workflow types defined in `gateway/agents/unified_workf
 
 **Client UI Restrictions**:
 - Target Files: **Disabled** (hidden or greyed out)
-- Reference Files: **Disabled** (hidden or greyed out)  
+- Reference Files: **Disabled** (hidden or greyed out)
 - Azure DevOps in Expose to LLM: **Disabled** (always false)
 
 **Available Options**:
@@ -89,7 +89,6 @@ The `workflow` field is now part of `UnifiedWorkflowRequest`:
     "target_paths": ["azdo:/src/myproject/*.cpp"],
     "reference_files": ["/docs/coding-standards.md"],
     "seed_urls": [],
-    "browse_web": false,
     "enable_embedding": false,
     "expose_to_llm": {
         "local_mcp": false,
@@ -112,7 +111,7 @@ Add a workflow selector dropdown or radio buttons at the top of the chat interfa
 ```typescript
 enum WorkflowType {
     GENERAL_CHAT = "general_chat",
-    CODE_ANALYSIS = "code_analysis", 
+    CODE_ANALYSIS = "code_analysis",
     BUILD_SYSTEM_ANALYSIS = "build_system_analysis",
     FILE_EXPLORER = "file_explorer"
 }
@@ -168,13 +167,13 @@ async function sendChatRequest(message: string, workflow: WorkflowType, options:
         reference_files: options.referenceFiles,
         // ... other fields
     };
-    
+
     const response = await fetch('/agent/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request)
     });
-    
+
     return response.json();
 }
 ```
@@ -238,7 +237,7 @@ Target Path Structure (examples of files/folders to search for):
 
 The LLM uses these as EXAMPLES to understand:
 - File naming patterns and extensions
-- Folder structure and organization  
+- Folder structure and organization
 - Where similar files might be located
 
 ### Query Construction

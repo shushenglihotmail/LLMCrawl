@@ -38,10 +38,7 @@ class ToolHandler:
         self,
         tool_call: Dict[str, Any],
         request_id: str,
-        seed_urls: Optional[List[str]] = None,
-        depth: Optional[int] = None,
         skip_embedding: bool = False,
-        allow_web_search: bool = True,
     ) -> Dict[str, Any]:
         """
         Handle a tool function call and return the result.
@@ -49,26 +46,13 @@ class ToolHandler:
         Args:
             tool_call: Tool call from LLM response
             request_id: Request tracking ID
-            seed_urls: Optional seed URLs to override tool arguments
-            depth: Optional crawl depth to override tool arguments
             skip_embedding: Skip embedding/indexing, return raw content
-            allow_web_search: Allow crawling public internet via Firecrawl
 
         Returns:
             Tool result for LLM context
         """
         tool_name = tool_call["function"]["name"]
         arguments = json.loads(tool_call["function"]["arguments"])
-
-        # Override arguments with user-provided seed_urls, depth, and allow_web_search
-        if seed_urls:
-            arguments["seed_urls"] = seed_urls
-            logger.info(f"Overriding seed_urls with user-provided: {seed_urls}")
-        if depth is not None:
-            arguments["depth"] = depth
-            logger.info(f"Overriding depth with user-provided: {depth}")
-        arguments["allow_web_search"] = allow_web_search
-        logger.info(f"Setting allow_web_search: {allow_web_search}")
 
         log_tool_call(logger, request_id, tool_name, arguments)
         start_time = datetime.now()

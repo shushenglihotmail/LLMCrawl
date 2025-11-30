@@ -464,9 +464,7 @@ async def _crawl_urls(
         return []
 
     crawled_content = []
-    logger.info(
-        f"Crawling {len(request.seed_urls)} seed URLs, browse_web={request.browse_web}"
-    )
+    logger.info(f"Crawling {len(request.seed_urls)} seed URLs")
 
     try:
         async with httpx.AsyncClient(timeout=90.0) as client:
@@ -478,7 +476,6 @@ async def _crawl_urls(
                     "freshness_days": 90,
                     "depth": request.crawl_depth,
                     "max_results": 10,
-                    "allow_web_search": request.browse_web,
                 },
                 headers={"X-Request-ID": request_id},
             )
@@ -582,6 +579,10 @@ def _build_system_prompt_general_chat(expose_to_llm: dict) -> str:
 
     System role: Informational consultant - casual, helpful conversation.
     Limited options: No target files, no reference files, no Azure DevOps exposure.
+
+    Note: Tool descriptions are NOT included in the system prompt to avoid
+    the "double definition" problem with OpenAI models. Tools are passed
+    via the tools=[...] parameter which contains their descriptions.
     """
     system_prompt = (
         "You are a friendly and knowledgeable Informational Consultant.\n"
@@ -592,23 +593,6 @@ def _build_system_prompt_general_chat(expose_to_llm: dict) -> str:
         "- Providing thoughtful analysis and recommendations\n"
         "- Having natural, conversational exchanges\n\n"
     )
-
-    # Only local MCP and crawler can be exposed in general chat (Azure DevOps disabled)
-    tool_descriptions = []
-
-    if expose_to_llm.get("local_mcp", False):
-        tool_descriptions.append(
-            "- **Local File Tools**: Access local files to provide additional context."
-        )
-
-    if expose_to_llm.get("crawler", False):
-        tool_descriptions.append(
-            "- **Web Crawler** (`crawl_and_refresh`): Fetch web content for additional information.\n"
-            "  Use this to access documentation, articles, or external resources."
-        )
-
-    if tool_descriptions:
-        system_prompt += "AVAILABLE TOOLS:\n" + "\n".join(tool_descriptions) + "\n\n"
 
     system_prompt += (
         "GUIDELINES:\n"
@@ -628,6 +612,10 @@ def _build_system_prompt_code_analysis(expose_to_llm: dict) -> str:
 
     System role: Technical architect for deep code analysis, review, and refactoring.
     All options available.
+
+    Note: Tool descriptions are NOT included in the system prompt to avoid
+    the "double definition" problem with OpenAI models. Tools are passed
+    via the tools=[...] parameter which contains their descriptions.
     """
     system_prompt = (
         "You are an expert Technical Architect specializing in code analysis, review, and refactoring.\n"
@@ -639,33 +627,6 @@ def _build_system_prompt_code_analysis(expose_to_llm: dict) -> str:
         "- **Architecture Assessment**: Evaluating design patterns and architectural decisions\n"
         "- **Best Practices**: Applying industry standards and coding conventions\n\n"
     )
-
-    tool_descriptions = []
-
-    if expose_to_llm.get("azure_devops_mcp", False):
-        tool_descriptions.append(
-            "- **Azure DevOps MCP Tools**: Access repository code and metadata.\n"
-            "  - `search_azure_devops_code`: BEST for finding definitions, packages, or dependencies.\n"
-            "  - `get_azure_devops_file`: Read file content (requires exact path).\n"
-            "  - `search_azure_devops_files`: Find specific filename patterns.\n"
-            "    **WARNING**: When `recursive=true`, provide a specific filename or keyword.\n"
-            "    NEVER use recursive search with only a wildcard path (e.g., just '*.json')."
-        )
-
-    if expose_to_llm.get("local_mcp", False):
-        tool_descriptions.append(
-            "- **Local MCP Tools**: Access the local workspace.\n"
-            "  Use these to read local file structures or content when the user references 'local files'."
-        )
-
-    if expose_to_llm.get("crawler", False):
-        tool_descriptions.append(
-            "- **Crawler Tool** (`crawl_and_refresh`): External Web Access.\n"
-            "  Use this to fetch documentation, API references, or technical resources."
-        )
-
-    if tool_descriptions:
-        system_prompt += "AVAILABLE TOOLS:\n" + "\n".join(tool_descriptions) + "\n\n"
 
     system_prompt += (
         "WORKFLOW & CONTEXT HANDLING:\n"
@@ -684,7 +645,6 @@ def _build_system_prompt_code_analysis(expose_to_llm: dict) -> str:
 
     system_prompt += (
         "CRITICAL RULES:\n"
-        "- **Function Calling**: Use function calling (tools) - do not output raw JSON text.\n"
         "- **Code Search**: Prefer `search_azure_devops_code` for finding dependencies and definitions.\n"
         "- **Be Thorough**: Provide comprehensive analysis with specific line references.\n"
         "- **Actionable Feedback**: Give concrete suggestions, not vague recommendations.\n"
@@ -701,6 +661,10 @@ def _build_system_prompt_build_system(expose_to_llm: dict) -> str:
     System role: Technical architect and expert build engineer for metadata, manifest,
     and build system analysis.
     All options available.
+
+    Note: Tool descriptions are NOT included in the system prompt to avoid
+    the "double definition" problem with OpenAI models. Tools are passed
+    via the tools=[...] parameter which contains their descriptions.
     """
     system_prompt = (
         "You are a Principal Build Architect and Release Manager specializing in **Windows OS Engineering**.\n"
@@ -713,33 +677,6 @@ def _build_system_prompt_build_system(expose_to_llm: dict) -> str:
         "- **Dependency Logic**: Resolving API contracts, binary compatibility, and 'OneCore' vs 'Desktop' dependencies.\n"
         "- **Refactoring**: Decoupling circular dependencies and optimizing Image Size (disk footprint).\n\n"
     )
-
-    tool_descriptions = []
-
-    if expose_to_llm.get("azure_devops_mcp", False):
-        tool_descriptions.append(
-            "- **Azure DevOps MCP Tools**: Access repository build files and metadata.\n"
-            "  - `search_azure_devops_code`: Find build definitions, package references, dependencies.\n"
-            "  - `get_azure_devops_file`: Read build files, manifests, and configuration.\n"
-            "  - `search_azure_devops_files`: Find build-related files (*.proj, *.targets, etc.).\n"
-            "    **WARNING**: When `recursive=true`, provide a specific filename pattern.\n"
-            "    NEVER use recursive search with only a wildcard (e.g., just '*.json')."
-        )
-
-    if expose_to_llm.get("local_mcp", False):
-        tool_descriptions.append(
-            "- **Local MCP Tools**: Access local build files and workspace configuration.\n"
-            "  Use these to examine local project structure and build artifacts."
-        )
-
-    if expose_to_llm.get("crawler", False):
-        tool_descriptions.append(
-            "- **Crawler Tool** (`crawl_and_refresh`): External Documentation Access.\n"
-            "  Use this to fetch build tool documentation, package registries, or best practices."
-        )
-
-    if tool_descriptions:
-        system_prompt += "AVAILABLE TOOLS:\n" + "\n".join(tool_descriptions) + "\n\n"
 
     system_prompt += (
         "WORKFLOW & CONTEXT HANDLING:\n"
@@ -759,7 +696,6 @@ def _build_system_prompt_build_system(expose_to_llm: dict) -> str:
 
     system_prompt += (
         "CRITICAL RULES:\n"
-        "- **Function Calling**: Use function calling (tools) - do not output raw JSON text.\n"
         "- **Dependency Analysis**: Always consider transitive dependencies and version compatibility.\n"
         "- **Platform Awareness**: Note platform-specific build configurations and conditions.\n"
         "- **Be Precise**: Provide exact file paths, target names, and configuration values.\n"
@@ -787,43 +723,6 @@ def _build_system_prompt_file_explorer(expose_to_llm: dict) -> str:
         "- **Query Construction**: Automatically build aggregated search queries from natural language\n"
         "- **Pattern Recognition**: Understand file naming conventions and project structures\n\n"
     )
-
-    tool_descriptions = []
-
-    if expose_to_llm.get("azure_devops_mcp", False):
-        tool_descriptions.append(
-            "- **Azure DevOps MCP Tools**: Access Azure DevOps repositories.\n"
-            "  - `search_azure_devops_code`: Search file CONTENT by keywords - finds text within files.\n"
-            "  - `search_azure_devops_files`: Search by FILENAME patterns.\n"
-            "    Use `path_pattern` for wildcards: `*.json`, `test_*.py`, `*_config.*`\n"
-            "    Use `recursive=true` with specific patterns to search subdirectories.\n"
-            "  - `get_azure_devops_file`: Read file content (requires exact path).\n"
-            "  **Tips**:\n"
-            '    - For "find files named X": use `search_azure_devops_files`\n'
-            '    - For "find files containing X": use `search_azure_devops_code`\n'
-            "    - Combine both for complex queries"
-        )
-
-    if expose_to_llm.get("local_mcp", False):
-        tool_descriptions.append(
-            "- **Local MCP Tools**: Access the local file system.\n"
-            "  - `list_directory`: List files and folders in a directory.\n"
-            "  - `read_file`: Read file content by path.\n"
-            "  - `search_files`: Search for files by name pattern or content.\n"
-            "  **Tips**:\n"
-            "    - Use wildcards: `*.py`, `config_*`, `*test*`\n"
-            "    - Search recursively through subdirectories\n"
-            "    - Combine name and content searches"
-        )
-
-    if expose_to_llm.get("crawler", False):
-        tool_descriptions.append(
-            "- **Crawler Tool** (`crawl_and_refresh`): Fetch web documentation.\n"
-            "  Use this to access online documentation about tools or file formats."
-        )
-
-    if tool_descriptions:
-        system_prompt += "AVAILABLE TOOLS:\n" + "\n".join(tool_descriptions) + "\n\n"
 
     system_prompt += (
         "QUERY CONSTRUCTION GUIDELINES:\n"
@@ -869,8 +768,19 @@ def _build_system_prompt_file_explorer(expose_to_llm: dict) -> str:
         "- **Use Multiple Tools**: Combine filename and content searches for better results.\n"
         "- **Show Results Clearly**: List found files with paths and brief descriptions.\n"
         "- **Summarize Patterns**: If many files found, group by folder or type.\n"
-        "- **Function Calling**: Use function calling (tools) - do not output raw JSON.\n"
-        "- **Focus**: Answer the LATEST message using history only for context.\n"
+        "- **Focus**: Answer the LATEST message using history only for context.\n\n"
+    )
+
+    # Add strong function calling instructions
+    system_prompt += (
+        "**CRITICAL - FUNCTION CALLING RULES:**\n"
+        "When you need to use a tool, you MUST use the function calling mechanism.\n"
+        "- DO NOT output JSON in your response text to call tools.\n"
+        "- DO NOT write out tool parameters as JSON - invoke the tool directly.\n"
+        "- Use the proper function calling API provided to you.\n"
+        "- If you want to crawl a URL or search files, make the actual tool call.\n"
+        '- WRONG: Writing `{"query": "...", "seed_urls": [...]}` in your response.\n'
+        "- RIGHT: Invoking the tool through the function calling interface.\n"
     )
 
     return system_prompt
@@ -947,8 +857,15 @@ def _build_messages(
 async def _load_tools(
     agent: AgentConfig,
     expose_to_llm: Dict[str, bool],
+    seed_urls: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """Load tools based on expose_to_llm settings."""
+    """Load tools based on expose_to_llm settings.
+
+    Args:
+        agent: Agent configuration
+        expose_to_llm: Dict of which tools to expose to LLM
+        seed_urls: Optional seed URLs to include in crawler tool description
+    """
     tools = []
 
     if expose_to_llm.get("local_mcp", False):
@@ -980,10 +897,17 @@ async def _load_tools(
             logger.error(f"Failed to load Azure DevOps MCP tools: {e}")
 
     if expose_to_llm.get("crawler", False):
-        from gateway.llm.prompts import CRAWL_AND_REFRESH_TOOL
+        from gateway.llm.prompts import build_crawler_tool_with_seed_urls
 
-        tools.append(CRAWL_AND_REFRESH_TOOL)
-        logger.info("Exposed crawler tool to LLM")
+        # Build crawler tool with seed URLs in description so LLM knows to prioritize them
+        crawler_tool = build_crawler_tool_with_seed_urls(seed_urls)
+        tools.append(crawler_tool)
+        if seed_urls:
+            logger.info(
+                f"Exposed crawler tool to LLM with {len(seed_urls)} priority seed URLs"
+            )
+        else:
+            logger.info("Exposed crawler tool to LLM")
 
     return tools
 
@@ -1047,10 +971,7 @@ async def _execute_llm_with_tools(
             tool_result = await tool_handler.handle_tool_call(
                 tool_call,
                 request_id,
-                request.seed_urls or [],
-                request.crawl_depth,
-                not request.enable_embedding,
-                request.browse_web,
+                skip_embedding=not request.enable_embedding,
             )
             messages.append(tool_result)
 
@@ -1209,7 +1130,8 @@ async def execute(request: UnifiedWorkflowRequest):
         )
 
         # Step 4: Load tools (use effective settings with workflow restrictions)
-        tools = await _load_tools(agent, effective_expose_to_llm)
+        # Pass seed_urls so LLM knows which URLs to prioritize when crawling
+        tools = await _load_tools(agent, effective_expose_to_llm, request.seed_urls)
 
         # Step 5: Execute LLM with tools
         response_text, tokens_used = await _execute_llm_with_tools(

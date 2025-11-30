@@ -1,28 +1,58 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Restart all LLMCrawl services
+    Restart LLMCrawl services with optional rebuild
 
 .DESCRIPTION
-    Restarts all LLMCrawl services by recreating containers.
-    This ensures environment variables from .env are reloaded.
-    Useful after updating .env configuration or code changes that require full restart.
+    Restarts LLMCrawl services with full control over rebuild behavior.
+    - Default: Recreate containers to reload env changes
+    - With -Build: Rebuild images to pick up code changes
+    - With -Full: Full rebuild (no cache) for major changes
 
 .PARAMETER Service
-    Optional. Restart only a specific service (gateway, crawler, indexer, mcp-server)
+    Optional. Restart only specific service(s). Can be comma-separated.
+    Valid services: gateway, crawler, indexer, mcp-server, azure-devops-mcp-server
+
+.PARAMETER Build
+    Rebuild images before starting (picks up code changes)
+
+.PARAMETER Full
+    Full rebuild with no cache (use after dependency changes)
+
+.PARAMETER Logs
+    Follow logs after restart
 
 .EXAMPLE
     .\scripts\restart-services.ps1
+    # Recreate containers (picks up .env changes)
 
 .EXAMPLE
-    .\scripts\restart-services.ps1 -Service gateway
+    .\scripts\restart-services.ps1 -Build
+    # Rebuild all services and restart (picks up code changes)
+
+.EXAMPLE
+    .\scripts\restart-services.ps1 -Service gateway -Build
+    # Rebuild and restart only gateway
+
+.EXAMPLE
+    .\scripts\restart-services.ps1 -Service gateway,crawler -Build -Logs
+    # Rebuild gateway and crawler, then follow logs
+
+.EXAMPLE
+    .\scripts\restart-services.ps1 -Full
+    # Full rebuild with no cache (after requirements.txt changes)
 #>
 
 param(
-    [string]$Service
+    [string]$Service,
+    [switch]$Build,
+    [switch]$Full,
+    [switch]$Logs
 )
 
-# Ensure we are in the deploy directory where docker-compose files are located
+$ErrorActionPreference = "Stop"
+
+# Ensure we are in the deploy directory
 $DeployPath = Join-Path $PSScriptRoot "../deploy"
 if (-not (Test-Path $DeployPath)) {
     Write-Error "Deploy directory not found at $DeployPath"
@@ -31,34 +61,89 @@ if (-not (Test-Path $DeployPath)) {
 Push-Location $DeployPath
 
 try {
-    Write-Host "Restarting LLMCrawl services..." -ForegroundColor Cyan
-
+    # Parse services
+    $Services = @()
     if ($Service) {
-        Write-Host "Restarting $Service only..." -ForegroundColor Yellow
-        Write-Host "Note: Using 'up -d' to reload environment variables" -ForegroundColor Gray
-        docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d $Service
+        $Services = $Service -split ',' | ForEach-Object { $_.Trim() }
+    }
 
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "`n$Service restarted successfully!" -ForegroundColor Green
-        } else {
-            Write-Host "`nFailed to restart $Service" -ForegroundColor Red
-            exit 1
-        }
+    $ServiceDisplay = if ($Services.Count -gt 0) { $Services -join ", " } else { "all services" }
+
+    Write-Host "`n========================================" -ForegroundColor Cyan
+    Write-Host " LLMCrawl Service Manager" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+
+    # Determine operation mode
+    if ($Full) {
+        Write-Host "`nMode: FULL REBUILD (no cache)" -ForegroundColor Yellow
+        Write-Host "Target: $ServiceDisplay" -ForegroundColor White
+    } elseif ($Build) {
+        Write-Host "`nMode: REBUILD + RESTART" -ForegroundColor Yellow
+        Write-Host "Target: $ServiceDisplay" -ForegroundColor White
     } else {
-        Write-Host "Restarting all services..." -ForegroundColor Yellow
-        Write-Host "Note: Using 'up -d' to reload environment variables" -ForegroundColor Gray
-        docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+        Write-Host "`nMode: RECREATE (env reload only)" -ForegroundColor Yellow
+        Write-Host "Target: $ServiceDisplay" -ForegroundColor White
+        Write-Host "Tip: Use -Build to pick up code changes" -ForegroundColor Gray
+    }
 
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "`nAll services restarted successfully!" -ForegroundColor Green
-            Write-Host "`nService URLs:" -ForegroundColor Cyan
-            Write-Host "  Gateway:    http://localhost:8000" -ForegroundColor White
-            Write-Host "  Crawler:    http://localhost:8001" -ForegroundColor White
-            Write-Host "  Indexer:    http://localhost:8002" -ForegroundColor White
-            Write-Host "  MCP Server: http://localhost:8003" -ForegroundColor White
+    # Build the docker compose command
+    $ComposeCmd = "docker compose -f docker-compose.yml"
+
+    # Build arguments
+    $Args = @("up", "-d")
+
+    if ($Full) {
+        $Args += "--build"
+        $Args += "--no-cache"
+        $Args += "--force-recreate"
+    } elseif ($Build) {
+        $Args += "--build"
+        $Args += "--force-recreate"
+    } else {
+        $Args += "--force-recreate"
+    }
+
+    # Add specific services if specified
+    if ($Services.Count -gt 0) {
+        $Args += $Services
+    }
+
+    Write-Host "`nExecuting: docker compose -f docker-compose.yml $($Args -join ' ')" -ForegroundColor Gray
+    Write-Host ""
+
+    # Execute
+    & docker compose -f docker-compose.yml @Args
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`nFailed to restart services" -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "`n========================================" -ForegroundColor Green
+    Write-Host " Services restarted successfully!" -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Green
+
+    # Show service status
+    Write-Host "`nService Status:" -ForegroundColor Cyan
+    docker compose -f docker-compose.yml ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+
+    Write-Host "`nService URLs:" -ForegroundColor Cyan
+    Write-Host "  Gateway:           http://localhost:8000" -ForegroundColor White
+    Write-Host "  Crawler:           http://localhost:8001" -ForegroundColor White
+    Write-Host "  Indexer:           http://localhost:8002" -ForegroundColor White
+    Write-Host "  MCP Server:        http://localhost:8003" -ForegroundColor White
+    Write-Host "  Azure DevOps MCP:  http://localhost:8004" -ForegroundColor White
+
+    Write-Host "`nHealth Check:" -ForegroundColor Cyan
+    Write-Host "  curl http://localhost:8000/health" -ForegroundColor Gray
+
+    # Follow logs if requested
+    if ($Logs) {
+        Write-Host "`nFollowing logs (Ctrl+C to exit)..." -ForegroundColor Yellow
+        if ($Services.Count -gt 0) {
+            docker compose -f docker-compose.yml logs -f @Services
         } else {
-            Write-Host "`nFailed to restart services" -ForegroundColor Red
-            exit 1
+            docker compose -f docker-compose.yml logs -f gateway crawler indexer mcp-server
         }
     }
 }

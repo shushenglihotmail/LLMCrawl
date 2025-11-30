@@ -55,7 +55,7 @@ class UnifiedWorkflowRequest(BaseModel):
     1. Agent gathers context from target_paths (if provided) via Azure DevOps MCP
     2. Agent gathers context from reference_files (if provided) via Local MCP
     3. Agent crawls seed_urls (if provided) via crawler
-    4. Agent optionally crawls web based on browse_web and user_message
+    4. Agent crawls seed_urls if provided
     5. Agent combines all context with user_message and sends to LLM
     6. LLM can use exposed tools (if any) for additional operations
 
@@ -66,7 +66,6 @@ class UnifiedWorkflowRequest(BaseModel):
         "target_paths": ["src/windows/runlevels/*.cpp"],  # Optional
         "reference_files": ["/docs/architecture.md"],  # Optional
         "seed_urls": ["https://www.osgwiki.com/wiki/Windows_Runlevels"],  # Optional
-        "browse_web": false,  # Allow crawling beyond seed_urls
         "enable_embedding": false,  # Index crawled content
         "expose_to_llm": {
             "local_mcp": false,  # Expose local file MCP tools to LLM
@@ -104,11 +103,6 @@ class UnifiedWorkflowRequest(BaseModel):
     )
 
     # Control switches
-    browse_web: bool = Field(
-        False,
-        description="Allow crawling sites beyond seed_urls (applies to both agent and LLM)",
-    )
-
     enable_embedding: bool = Field(
         False, description="Enable embedding/indexing for crawled content"
     )

@@ -7,6 +7,8 @@ import asyncio  # noqa: F401
 import json
 import logging
 import os
+import re
+import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
@@ -184,12 +186,22 @@ class LLMClient:
             response = await self.openai_client.chat.completions.create(**kwargs)
             parsed = self._parse_response(response)
 
-            # Log if tools were passed but no tool_calls in response
+            # Check if tools were passed but LLM responded with JSON text instead of tool call
             if tools and not parsed.get("tool_calls"):
-                logger.warning(
-                    f"Tools were provided but LLM did not use them. "
-                    f"Response content preview: {parsed.get('content', '')[:200]}"
-                )
+                content = parsed.get("content", "")
+                converted = self._try_convert_json_to_tool_call(content, tools)
+                if converted:
+                    logger.info(
+                        f"Converted JSON text response to tool call: {converted['function']['name']}"
+                    )
+                    parsed["tool_calls"] = [converted]
+                    # Remove the JSON from content to avoid confusion
+                    parsed["content"] = self._strip_json_from_content(content)
+                else:
+                    logger.warning(
+                        f"Tools were provided but LLM did not use them. "
+                        f"Response content preview: {content[:200]}"
+                    )
 
             return parsed
 
@@ -408,6 +420,110 @@ class LLMClient:
                 )
 
         return result
+
+    def _try_convert_json_to_tool_call(
+        self, content: str, tools: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Try to detect and convert JSON text in response to a proper tool call.
+
+        Some LLMs output tool call parameters as JSON text instead of using the
+        function calling API. This method detects such patterns and converts them.
+
+        Args:
+            content: The response content text
+            tools: The tools that were provided to the LLM
+
+        Returns:
+            A tool call dict if JSON was detected and matched a tool, None otherwise
+        """
+        if not content:
+            return None
+
+        # Try to extract JSON from the content
+        # Look for JSON that starts at the beginning or after a newline
+        json_patterns = [
+            r"^\s*(\{[^{}]*\})",  # JSON at start
+            r"\n\s*(\{[^{}]*\})",  # JSON after newline
+            r"```json?\s*(\{[^{}]*\})\s*```",  # JSON in code block
+        ]
+
+        json_str = None
+        for pattern in json_patterns:
+            match = re.search(pattern, content, re.DOTALL)
+            if match:
+                json_str = match.group(1)
+                break
+
+        if not json_str:
+            return None
+
+        try:
+            parsed_json = json.loads(json_str)
+        except json.JSONDecodeError:
+            return None
+
+        # Check if the JSON matches any of our tool schemas
+        # For crawl_and_refresh, we expect: query, and optionally seed_urls, freshness_days, depth
+        for tool in tools:
+            tool_name = tool.get("function", {}).get("name", "")
+            tool_params = (
+                tool.get("function", {}).get("parameters", {}).get("properties", {})
+            )
+
+            if tool_name == "crawl_and_refresh":
+                # Check if JSON has the expected fields for crawl_and_refresh
+                if "query" in parsed_json:
+                    # This looks like a crawl_and_refresh call!
+                    # Build the tool call structure
+                    return {
+                        "id": f"call_{uuid.uuid4().hex[:24]}",
+                        "type": "function",
+                        "function": {
+                            "name": "crawl_and_refresh",
+                            "arguments": json.dumps(parsed_json),
+                        },
+                    }
+
+            # Generic check: if JSON keys match tool parameter names
+            elif tool_params:
+                required_params = (
+                    tool.get("function", {}).get("parameters", {}).get("required", [])
+                )
+                # Check if all required params are present in the JSON
+                if required_params and all(
+                    param in parsed_json for param in required_params
+                ):
+                    return {
+                        "id": f"call_{uuid.uuid4().hex[:24]}",
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "arguments": json.dumps(parsed_json),
+                        },
+                    }
+
+        return None
+
+    def _strip_json_from_content(self, content: str) -> str:
+        """
+        Remove the JSON portion from the content, keeping any additional text.
+
+        Args:
+            content: The original response content
+
+        Returns:
+            Content with JSON stripped out
+        """
+        if not content:
+            return content
+
+        # Remove JSON at the start
+        content = re.sub(r"^\s*\{[^{}]*\}\s*", "", content)
+        # Remove JSON in code blocks
+        content = re.sub(r"```json?\s*\{[^{}]*\}\s*```\s*", "", content)
+
+        return content.strip()
 
     async def create_embeddings(
         self, texts: List[str], model: Optional[str] = None
