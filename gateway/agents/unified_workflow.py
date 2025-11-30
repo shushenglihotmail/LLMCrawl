@@ -8,9 +8,43 @@ Simplified single workflow that handles all use cases:
 - Direct LLM interaction with user message
 """
 
+from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
+
+
+class WorkflowType(str, Enum):
+    """
+    Workflow types that determine system behavior and available options.
+
+    GENERAL_CHAT: Casual conversation with informational consultant.
+        - System role: Informational consultant
+        - Target files: Disabled
+        - Reference files: Disabled
+        - Azure DevOps in expose_to_llm: Disabled
+        - Use case: General questions, casual chat
+
+    CODE_ANALYSIS: Deep code analysis with technical architect.
+        - System role: Technical architect for code analysis, review, refactoring
+        - All options available
+        - Use case: Code review, refactoring, architecture analysis
+
+    BUILD_SYSTEM_ANALYSIS: Metadata and build system analysis.
+        - System role: Technical architect and expert build engineer
+        - All options available
+        - Use case: Build system, manifest, metadata analysis
+
+    FILE_EXPLORER: DevOps and file assistant for browsing/searching files.
+        - System role: DevOps and local file assistant/helper
+        - All options available
+        - Use case: Browse repos, search files by content/name/pattern
+    """
+
+    GENERAL_CHAT = "general_chat"
+    CODE_ANALYSIS = "code_analysis"
+    BUILD_SYSTEM_ANALYSIS = "build_system_analysis"
+    FILE_EXPLORER = "file_explorer"
 
 
 class UnifiedWorkflowRequest(BaseModel):
@@ -27,6 +61,7 @@ class UnifiedWorkflowRequest(BaseModel):
 
     Example:
     {
+        "workflow": "code_analysis",
         "user_message": "Explain how Windows runlevels work",
         "target_paths": ["src/windows/runlevels/*.cpp"],  # Optional
         "reference_files": ["/docs/architecture.md"],  # Optional
@@ -44,6 +79,12 @@ class UnifiedWorkflowRequest(BaseModel):
         "max_tokens": 2000
     }
     """
+
+    # Workflow type selection
+    workflow: WorkflowType = Field(
+        WorkflowType.GENERAL_CHAT,
+        description="Workflow type that determines system behavior and available options",
+    )
 
     # Required
     user_message: str = Field(..., description="User's question or request")

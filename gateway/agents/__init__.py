@@ -9,8 +9,10 @@ Usage:
 """
 
 from gateway.agents.agent_config import AgentConfig, convert_mcp_tool_to_openai
+from gateway.agents.unified_workflow import WorkflowType
 
 __all__ = [
     "AgentConfig",
     "convert_mcp_tool_to_openai",
+    "WorkflowType",
 ]

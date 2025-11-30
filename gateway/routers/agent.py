@@ -21,6 +21,7 @@ from gateway.agents import AgentConfig, convert_mcp_tool_to_openai
 from gateway.agents.unified_workflow import (
     UnifiedWorkflowRequest,
     UnifiedWorkflowResponse,
+    WorkflowType,
 )
 from gateway.llm.client import LLMClient
 from gateway.routers.tools import get_tool_handler
@@ -367,6 +368,71 @@ async def _gather_files(
     return file_content
 
 
+def _format_path_tree(paths: List[str]) -> str:
+    """
+    Format a list of paths as a tree-like structure for display.
+    Groups paths by their parent directories for better readability.
+    """
+    if not paths:
+        return ""
+
+    # Sort paths for consistent display
+    sorted_paths = sorted(paths)
+
+    lines = []
+    for path in sorted_paths:
+        # Determine if it's a folder or file based on trailing slash or lack of extension
+        if path.endswith("/") or path.endswith("\\"):
+            lines.append(f"  📁 {path}")
+        else:
+            lines.append(f"  📄 {path}")
+
+    return "\n".join(lines)
+
+
+async def _gather_target_files_for_file_explorer(
+    agent: AgentConfig,
+    paths: List[str],
+    context_gathered: Dict[str, int],
+) -> List[str]:
+    """
+    Gather target paths for FILE_EXPLORER workflow - NO file content reading.
+
+    For FILE_EXPLORER workflow, target paths serve as EXAMPLES of what to search for.
+    We only list the expanded folder/file tree structure without reading any content.
+    This provides the LLM with path patterns and structure to understand what to look for.
+
+    Args:
+        agent: Agent configuration (unused but kept for interface consistency)
+        paths: List of expanded file/folder paths
+        context_gathered: Dict to track gathered context counts
+
+    Returns:
+        List with single formatted string showing the path tree
+    """
+    if not paths:
+        return []
+
+    logger.info(f"FILE_EXPLORER: Listing {len(paths)} paths (no content reading)")
+
+    # Format the path tree
+    path_tree = _format_path_tree(paths)
+
+    result = (
+        "Target Path Structure (examples of files/folders to search for):\n"
+        f"{path_tree}\n\n"
+        "Use these paths as examples to understand:\n"
+        "- File naming patterns and extensions\n"
+        "- Folder structure and organization\n"
+        "- Where similar files might be located"
+    )
+
+    context_gathered["target_files"] = len(paths)
+    logger.info(f"Listed {len(paths)} paths as structure reference")
+
+    return [result]
+
+
 async def _gather_target_files(
     agent: AgentConfig,
     paths: List[str],
@@ -482,54 +548,359 @@ def _build_context_string(
     return "\n\n===\n\n".join(context_parts) if context_parts else ""
 
 
-def _build_system_prompt(expose_to_llm: Dict[str, bool]) -> str:
-    """Build system prompt with tool descriptions."""
+def _apply_workflow_restrictions(workflow: WorkflowType, expose_to_llm: dict) -> dict:
+    """
+    Apply workflow-specific restrictions to the expose_to_llm settings.
+
+    GENERAL_CHAT workflow restrictions:
+    - azure_devops_mcp: Always disabled
+
+    CODE_ANALYSIS and BUILD_SYSTEM_ANALYSIS:
+    - All options available (use client settings as-is)
+
+    Args:
+        workflow: The workflow type
+        expose_to_llm: Original client settings
+
+    Returns:
+        Modified expose_to_llm dict with workflow restrictions applied
+    """
+    # Start with a copy of the original settings
+    effective_settings = dict(expose_to_llm)
+
+    if workflow == WorkflowType.GENERAL_CHAT:
+        # GENERAL_CHAT: Disable Azure DevOps access
+        effective_settings["azure_devops_mcp"] = False
+        logger.info("GENERAL_CHAT workflow: Azure DevOps MCP disabled")
+
+    return effective_settings
+
+
+def _build_system_prompt_general_chat(expose_to_llm: dict) -> str:
+    """
+    Build system prompt for GENERAL_CHAT workflow.
+
+    System role: Informational consultant - casual, helpful conversation.
+    Limited options: No target files, no reference files, no Azure DevOps exposure.
+    """
     system_prompt = (
-        "You are a helpful assistant with access to tools for fetching current information.\n\n"
-        "AVAILABLE TOOLS:\n"
+        "You are a friendly and knowledgeable Informational Consultant.\n"
+        "Your goal is to provide helpful, accurate information and have engaging conversations.\n\n"
+        "You excel at:\n"
+        "- Answering general questions across various topics\n"
+        "- Explaining concepts in clear, accessible language\n"
+        "- Providing thoughtful analysis and recommendations\n"
+        "- Having natural, conversational exchanges\n\n"
     )
 
+    # Only local MCP and crawler can be exposed in general chat (Azure DevOps disabled)
     tool_descriptions = []
-    if expose_to_llm.get("azure_devops_mcp", False):
-        tool_descriptions.append(
-            "- **Azure DevOps MCP Tools**: Search and read files from Azure DevOps repositories\n"
-            "  - `search_azure_devops_code`: Search for code patterns in files (PREFERRED for finding packages, dependencies)\n"
-            "  - `get_azure_devops_file`: Read specific file contents when you know the exact path\n"
-            "  - `search_azure_devops_files`: Find files by name/path patterns\n"
-            "    **CRITICAL RESTRICTION**: When using recursive=true, you MUST provide either:\n"
-            "      * A specific filename in file_pattern (e.g., 'package.json')\n"
-            "      * OR a search keyword to filter results\n"
-            "    **NEVER** use recursive=true with only path_pattern and extension - this will timeout!"
-        )
 
     if expose_to_llm.get("local_mcp", False):
         tool_descriptions.append(
-            "- **Local MCP Tools**: Access local workspace files and directories\n"
-            "  Use these when user asks about local files or workspace structure."
+            "- **Local File Tools**: Access local files to provide additional context."
         )
 
     if expose_to_llm.get("crawler", False):
         tool_descriptions.append(
-            "- **Crawler Tool** (`crawl_and_refresh`): Fetch and index web content\n"
-            "  Use this when user asks for current web information or recent news."
+            "- **Web Crawler** (`crawl_and_refresh`): Fetch web content for additional information.\n"
+            "  Use this to access documentation, articles, or external resources."
         )
 
     if tool_descriptions:
-        system_prompt += "\n".join(tool_descriptions) + "\n\n"
+        system_prompt += "AVAILABLE TOOLS:\n" + "\n".join(tool_descriptions) + "\n\n"
 
     system_prompt += (
-        "CONVERSATION HANDLING:\n"
-        "- **ALWAYS focus on answering the LATEST user message only** - this is the PRIMARY ASK.\n"
-        "- Previous messages are provided as CONTEXT/BACKGROUND only.\n\n"
-        "CRITICAL RULES FOR TOOL USAGE:\n"
-        "1. You MUST use function calling to invoke tools - DO NOT output JSON as text.\n"
-        "2. When asked about packages/dependencies, call search_azure_devops_code or search_azure_devops_files.\n"
-        "3. DO NOT ask for clarification about which tool to use - just call the most appropriate tool.\n"
-        "4. If context is already provided, analyze it directly.\n\n"
-        "Remember: USE FUNCTION CALLING, NOT TEXT OUTPUT OF JSON."
+        "GUIDELINES:\n"
+        "- Be conversational and approachable\n"
+        "- Provide clear, well-organized responses\n"
+        "- Ask clarifying questions when the request is ambiguous\n"
+        "- Focus on being helpful rather than technical\n"
+        "- If you don't know something, say so honestly\n"
     )
 
     return system_prompt
+
+
+def _build_system_prompt_code_analysis(expose_to_llm: dict) -> str:
+    """
+    Build system prompt for CODE_ANALYSIS workflow.
+
+    System role: Technical architect for deep code analysis, review, and refactoring.
+    All options available.
+    """
+    system_prompt = (
+        "You are an expert Technical Architect specializing in code analysis, review, and refactoring.\n"
+        "Your goal is to provide deep technical analysis, identify issues, and propose improvements.\n\n"
+        "Your expertise includes:\n"
+        "- **Code Analysis**: Understanding code structure, logic flow, and dependencies\n"
+        "- **Code Review**: Identifying bugs, security issues, performance problems, and code smells\n"
+        "- **Refactoring**: Proposing and implementing structural improvements\n"
+        "- **Architecture Assessment**: Evaluating design patterns and architectural decisions\n"
+        "- **Best Practices**: Applying industry standards and coding conventions\n\n"
+    )
+
+    tool_descriptions = []
+
+    if expose_to_llm.get("azure_devops_mcp", False):
+        tool_descriptions.append(
+            "- **Azure DevOps MCP Tools**: Access repository code and metadata.\n"
+            "  - `search_azure_devops_code`: BEST for finding definitions, packages, or dependencies.\n"
+            "  - `get_azure_devops_file`: Read file content (requires exact path).\n"
+            "  - `search_azure_devops_files`: Find specific filename patterns.\n"
+            "    **WARNING**: When `recursive=true`, provide a specific filename or keyword.\n"
+            "    NEVER use recursive search with only a wildcard path (e.g., just '*.json')."
+        )
+
+    if expose_to_llm.get("local_mcp", False):
+        tool_descriptions.append(
+            "- **Local MCP Tools**: Access the local workspace.\n"
+            "  Use these to read local file structures or content when the user references 'local files'."
+        )
+
+    if expose_to_llm.get("crawler", False):
+        tool_descriptions.append(
+            "- **Crawler Tool** (`crawl_and_refresh`): External Web Access.\n"
+            "  Use this to fetch documentation, API references, or technical resources."
+        )
+
+    if tool_descriptions:
+        system_prompt += "AVAILABLE TOOLS:\n" + "\n".join(tool_descriptions) + "\n\n"
+
+    system_prompt += (
+        "WORKFLOW & CONTEXT HANDLING:\n"
+        "You will receive inputs categorized as Target Files, Reference Files, or Web/Seed Content.\n\n"
+        "1. **Target Files (Code to Analyze):**\n"
+        "   - **Analyze**: Detailed breakdown of structure, logic, and dependencies.\n"
+        "   - **Review**: Identify issues, bugs, security concerns, and improvements.\n"
+        "   - **Refactor**: If requested, propose a refactoring plan, then generate the improved code.\n\n"
+        "2. **Reference Files & Web Content:**\n"
+        "   - Treat these as **CONTEXT & KNOWLEDGE SOURCES**.\n"
+        "   - Use them to understand coding standards, patterns, and project conventions.\n\n"
+        "3. **Active Information Gathering:**\n"
+        "   - If context is insufficient, use available tools to gather more information.\n"
+        "   - Use Azure DevOps tools to explore related code and dependencies.\n\n"
+    )
+
+    system_prompt += (
+        "CRITICAL RULES:\n"
+        "- **Function Calling**: Use function calling (tools) - do not output raw JSON text.\n"
+        "- **Code Search**: Prefer `search_azure_devops_code` for finding dependencies and definitions.\n"
+        "- **Be Thorough**: Provide comprehensive analysis with specific line references.\n"
+        "- **Actionable Feedback**: Give concrete suggestions, not vague recommendations.\n"
+        "- **Focus**: Answer the LATEST message using history only for context.\n"
+    )
+
+    return system_prompt
+
+
+def _build_system_prompt_build_system(expose_to_llm: dict) -> str:
+    """
+    Build system prompt for BUILD_SYSTEM_ANALYSIS workflow.
+
+    System role: Technical architect and expert build engineer for metadata, manifest,
+    and build system analysis.
+    All options available.
+    """
+    system_prompt = (
+        "You are a Principal Build Architect and Release Manager specializing in **Windows OS Engineering**.\n"
+        "Your deep expertise covers the Windows Build System, Component-Based Servicing (CBS), Modular Build System (MBS), Feature, Feature OnDemand Package and OS Image Composition.\n"
+        "You do not just read code; you visualize the dependency graph that creates a bootable Windows Image (FFU/WIM).\n\n"
+        "YOUR SPECIALIZED EXPERTISE INCLUDES:\n"
+        "- **Build Engines**: MSBuild (`.targets`, `.props`), NMake, and custom Windows build tools.\n"
+        "- **OS Composition**: Analyzing Feature Manifests (FM), OEMInput files, and Component Manifests.\n"
+        "- **Package Management**: Understanding how Packages (CAB/APPX/MBS/FOD) bundle Binaries, Drivers (`.inf`), and Registry keys.\n"
+        "- **Dependency Logic**: Resolving API contracts, binary compatibility, and 'OneCore' vs 'Desktop' dependencies.\n"
+        "- **Refactoring**: Decoupling circular dependencies and optimizing Image Size (disk footprint).\n\n"
+    )
+
+    tool_descriptions = []
+
+    if expose_to_llm.get("azure_devops_mcp", False):
+        tool_descriptions.append(
+            "- **Azure DevOps MCP Tools**: Access repository build files and metadata.\n"
+            "  - `search_azure_devops_code`: Find build definitions, package references, dependencies.\n"
+            "  - `get_azure_devops_file`: Read build files, manifests, and configuration.\n"
+            "  - `search_azure_devops_files`: Find build-related files (*.proj, *.targets, etc.).\n"
+            "    **WARNING**: When `recursive=true`, provide a specific filename pattern.\n"
+            "    NEVER use recursive search with only a wildcard (e.g., just '*.json')."
+        )
+
+    if expose_to_llm.get("local_mcp", False):
+        tool_descriptions.append(
+            "- **Local MCP Tools**: Access local build files and workspace configuration.\n"
+            "  Use these to examine local project structure and build artifacts."
+        )
+
+    if expose_to_llm.get("crawler", False):
+        tool_descriptions.append(
+            "- **Crawler Tool** (`crawl_and_refresh`): External Documentation Access.\n"
+            "  Use this to fetch build tool documentation, package registries, or best practices."
+        )
+
+    if tool_descriptions:
+        system_prompt += "AVAILABLE TOOLS:\n" + "\n".join(tool_descriptions) + "\n\n"
+
+    system_prompt += (
+        "WORKFLOW & CONTEXT HANDLING:\n"
+        "You will receive build files, manifests, or metadata as Target Files and supporting context.\n\n"
+        "1. **Target Files (Build/Metadata Files):**\n"
+        "   - **Analyze**: Understand build targets, dependencies, and configuration.\n"
+        "   - **Diagnose**: Identify build errors, missing dependencies, version conflicts.\n"
+        "   - **Optimize**: Suggest improvements for build performance and reliability.\n"
+        "   - **Restructure**: If requested, propose and implement build system changes.\n\n"
+        "2. **Reference Files & Documentation:**\n"
+        "   - Use these to understand project conventions and build requirements.\n"
+        "   - Cross-reference with official documentation when needed.\n\n"
+        "3. **Active Information Gathering:**\n"
+        "   - Explore related build files to understand the full dependency graph.\n"
+        "   - Look for common build patterns and configurations in the codebase.\n\n"
+    )
+
+    system_prompt += (
+        "CRITICAL RULES:\n"
+        "- **Function Calling**: Use function calling (tools) - do not output raw JSON text.\n"
+        "- **Dependency Analysis**: Always consider transitive dependencies and version compatibility.\n"
+        "- **Platform Awareness**: Note platform-specific build configurations and conditions.\n"
+        "- **Be Precise**: Provide exact file paths, target names, and configuration values.\n"
+        "- **Focus**: Answer the LATEST message using history only for context.\n"
+    )
+
+    return system_prompt
+
+
+def _build_system_prompt_file_explorer(expose_to_llm: dict) -> str:
+    """
+    Build system prompt for FILE_EXPLORER workflow.
+
+    System role: DevOps and local file assistant for browsing and searching files.
+    All options available.
+    """
+    system_prompt = (
+        "You are an expert DevOps Engineer and File System Assistant.\n"
+        "Your goal is to help users browse, search, and explore repositories and local file systems efficiently.\n\n"
+        "Your expertise includes:\n"
+        "- **File Browsing**: Navigate directory structures, list folder contents\n"
+        "- **Content Search**: Find files containing specific keywords or patterns\n"
+        "- **Filename Matching**: Search by wildcards (*.cpp, test_*.py), prefixes, suffixes\n"
+        "- **Folder Matching**: Find directories by name patterns\n"
+        "- **Query Construction**: Automatically build aggregated search queries from natural language\n"
+        "- **Pattern Recognition**: Understand file naming conventions and project structures\n\n"
+    )
+
+    tool_descriptions = []
+
+    if expose_to_llm.get("azure_devops_mcp", False):
+        tool_descriptions.append(
+            "- **Azure DevOps MCP Tools**: Access Azure DevOps repositories.\n"
+            "  - `search_azure_devops_code`: Search file CONTENT by keywords - finds text within files.\n"
+            "  - `search_azure_devops_files`: Search by FILENAME patterns.\n"
+            "    Use `path_pattern` for wildcards: `*.json`, `test_*.py`, `*_config.*`\n"
+            "    Use `recursive=true` with specific patterns to search subdirectories.\n"
+            "  - `get_azure_devops_file`: Read file content (requires exact path).\n"
+            "  **Tips**:\n"
+            '    - For "find files named X": use `search_azure_devops_files`\n'
+            '    - For "find files containing X": use `search_azure_devops_code`\n'
+            "    - Combine both for complex queries"
+        )
+
+    if expose_to_llm.get("local_mcp", False):
+        tool_descriptions.append(
+            "- **Local MCP Tools**: Access the local file system.\n"
+            "  - `list_directory`: List files and folders in a directory.\n"
+            "  - `read_file`: Read file content by path.\n"
+            "  - `search_files`: Search for files by name pattern or content.\n"
+            "  **Tips**:\n"
+            "    - Use wildcards: `*.py`, `config_*`, `*test*`\n"
+            "    - Search recursively through subdirectories\n"
+            "    - Combine name and content searches"
+        )
+
+    if expose_to_llm.get("crawler", False):
+        tool_descriptions.append(
+            "- **Crawler Tool** (`crawl_and_refresh`): Fetch web documentation.\n"
+            "  Use this to access online documentation about tools or file formats."
+        )
+
+    if tool_descriptions:
+        system_prompt += "AVAILABLE TOOLS:\n" + "\n".join(tool_descriptions) + "\n\n"
+
+    system_prompt += (
+        "QUERY CONSTRUCTION GUIDELINES:\n"
+        "When a user asks to find files, automatically construct appropriate queries:\n\n"
+        "1. **By Filename Pattern**:\n"
+        '   - "find all JSON files" → pattern: `*.json`\n'
+        '   - "find test files" → pattern: `test_*.py` or `*_test.py`\n'
+        '   - "find config files" → pattern: `*config*` or `*.config.*`\n'
+        "   - \"files starting with 'auth'\" → pattern: `auth*`\n"
+        "   - \"files ending with '_helper'\" → pattern: `*_helper.*`\n\n"
+        "2. **By Content Keyword**:\n"
+        "   - \"find files containing 'TODO'\" → content search for 'TODO'\n"
+        "   - \"where is class X defined\" → content search for 'class X'\n"
+        "   - \"find imports of module Y\" → content search for 'import Y' or 'from Y'\n\n"
+        "3. **By Folder Pattern**:\n"
+        '   - "in the tests folder" → scope to `tests/` or `**/tests/**`\n'
+        '   - "under src directory" → scope to `src/**`\n'
+        '   - "find all util folders" → pattern: `**/util*/**`\n\n'
+        "4. **Combined Queries**:\n"
+        "   - \"find Python files containing 'async'\" → filename `*.py` + content 'async'\n"
+        '   - "JSON configs in settings folder" → folder `**/settings/**` + pattern `*.json`\n\n'
+    )
+
+    system_prompt += (
+        "INPUT CONTEXT USAGE (File Explorer Specific):\n"
+        "1. **Target File Paths**: These are EXAMPLE files that match what the user wants to find.\n"
+        "   - Study their naming patterns, extensions, and folder locations.\n"
+        "   - Use them to understand what KIND of files to search for.\n"
+        "   - Extract patterns: if given `src/utils/helper.py`, look for similar `*helper*.py` files.\n\n"
+        "2. **Reference Files**: These are INSTRUCTIONS or HELP TIPS on how to find expected files.\n"
+        "   - May contain documentation about project structure or naming conventions.\n"
+        "   - May describe where certain file types are typically located.\n"
+        "   - Use this knowledge to construct better search queries.\n\n"
+        "3. **Seed URL Content**: Same purpose as Reference Files - provides CONTEXT and INSTRUCTIONS.\n"
+        "   - May contain wiki pages about project organization.\n"
+        "   - May describe file naming standards or folder structures.\n"
+        "   - Use this documentation to understand where to search.\n\n"
+    )
+
+    system_prompt += (
+        "CRITICAL RULES:\n"
+        "- **Be Proactive**: Construct and execute queries without asking for clarification.\n"
+        "- **Use Multiple Tools**: Combine filename and content searches for better results.\n"
+        "- **Show Results Clearly**: List found files with paths and brief descriptions.\n"
+        "- **Summarize Patterns**: If many files found, group by folder or type.\n"
+        "- **Function Calling**: Use function calling (tools) - do not output raw JSON.\n"
+        "- **Focus**: Answer the LATEST message using history only for context.\n"
+    )
+
+    return system_prompt
+
+
+def _build_system_prompt(workflow: WorkflowType, expose_to_llm: dict) -> str:
+    """
+    Route to the appropriate prompt builder based on workflow type.
+
+    Args:
+        workflow: The workflow type selected by the client
+        expose_to_llm: Dictionary of tools to expose to the LLM
+
+    Returns:
+        System prompt string appropriate for the workflow
+    """
+    if workflow == WorkflowType.GENERAL_CHAT:
+        return _build_system_prompt_general_chat(expose_to_llm)
+    elif workflow == WorkflowType.CODE_ANALYSIS:
+        return _build_system_prompt_code_analysis(expose_to_llm)
+    elif workflow == WorkflowType.BUILD_SYSTEM_ANALYSIS:
+        return _build_system_prompt_build_system(expose_to_llm)
+    elif workflow == WorkflowType.FILE_EXPLORER:
+        return _build_system_prompt_file_explorer(expose_to_llm)
+    else:
+        # Default to code analysis for unknown workflow types
+        logger.warning(
+            f"Unknown workflow type: {workflow}, defaulting to CODE_ANALYSIS"
+        )
+        return _build_system_prompt_general_chat(expose_to_llm)
 
 
 def _build_messages(
@@ -801,9 +1172,15 @@ async def execute(request: UnifiedWorkflowRequest):
             )
 
         # Step 2: Gather context from all sources
-        target_content = await _gather_target_files(
-            agent, expanded_target_paths, context_gathered
-        )
+        # For FILE_EXPLORER workflow, use special gathering that doesn't read folder contents
+        if request.workflow == WorkflowType.FILE_EXPLORER:
+            target_content = await _gather_target_files_for_file_explorer(
+                agent, expanded_target_paths, context_gathered
+            )
+        else:
+            target_content = await _gather_target_files(
+                agent, expanded_target_paths, context_gathered
+            )
         reference_content = await _gather_reference_files(
             agent, expanded_reference_files, context_gathered
         )
@@ -817,7 +1194,12 @@ async def execute(request: UnifiedWorkflowRequest):
         )
         logger.info(f"Full context: {len(full_context)} chars")
 
-        system_prompt = _build_system_prompt(request.expose_to_llm)
+        # Apply workflow-specific settings
+        effective_expose_to_llm = _apply_workflow_restrictions(
+            request.workflow, request.expose_to_llm
+        )
+
+        system_prompt = _build_system_prompt(request.workflow, effective_expose_to_llm)
         messages = _build_messages(
             system_prompt,
             full_context,
@@ -826,8 +1208,8 @@ async def execute(request: UnifiedWorkflowRequest):
             request.clear_history,
         )
 
-        # Step 4: Load tools
-        tools = await _load_tools(agent, request.expose_to_llm)
+        # Step 4: Load tools (use effective settings with workflow restrictions)
+        tools = await _load_tools(agent, effective_expose_to_llm)
 
         # Step 5: Execute LLM with tools
         response_text, tokens_used = await _execute_llm_with_tools(
