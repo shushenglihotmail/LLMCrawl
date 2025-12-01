@@ -68,13 +68,10 @@ def create_http_app() -> FastAPI:
             f"Starting Azure DevOps MCP Server for {organization}/{project}/{repository}"
         )
 
-        # Authenticate
-        use_interactive = (
-            os.getenv("AZURE_DEVOPS_AUTH_MODE", "interactive") == "interactive"
-        )
+        # Authenticate using PAT
         # In HTTP mode, allow server to start even if connection test fails
         # The actual requests will handle auth errors
-        init_result = await mcp_server.initialize(use_interactive_auth=use_interactive)
+        init_result = await mcp_server.initialize()
         if not init_result:
             logger.warning(
                 "Failed to initialize server - authentication may be required for requests"

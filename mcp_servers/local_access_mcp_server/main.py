@@ -1,21 +1,17 @@
 """
 MCP Server for local file operations.
-Provides tools to read, search, and index files under a configured root directory.
+Provides tools to list and read files under a configured root directory.
 Supports both stdio transport (for VS Code) and HTTP REST API (for LLMCrawl).
 """
 
-import argparse
-import asyncio
 import logging
 import os
-import sys
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .file_indexer import FileIndexer
 from .file_reader import FileReader
 
 # Setup logging
@@ -27,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 ROOT_FOLDER = os.getenv("MCP_ROOT_FOLDER", "/data/files")
-VECTOR_DB_PATH = os.getenv("MCP_VECTOR_DB_PATH", "/data/mcp_vector_db")
 
 app = FastAPI(title="MCP File Server", version="1.0.0")
 
@@ -40,9 +35,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize services
+# Initialize file reader
 file_reader = FileReader(root_folder=ROOT_FOLDER)
-file_indexer = FileIndexer(root_folder=ROOT_FOLDER, vector_db_path=VECTOR_DB_PATH)
 
 
 class ToolRequest(BaseModel):
@@ -64,14 +58,9 @@ class ToolResponse(BaseModel):
 async def startup_event():
     """Initialize services on startup."""
     logger.info(f"MCP Server starting with root folder: {ROOT_FOLDER}")
-    logger.info(f"Vector DB path: {VECTOR_DB_PATH}")
 
-    # Ensure directories exist
+    # Ensure root directory exists
     os.makedirs(ROOT_FOLDER, exist_ok=True)
-    os.makedirs(VECTOR_DB_PATH, exist_ok=True)
-
-    # Initialize indexer
-    await file_indexer.initialize()
     logger.info("MCP Server started successfully")
 
 
@@ -81,7 +70,6 @@ async def health_check():
     return {
         "status": "healthy",
         "root_folder": ROOT_FOLDER,
-        "vector_db_path": VECTOR_DB_PATH,
     }
 
 
@@ -93,35 +81,12 @@ async def get_tools():
     """
     tools = [
         {
-            "name": "read_local_file",
-            "description": (
-                "Read and return the content of a local file. "
-                "The file path must be relative to the configured root folder, "
-                "or an absolute path that is within the root folder. "
-                "Use this when the user asks to 'read', 'show', 'display', or "
-                "'get content of' a specific file."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": (
-                            "Path to the file (relative to root folder or "
-                            "absolute path within root folder)"
-                        ),
-                    }
-                },
-                "required": ["file_path"],
-            },
-        },
-        {
             "name": "list_files",
             "description": (
-                "List files in a directory under the root folder. "
+                "List files and directories in a folder. "
+                "Use this to explore the file system and find files. "
                 "Supports filtering by file extension and recursive search. "
-                "Use this when the user asks to 'list', 'find files', 'show files' "
-                "in a specific folder."
+                "Returns both files and subdirectories."
             ),
             "inputSchema": {
                 "type": "object",
@@ -129,8 +94,8 @@ async def get_tools():
                     "folder_path": {
                         "type": "string",
                         "description": (
-                            "Path to the folder (relative to root or absolute "
-                            "within root)"
+                            "Path to the folder to list (relative to root or absolute). "
+                            "Use '.' for root folder."
                         ),
                         "default": ".",
                     },
@@ -138,13 +103,16 @@ async def get_tools():
                         "type": "string",
                         "description": (
                             "Filter by file extension (e.g., '.json', '.txt'). "
-                            "Leave empty for all files."
+                            "Leave empty to list all files."
                         ),
                         "default": "",
                     },
                     "recursive": {
                         "type": "boolean",
-                        "description": "Whether to search subdirectories",
+                        "description": (
+                            "If true, list files in all subdirectories recursively. "
+                            "If false, only list files in the specified folder."
+                        ),
                         "default": False,
                     },
                 },
@@ -152,66 +120,24 @@ async def get_tools():
             },
         },
         {
-            "name": "search_file_content",
+            "name": "read_local_file",
             "description": (
-                "Search for files containing specific text or matching a query. "
-                "Files are indexed and searchable using semantic similarity. "
-                "Use this when the user asks to 'find files containing', "
-                "'search for', or 'look for files with' specific content."
+                "Read and return the full content of a file. "
+                "Use this after list_files to read a specific file's content. "
+                "Supports text files (UTF-8). Binary files return size info only."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query or text to find",
-                    },
-                    "folder_path": {
+                    "file_path": {
                         "type": "string",
                         "description": (
-                            "Limit search to specific folder (relative to root)"
+                            "Path to the file to read (relative to root or absolute). "
+                            "Get the path from list_files results."
                         ),
-                        "default": ".",
-                    },
-                    "top_k": {
-                        "type": "integer",
-                        "description": "Number of results to return",
-                        "default": 5,
-                    },
+                    }
                 },
-                "required": ["query"],
-            },
-        },
-        {
-            "name": "index_files",
-            "description": (
-                "Index files in a folder for semantic search. "
-                "This processes and embeds file content for efficient searching. "
-                "Use this when the user asks to 'index', 'scan', or 'process' "
-                "files in a folder."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "folder_path": {
-                        "type": "string",
-                        "description": (
-                            "Path to the folder to index (relative to root)"
-                        ),
-                        "default": ".",
-                    },
-                    "recursive": {
-                        "type": "boolean",
-                        "description": "Whether to index subdirectories",
-                        "default": True,
-                    },
-                    "force": {
-                        "type": "boolean",
-                        "description": "Force re-indexing even if unchanged",
-                        "default": False,
-                    },
-                },
-                "required": ["folder_path"],
+                "required": ["file_path"],
             },
         },
     ]
@@ -227,13 +153,7 @@ async def invoke_tool(request: ToolRequest):
     logger.info(f"Invoking tool: {request.tool_name} with args: {request.arguments}")
 
     try:
-        if request.tool_name == "read_local_file":
-            result = await file_reader.read_file(
-                file_path=request.arguments["file_path"]
-            )
-            return ToolResponse(success=True, result=result)
-
-        elif request.tool_name == "list_files":
+        if request.tool_name == "list_files":
             result = await file_reader.list_files(
                 folder_path=request.arguments.get("folder_path", "."),
                 extension=request.arguments.get("extension", ""),
@@ -241,19 +161,9 @@ async def invoke_tool(request: ToolRequest):
             )
             return ToolResponse(success=True, result=result)
 
-        elif request.tool_name == "search_file_content":
-            result = await file_indexer.search(
-                query=request.arguments["query"],
-                folder_path=request.arguments.get("folder_path", "."),
-                top_k=request.arguments.get("top_k", 5),
-            )
-            return ToolResponse(success=True, result=result)
-
-        elif request.tool_name == "index_files":
-            result = await file_indexer.index_folder(
-                folder_path=request.arguments.get("folder_path", "."),
-                recursive=request.arguments.get("recursive", True),
-                extensions=request.arguments.get("extensions", []),
+        elif request.tool_name == "read_local_file":
+            result = await file_reader.read_file(
+                file_path=request.arguments["file_path"]
             )
             return ToolResponse(success=True, result=result)
 

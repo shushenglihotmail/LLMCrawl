@@ -45,13 +45,19 @@ _agent_config: Optional[AgentConfig] = None
 async def _expand_paths(agent: AgentConfig, path_list: List[str]) -> List[str]:
     """
     Expand path list to actual file paths using conventions:
-    - 'azdo:...' = Azure DevOps path (use Azure DevOps MCP for expansion)
+
+    Azure DevOps (azdo:) paths - NEW FORMAT:
+    - 'azdo:/path:searchText' = Use Azure DevOps Code Search API
+      - path is the scope (folder to search in)
+      - searchText is passed directly to Azure DevOps API
+      - Examples: 'azdo:/vm/compute:ext:xml', 'azdo:/:file:*manifest*.xml'
+    - 'azdo:/path/to/file.cpp' = Direct file path (no colon after path = exact file)
+
+    Local paths:
     - 'file.cpp' = direct file
     - '*.cpp' or 'x*.json' = wildcard pattern
     - 'folder/' or 'folder\\' = folder (non-recursive)
     - 'folder/**' = folder (recursive)
-
-    Both local and Azure DevOps paths support folder expansion and wildcards.
     """
     expanded_files = []
 
@@ -65,36 +71,13 @@ async def _expand_paths(agent: AgentConfig, path_list: List[str]) -> List[str]:
                 expanded_files.append(path)
                 continue
 
-            azdo_path = parsed.path
-
-            # Check for recursive folder pattern
-            if azdo_path.endswith("/**"):
-                folder = azdo_path[:-3]
-                files = await _list_azdo_folder_files(
-                    agent, folder, recursive=True, parsed=parsed
-                )
+            # Check if this is a search query (has search_text)
+            if parsed.is_search_query():
+                # Use Azure DevOps Code Search API
+                files = await _search_azdo_files(agent, parsed)
                 expanded_files.extend(files)
-            # Check for folder (ends with slash)
-            elif azdo_path.endswith("/"):
-                folder = azdo_path[:-1]
-                files = await _list_azdo_folder_files(
-                    agent, folder, recursive=False, parsed=parsed
-                )
-                expanded_files.extend(files)
-            # Check for wildcard pattern
-            elif "*" in azdo_path:
-                parts = azdo_path.split("/")
-                pattern = parts[-1]
-                folder = "/".join(parts[:-1]) if len(parts) > 1 else "/"
-                files = await _list_azdo_folder_files(
-                    agent, folder, recursive=False, parsed=parsed
-                )
-                matching = [
-                    f for f in files if fnmatch.fnmatch(f.split("/")[-1], pattern)
-                ]
-                expanded_files.extend(matching)
             else:
-                # Direct azdo file path - keep original URI format
+                # Direct file path - keep original URI format
                 expanded_files.append(path)
         else:
             # Local file path
@@ -153,27 +136,34 @@ async def _list_local_folder_files(
         return []
 
 
-async def _list_azdo_folder_files(
-    agent: AgentConfig, folder_path: str, recursive: bool, parsed: Any
-) -> List[str]:
-    """List files in an Azure DevOps folder via Azure DevOps MCP server."""
+async def _search_azdo_files(agent: AgentConfig, parsed: Any) -> List[str]:
+    """
+    Search for files in Azure DevOps using Code Search API.
+
+    Uses the new azdo:/path:searchText format where:
+    - path is the scope (folder to search in)
+    - search_text is passed directly to Azure DevOps Code Search API
+    """
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            # Use search_azure_devops_files tool with path_pattern
             arguments = {
-                "path_pattern": folder_path,
-                "recursive": recursive,
+                "search_text": parsed.search_text,
+                "path": parsed.path,
             }
+            if parsed.project:
+                arguments["project"] = parsed.project
+            if parsed.repository:
+                arguments["repository"] = parsed.repository
             if parsed.branch:
                 arguments["branch"] = parsed.branch
 
             logger.info(
-                f"Listing Azure DevOps folder: {folder_path}, recursive={recursive}, args: {arguments}"
+                f"Azure DevOps Code Search: path={parsed.path}, search_text={parsed.search_text}"
             )
             response = await client.post(
                 f"{agent.azure_devops_mcp_url}/invoke",
                 json={
-                    "tool_name": "search_azure_devops_files",
+                    "tool_name": "search_azure_devops_code",
                     "arguments": arguments,
                 },
             )
@@ -182,65 +172,37 @@ async def _list_azdo_folder_files(
             logger.debug(f"Azure DevOps MCP response: {result}")
 
             if result.get("success"):
-                # Handle different response formats
                 result_data = result.get("result", {})
-                if isinstance(result_data, dict):
-                    # Check for 'results' (from search API) or 'files' key
-                    files_data = result_data.get(
-                        "results", result_data.get("files", [])
-                    )
-                elif isinstance(result_data, list):
-                    files_data = result_data
-                else:
-                    files_data = []
+                files_data = result_data.get("results", [])
 
-                # Extract file paths - format may vary
+                # Extract file paths and build azdo URIs
                 file_paths = []
                 for f in files_data:
                     if isinstance(f, dict):
-                        # Could be {"path": "..."} from search results
-                        path = f.get("path")
+                        path = f.get("file_path")
                         if path:
-                            # Filter: only include files directly in the folder if not recursive
-                            if recursive or _is_direct_child(folder_path, path):
-                                file_paths.append(path)
-                    elif isinstance(f, str):
-                        if recursive or _is_direct_child(folder_path, path):
-                            file_paths.append(f)
+                            file_paths.append(path)
 
-                logger.info(f"Found {len(file_paths)} files in {folder_path}")
-                # Reconstruct azdo URIs for the files
+                logger.info(
+                    f"Code Search found {len(file_paths)} files for: {parsed.search_text}"
+                )
+                # Reconstruct azdo URIs for the files (without search_text for direct access)
                 return [_build_azdo_uri(parsed, fp) for fp in file_paths]
             else:
                 logger.warning(f"Azure DevOps MCP returned success=False: {result}")
             return []
     except Exception as e:
-        logger.error(f"Failed to list Azure DevOps folder {folder_path}: {e}")
+        logger.error(f"Failed to search Azure DevOps: {e}")
         return []
 
 
-def _is_direct_child(folder_path: str, file_path: str) -> bool:
-    """Check if file_path is a direct child of folder_path (not in subdirectory)."""
-    # Normalize paths - remove leading/trailing slashes for comparison
-    folder = folder_path.strip("/")
-    file_p = file_path.strip("/")
-
-    # Check if file is under the folder
-    if not folder:
-        # Root folder - file should have no slashes (direct child of root)
-        return "/" not in file_p
-
-    if not file_p.startswith(folder + "/"):
-        return False
-
-    # Get the relative path after the folder
-    relative = file_p[len(folder) + 1 :]
-    # Direct child has no more slashes
-    return "/" not in relative
-
-
 def _build_azdo_uri(parsed: Any, file_path: str) -> str:
-    """Build an azdo: URI from parsed components and a file path."""
+    """
+    Build an azdo: URI from parsed components and a file path.
+
+    Note: This builds a direct file access URI (no search_text),
+    even if the original parsed URI had search_text.
+    """
     # Ensure file_path starts with /
     if not file_path.startswith("/"):
         file_path = "/" + file_path
@@ -252,11 +214,10 @@ def _build_azdo_uri(parsed: Any, file_path: str) -> str:
             uri += f"?branch={parsed.branch}"
         return uri
 
-    # Full format: azdo://project/repo/path or azdo://project/repo@branch/path
-    uri = f"azdo://{parsed.project}/{parsed.repository}"
+    # Full format: azdo://project/repo/path
+    uri = f"azdo://{parsed.project}/{parsed.repository}{file_path}"
     if parsed.branch:
-        uri += f"@{parsed.branch}"
-    uri += file_path
+        uri += f"?branch={parsed.branch}"
     return uri
 
 

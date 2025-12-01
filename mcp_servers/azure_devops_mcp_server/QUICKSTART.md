@@ -1,110 +1,73 @@
-# Azure DevOps MCP Server - Quick Start Guide
+# Azure DevOps MCP Server - Quick Start
 
-## Installation
+## 1. Install
 
-### Prerequisites
+```bash
+cd mcp_servers/azure_devops_mcp_server
+pip install -e .
+```
 
-You need Python 3.8+ with the azure-devops-mcp-server package installed. You can:
+## 2. Set PAT Token
 
-1. **Use a virtual environment** (recommended):
-   ```bash
-   cd C:\src\github\LLMCrawl
-   python -m venv venv
-   .\venv\Scripts\Activate.ps1  # Windows
-   # source venv/bin/activate    # macOS/Linux
-
-   cd azure_devops_mcp_server
-   pip install -e .
-   ```
-
-2. **Install globally** (not recommended):
-   ```bash
-   cd azure_devops_mcp_server
-   pip install -e .
-   ```
-
-3. **Use conda environment**:
-   ```bash
-   conda create -n azure-devops python=3.11
-   conda activate azure-devops
-   cd azure_devops_mcp_server
-   pip install -e .
-   ```
-
-**Find your Python path** (needed for VS Code config):
+Get a PAT from Azure DevOps with "Code (Read)" scope:
+https://dev.azure.com/{organization}/_usersSettings/tokens
 
 ```powershell
-# Windows PowerShell
-(Get-Command python).Source
-# Output example: C:\src\github\LLMCrawl\venv\Scripts\python.exe
+# PowerShell
+$env:AZURE_DEVOPS_PAT = "your_pat_token"
 ```
 
 ```bash
-# macOS/Linux
-which python
-# Output example: /Users/yourname/LLMCrawl/venv/bin/python
+# Bash
+export AZURE_DEVOPS_PAT=your_pat_token
 ```
 
-## Quick Testing
-
-Before integrating with VS Code or LLMCrawl, test the server with the command-line tool:
+## 3. Test Command Line
 
 ```bash
-cd azure_devops_mcp_server/tests
+cd tests
 
-# Set your PAT token
-export AZURE_DEVOPS_PAT=your_pat_token  # Linux/Mac
-$env:AZURE_DEVOPS_PAT = "your_pat_token"  # PowerShell
-
-# List files at root
-python test_search.py --filter "ext:txt"
+# Search files
+python test_search.py --filter "ext:json"
 
 # Get file content
-python test_search.py --get-file ".gitignore" --max-lines 20
+python test_search.py --get-file ".gitignore"
 
-# Search in specific path
-python test_search.py --path /src --filter "ext:yml" --max-results 10
-
-# See all options
-python test_search.py --help
+# Search in path
+python test_search.py --path /src --filter "HCS ext:md"
 ```
 
-See `tests/README.md` for detailed examples and filter syntax.
+## 4. Run HTTP Server
 
-## Usage
+```bash
+python -m azure_devops_client --mode http --port 8004
+```
 
-### 1. VS Code MCP Integration (stdio mode)
+Test:
+```bash
+curl http://localhost:8004/health
+curl http://localhost:8004/tools
+```
 
-The MCP server runs as a **separate Python process** that VS Code Copilot communicates with via stdio. Your workspace project can be **any language** - Python, Go, JavaScript, etc. The Python environment is only used to run the MCP server itself.
+## 5. VS Code Configuration
 
-**Step 1: Configure VS Code**
-
-Add to your **mcp.json** file in VS Code user folder (typically `%APPDATA%\Code\User\` on Windows):
+Add to `%APPDATA%\Code\User\mcp.json`:
 
 ```json
 {
-  "inputs": [],
   "servers": {
     "azure-devops": {
-      "command": "C:\\src\\github\\LLMCrawl\\venv\\Scripts\\python.exe",
+      "command": "C:\\path\\to\\python.exe",
       "args": [
-        "-m",
-        "azure_devops_client",
-        "--mode",
-        "stdio",
-        "--organization",
-        "microsoft",
-        "--project",
-        "OS",
-        "--repository",
-        "os.2020",
-        "--branch",
-        "official/rs_sparc_ctr_exp",
-        "--auth-mode",
-        "pat"
+        "-m", "azure_devops_client",
+        "--mode", "stdio",
+        "--organization", "microsoft",
+        "--project", "OS",
+        "--repository", "os.2020",
+        "--auth-mode", "pat"
       ],
       "env": {
-        "AZURE_DEVOPS_PAT": "YOUR_PAT_TOKEN_HERE"
+        "AZURE_DEVOPS_PAT": "YOUR_PAT_TOKEN"
       },
       "type": "stdio"
     }
@@ -112,384 +75,38 @@ Add to your **mcp.json** file in VS Code user folder (typically `%APPDATA%\Code\
 }
 ```
 
-**Important Notes:**
-- Use **absolute path** to Python executable (not just `"python"`)
-- Find your Python path with: `(Get-Command python).Source` (PowerShell) or `which python` (bash)
-- The Python environment only runs the MCP server - your workspace can be any language
-- PAT is more reliable than interactive auth for automated scenarios
-
-**Step 2: Restart VS Code**
-
-Close and reopen VS Code for the MCP server configuration to take effect.
-
-**Available Tools:**
-- `search_azure_devops_files` - Search files with flexible filters (path, file pattern, extension, keyword)
-- `get_azure_devops_file` - Get specific file content
-- `search_azure_devops_code` - Legacy code search (requires Azure DevOps Search service)
-
-**Example Prompts:**
-- "List all YAML files in the OS repository"
-- "Search for JSON files in src/MergedComponents"
-- "Show me the .gitignore file from the OS repository"
-- "Find all C++ files in test directories"
-- "Search for files containing 'Azure' in JSON files"
-
-### 2. LLMCrawl Integration (HTTP mode)
-
-**Step 1: Add to docker-compose.yml**
-
-The service is already added in `deploy/docker-compose.yml`:
-
-```yaml
-azure-devops-mcp-server:
-  build:
-    context: ../azure_devops_mcp_server
-    dockerfile: Dockerfile
-  ports:
-    - "8004:8004"
-  environment:
-    - MCP_MODE=http
-    - AZURE_DEVOPS_PAT=${AZURE_DEVOPS_PAT}
-```
-
-**Step 2: Set Environment Variable**
-
-Add to `.env` file:
-
-```bash
-AZURE_DEVOPS_PAT=your-personal-access-token
-```
-
-**Step 3: Start Services**
+## 6. Docker
 
 ```bash
 cd deploy
 docker-compose up -d azure-devops-mcp-server
 ```
 
-**Step 4: Test Endpoints**
+## Search Syntax
 
-```bash
-# Health check
-curl http://localhost:8004/health
+The `search_text` is passed directly to Azure DevOps Code Search API:
 
-# Get available tools
-curl http://localhost:8004/tools
+| Syntax | Example | Description |
+|--------|---------|-------------|
+| `ext:` | `ext:xml` | File extension |
+| `file:` | `file:*config*` | File name pattern |
+| `path:` | `path:Services` | Path contains |
+| `class:` | `class:MyClass` | Class name |
+| `func:` | `func:Main` | Function name |
+| `AND/OR/NOT` | `term1 AND ext:cpp` | Boolean operators |
 
-# Search code
-curl -X POST http://localhost:8004/invoke \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool_name": "search_azure_devops_code",
-    "arguments": {
-      "query": "authentication",
-      "top": 5
-    }
-  }'
+## HiChat URI Format
 
-# Get file content
-curl -X POST http://localhost:8004/invoke \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool_name": "get_azure_devops_file",
-    "arguments": {
-      "file_path": "src/main.cpp"
-    }
-  }'
+```
+azdo:/path:searchText
 ```
 
-### 3. Standalone Usage (Command Line)
-
-**Interactive Auth (stdio mode):**
-
-```bash
-python -m azure_devops_client \
-  --mode stdio \
-  --organization microsoft \
-  --project OS \
-  --repository os.2020 \
-  --auth-mode interactive
-```
-
-**PAT Auth (HTTP mode):**
-
-```bash
-export AZURE_DEVOPS_PAT=your-pat-token
-
-python -m azure_devops_client \
-  --mode http \
-  --port 8004 \
-  --organization microsoft \
-  --project OS \
-  --repository os.2020 \
-  --auth-mode pat
-```
-
-## Authentication Methods
-
-### Interactive OAuth (Recommended for VS Code)
-
-1. Run with `--auth-mode interactive`
-2. Device code will be displayed
-3. Browser opens automatically to https://microsoft.com/devicelogin
-4. Enter device code and authenticate
-5. Credentials cached in `~/.mcp_cache/azure_devops_token.bin`
-
-### Personal Access Token (Recommended for Docker)
-
-1. Create PAT in Azure DevOps:
-   - Go to User Settings → Personal Access Tokens
-   - Click "New Token"
-   - Select scopes: Code (Read), Project and Team (Read)
-   - Copy token
-
-2. Use with `--auth-mode pat` or set `AZURE_DEVOPS_PAT` environment variable
+Examples:
+- `azdo:/:ext:xml` - All XML files
+- `azdo:/src:HCS ext:md` - HCS markdown in src folder
 
 ## Troubleshooting
 
-### "Failed to authenticate"
-
-- Check PAT has correct scopes (Code Read, Project Read)
-- Verify organization/project names are correct
-- Try interactive auth instead of PAT
-
-### "Connection timeout"
-
-- Check network connectivity
-- Verify Azure DevOps URL is accessible
-- Check firewall/proxy settings
-
-### "Tool not found"
-
-- Ensure server is initialized: Check health endpoint
-- Verify VS Code MCP configuration
-- Check server logs for initialization errors
-
-### VS Code Not Finding Server
-
-- Verify `python` command is in PATH
-- Check VS Code Output → MCP for error messages
-- Try absolute path to Python executable in settings
-
-## Configuration Options
-
-| Option | Environment Variable | Default | Description |
-|--------|---------------------|---------|-------------|
-| `--mode` | `MCP_MODE` | `stdio` | Server mode: stdio or http |
-| `--port` | `MCP_PORT` | `8004` | HTTP server port |
-| `--host` | `MCP_HOST` | `0.0.0.0` | HTTP server host |
-| `--organization` | `AZURE_DEVOPS_ORG` | `microsoft` | Azure DevOps organization |
-| `--project` | `AZURE_DEVOPS_PROJECT` | `OS` | Azure DevOps project |
-| `--repository` | `AZURE_DEVOPS_REPO` | `os.2020` | Azure DevOps repository |
-| `--branch` | `AZURE_DEVOPS_BRANCH` | None | Default branch (None = repo default) |
-| `--max-results` | `AZURE_DEVOPS_MAX_RESULTS` | `50` | Default max results per query |
-| `--auth-mode` | `AZURE_DEVOPS_AUTH_MODE` | `interactive` | Auth mode: interactive or pat |
-| `--pat` | `AZURE_DEVOPS_PAT` | None | Personal Access Token |
-
-## Tool Usage Examples
-
-### search_azure_devops_files
-
-**List root files:**
-```json
-{
-  "tool_name": "search_azure_devops_files",
-  "arguments": {}
-}
-```
-
-**Search by extension (non-recursive - safe and fast):**
-```json
-{
-  "tool_name": "search_azure_devops_files",
-  "arguments": {
-    "extension": "json",
-    "max_results": 10
-  }
-}
-```
-
-**Search in specific path:**
-```json
-{
-  "tool_name": "search_azure_devops_files",
-  "arguments": {
-    "path_pattern": "src/MergedComponents",
-    "extension": "cpp"
-  }
-}
-```
-
-**Deep recursive search with glob patterns:**
-```json
-{
-  "tool_name": "search_azure_devops_files",
-  "arguments": {
-    "path_pattern": "**/test/**",
-    "file_pattern": "*test*.cpp",
-    "recursive": true,
-    "max_results": 20
-  }
-}
-```
-
-**Search with file pattern:**
-```json
-{
-  "tool_name": "search_azure_devops_files",
-  "arguments": {
-    "file_pattern": "azure-pipelines*",
-    "extension": "yml",
-    "recursive": true
-  }
-}
-```
-
-**Keyword search in content (requires recursive):**
-```json
-{
-  "tool_name": "search_azure_devops_files",
-  "arguments": {
-    "extension": "json",
-    "keyword": "Azure",
-    "recursive": true,
-    "max_results": 10
-  }
-}
-```
-
-### get_azure_devops_file
-
-**Get file from root:**
-```json
-{
-  "tool_name": "get_azure_devops_file",
-  "arguments": {
-    "file_path": ".gitignore"
-  }
-}
-```
-
-**Get file from specific path:**
-```json
-{
-  "tool_name": "get_azure_devops_file",
-  "arguments": {
-    "file_path": "src/MergedComponents/config.json"
-  }
-}
-```
-
-**Get file from specific branch:**
-```json
-{
-  "tool_name": "get_azure_devops_file",
-  "arguments": {
-    "file_path": "README.md",
-    "branch": "main"
-  }
-}
-```
-
-## Filter Pattern Syntax
-
-### Path Patterns
-- `src/` - Files in src directory (root level only, non-recursive)
-- `src/MergedComponents` - Files in specific subdirectory
-- `**/test/**` - Files in any test directory at any depth (requires `recursive: true`)
-- `**/Doc**/Framework/**` - Complex glob pattern (requires `recursive: true`)
-
-### File Patterns
-- `*.cpp` - All C++ files
-- `azure-*` - Files starting with "azure-"
-- `*test*` - Files containing "test" in name
-- `README.md` - Exact filename match
-
-### Extensions
-- `json` - JSON files
-- `yml` - YAML files
-- `cpp` - C++ files
-- `cs` - C# files
-
-### Keywords (requires recursive=true)
-- `Azure` - Files containing the word "Azure"
-- `connection timeout` - Phrase search
-- `Http*Request` - With wildcards
-
-### Combining Filters
-All filters work together with AND logic:
-```json
-{
-  "path_pattern": "src/",
-  "file_pattern": "*service*",
-  "extension": "cs",
-  "recursive": true
-}
-```
-Finds: C# files with "service" in the name, located under src/, searching recursively.
-
-## Performance Tips
-
-1. **Use non-recursive search by default** - Much faster for large repos
-2. **Be specific with paths** - Narrow down search scope
-3. **Use extension filters** - Reduces files to examine
-4. **Set reasonable max_results** - Limit results for faster queries
-5. **Use file patterns** - More efficient than keyword search
-6. **Keyword search is expensive** - Only use when necessary, always with recursive=true
-
-## Command-Line Testing
-
-For quick testing without MCP integration:
-
-```bash
-cd azure_devops_mcp_server/tests
-
-# List root files
-python test_search.py --filter "ext:txt"
-
-# Search in path
-python test_search.py --path /src/MergedComponents --filter "ext:json" --max-results 10
-
-# Get file content
-python test_search.py --get-file ".gitignore" --max-lines 20
-
-# Deep search with glob
-python test_search.py --path "**/test/**" --filter "ext:cpp" --recursive
-
-# Verbose output
-python test_search.py --filter "ext:yml" --verbose
-
-# Different branch
-python test_search.py --branch main --filter "ext:md"
-```
-
-See `tests/README.md` for complete usage guide.
-
-## Next Steps
-
-- Review `README.md` for comprehensive API documentation
-- Check `tests/README.md` for command-line tool examples
-- See `IMPLEMENTATION.md` for technical details
-- Explore `examples/` for integration patterns
-{
-  "tool_name": "get_azure_devops_file",
-  "arguments": {
-    "file_path": "src/kernel/main.cpp",
-    "branch": "main"
-  }
-}
-```
-
-## Next Steps
-
-1. Configure for your environment
-2. Test authentication
-3. Try example searches
-4. Integrate with your workflow
-5. Check README.md for advanced usage
-
-## Support
-
-- Issues: GitHub Issues
-- Documentation: README.md
-- Azure DevOps API: https://learn.microsoft.com/en-us/rest/api/azure/devops/
+- **Auth failed**: Check PAT is valid with "Code (Read)" scope
+- **No results**: Verify search syntax, try `ext:json` first
+- **Timeout**: Check network connectivity to Azure DevOps

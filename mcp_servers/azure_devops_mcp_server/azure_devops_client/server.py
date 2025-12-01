@@ -2,6 +2,10 @@
 Azure DevOps MCP Server
 
 Supports both stdio transport (for VS Code) and HTTP REST API (for LLMCrawl).
+
+This server exposes Azure DevOps Code Search API directly.
+Search patterns match Azure DevOps Code Search API syntax:
+https://learn.microsoft.com/en-us/rest/api/azure/devops/search/code-search-results/fetch-code-search-results
 """
 
 import json
@@ -48,134 +52,60 @@ class AzureDevOpsMCPServer:
             {
                 "name": "search_azure_devops_code",
                 "description": (
-                    "Search for code in Azure DevOps repository. "
-                    "Use this when user asks to find, search, or "
-                    "locate code, files, functions, or classes in "
-                    "the repository. Returns file paths and code "
-                    "previews matching the query."
+                    "Search for code/files in Azure DevOps repository using Azure DevOps Code Search API. "
+                    "This is the primary tool for finding files and code in Azure DevOps repositories.\n\n"
+                    "The search_text is passed DIRECTLY to Azure DevOps Code Search API. "
+                    "Use Azure DevOps search syntax in search_text:\n\n"
+                    "**Search Syntax Examples:**\n"
+                    "- File Extension: `mySearchTerm ext:xml` or `ext:cpp`\n"
+                    "- File Name: `file:config` or `file:*config.xml`\n"
+                    "- Path keyword: `mySearchTerm path:Services`\n"
+                    "- Boolean Logic: `mySearchTerm AND NOT ext:json`\n"
+                    "- Code Element: `class:MyClass` (C#, Java) or `func:MyFunction`\n"
+                    "- Aggregate: `(term1 OR term2) ext:xml`\n"
+                    "- File name specific: `(term1 OR term2) file:*config.xml`\n"
+                    "- Find all XML files: `ext:xml`\n"
+                    "- Find specific file: `file:azure-pipelines.yml`\n"
+                    "- Find files with pattern: `file:*manifest*.xml`\n\n"
+                    "Use the `path` parameter to limit search scope to a specific folder."
                 ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "query": {
+                        "search_text": {
                             "type": "string",
                             "description": (
-                                "Search query (e.g., 'manifest builder', " "'OneCore')"
+                                "Search query text passed directly to Azure DevOps Code Search API. "
+                                "Include filters in this string using Azure DevOps syntax:\n"
+                                "- keyword (search by keyword)\n"
+                                "- ext:xml (file extension)\n"
+                                "- file:config or file:*pattern* (file name)\n"
+                                "- path:folder (path contains)\n"
+                                "- class:ClassName or func:FuncName (code elements)\n"
+                                "- AND, OR, NOT (boolean operators)\n"
+                                "Examples: 'ext:xml', 'manifest ext:xml', 'file:*config*.json', "
+                                "'CreateWindow AND ext:cpp'"
                             ),
                         },
-                        "file_type": {
+                        "path": {
                             "type": "string",
                             "description": (
-                                "Filter by file extension "
-                                "(e.g., '*.cpp', '*.h', '*.cs')"
+                                "Path scope - folder path to limit search scope. "
+                                "Must be exact folder path (no wildcards). "
+                                "Examples: '/src', '/vm/compute', '/Nanoserver/merged'. "
+                                "Default: '/' (entire repository)"
                             ),
                         },
                         "max_results": {
                             "type": "integer",
                             "description": "Maximum number of results (default: 20)",
                         },
-                    },
-                    "required": ["query"],
-                },
-            },
-            {
-                "name": "search_azure_devops_files",
-                "description": (
-                    "Search for files in Azure DevOps repository "
-                    "with flexible filtering. "
-                    "⚠️ IMPORTANT: Searches only root directory by "
-                    "default (non-recursive). "
-                    "Set recursive=true to search subdirectories in "
-                    "large repos. "
-                    "\n\nSupports path patterns, file name patterns, "
-                    "extensions, and keyword search. "
-                    "Use this when user wants to list, find, or "
-                    "filter files by name, location, or type. "
-                    "Returns list of file paths matching the criteria. "
-                    "\n\nFilter patterns:\n"
-                    "- Path: 'src/' or 'path:src/Services' or "
-                    "'path:**/pipelines/**' (** = any depth, "
-                    "requires recursive=true)\n"
-                    "- File: 'file:azure-pipelines*' or "
-                    "'file:*test*' or 'file:README.md'\n"
-                    "- Extension: 'ext:yml' or 'ext:cs' or "
-                    "'ext:json'\n"
-                    "- Keyword: Search in file content "
-                    "(use wildcards: 'Azure*', '*timeout', "
-                    "requires recursive=true)\n"
-                    "- Glob patterns: ** (any depth), * (any chars), "
-                    "? (single char)\n"
-                    "\nExamples:\n"
-                    "- List root files: (no filters)\n"
-                    "- Root YAML files: ext:yml\n"
-                    "- Recursive search: ext:cs recursive:true\n"
-                    "- Deep search: path:**/pipelines/** ext:yml "
-                    "recursive:true"
-                ),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "path_pattern": {
-                            "type": "string",
-                            "description": (
-                                "Path filter pattern. Examples: "
-                                "'src/', 'path:src/Services', "
-                                "'path:**/pipelines/**'. "
-                                "Note: ** patterns require recursive=true."
-                            ),
-                        },
-                        "file_pattern": {
-                            "type": "string",
-                            "description": (
-                                "File name pattern (matches only "
-                                "filename, not path). Examples: "
-                                "'file:azure-pipelines*', 'file:*test*', "
-                                "'file:README.md', '*service*.cs'. "
-                                "Supports * and ? wildcards."
-                            ),
-                        },
-                        "extension": {
-                            "type": "string",
-                            "description": (
-                                "File extension filter. Examples: "
-                                "'ext:yml', 'ext:json', 'ext:cs', 'yml', "
-                                "'.yml'"
-                            ),
-                        },
-                        "keyword": {
-                            "type": "string",
-                            "description": (
-                                "Keyword to search in file content. "
-                                "Supports wildcards. Examples: 'Azure', "
-                                "'connection timeout', 'Http*Request'. "
-                                "Uses Azure DevOps Code Search API "
-                                "(fast, indexed search)."
-                            ),
-                        },
                         "branch": {
                             "type": "string",
-                            "description": (
-                                "Branch name (default: configured " "default branch)"
-                            ),
-                        },
-                        "max_results": {
-                            "type": "integer",
-                            "description": (
-                                "Maximum number of results " "(default: configured max)"
-                            ),
-                        },
-                        "recursive": {
-                            "type": "boolean",
-                            "description": (
-                                "Search subdirectories recursively. "
-                                "Default: false (root only). "
-                                "Set to true for deep searches in large "
-                                "repos (slower but thorough)."
-                            ),
-                            "default": False,
+                            "description": "Branch name (default: configured default branch)",
                         },
                     },
-                    "required": [],
+                    "required": ["search_text"],
                 },
             },
             {
@@ -199,9 +129,7 @@ class AzureDevOpsMCPServer:
                         },
                         "branch": {
                             "type": "string",
-                            "description": (
-                                "Branch name (default: repository " "default branch)"
-                            ),
+                            "description": "Branch name (default: repository default branch)",
                         },
                     },
                     "required": ["file_path"],
@@ -209,18 +137,15 @@ class AzureDevOpsMCPServer:
             },
         ]
 
-    async def initialize(self, use_interactive_auth: bool = True) -> bool:
+    async def initialize(self) -> bool:
         """
-        Initialize and authenticate the server.
-
-        Args:
-            use_interactive_auth: Use interactive OAuth flow
+        Initialize and authenticate the server using PAT.
 
         Returns:
             True if initialization successful
         """
         logger.info("Initializing Azure DevOps MCP Server...")
-        success = await self.client.authenticate(use_interactive=use_interactive_auth)
+        success = await self.client.authenticate()
 
         if success:
             # Test connection
@@ -254,8 +179,6 @@ class AzureDevOpsMCPServer:
         try:
             if tool_name == "search_azure_devops_code":
                 return await self._handle_search_code(arguments)
-            elif tool_name == "search_azure_devops_files":
-                return await self._handle_search_files(arguments)
             elif tool_name == "get_azure_devops_file":
                 return await self._handle_get_file(arguments)
             else:
@@ -267,59 +190,29 @@ class AzureDevOpsMCPServer:
 
     async def _handle_search_code(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Handle code search tool."""
-        query = arguments.get("query")
-        file_type = arguments.get("file_type")
+        search_text = arguments.get("search_text")
+        path = arguments.get("path", "/")
         max_results = arguments.get("max_results", 20)
+        branch = arguments.get("branch", "")
         project = arguments.get("project")
         repository = arguments.get("repository")
 
-        if not query:
-            return {"error": "query parameter is required"}
+        if not search_text:
+            return {"error": "search_text parameter is required"}
 
         results = await self.client.search_code(
-            query, file_type, max_results, project=project, repository=repository
-        )
-
-        return {
-            "success": True,
-            "query": query,
-            "results_count": len(results),
-            "results": results,
-        }
-
-    async def _handle_search_files(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle file search tool with flexible filtering."""
-        path_pattern = arguments.get("path_pattern")
-        file_pattern = arguments.get("file_pattern")
-        extension = arguments.get("extension")
-        keyword = arguments.get("keyword")
-        branch = arguments.get("branch")
-        max_results = arguments.get("max_results")
-        recursive = arguments.get("recursive", False)
-        project = arguments.get("project")
-        repository = arguments.get("repository")
-
-        results = await self.client.search_files(
-            path_pattern=path_pattern,
-            file_pattern=file_pattern,
-            extension=extension,
-            keyword=keyword,
-            branch=branch,
+            search_text=search_text,
             max_results=max_results,
-            recursive=recursive,
+            branch=branch,
+            path=path,
             project=project,
             repository=repository,
         )
 
         return {
             "success": True,
-            "filters": {
-                "path_pattern": path_pattern,
-                "file_pattern": file_pattern,
-                "extension": extension,
-                "keyword": keyword,
-                "recursive": recursive,
-            },
+            "search_text": search_text,
+            "path_scope": path,
             "results_count": len(results),
             "results": results,
         }

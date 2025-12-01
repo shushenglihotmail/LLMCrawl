@@ -46,12 +46,6 @@ def main():
         default=os.getenv("MCP_ROOT_FOLDER", "/data/files"),
         help="Root folder for file operations",
     )
-    parser.add_argument(
-        "--vector-db-path",
-        type=str,
-        default=os.getenv("MCP_VECTOR_DB_PATH", "/data/mcp_vector_db"),
-        help="Path to vector database",
-    )
 
     args = parser.parse_args()
 
@@ -60,22 +54,20 @@ def main():
         from .stdio_server import run_stdio_server
 
         logger.info("Starting Local Access MCP Server in stdio mode")
-        asyncio.run(run_stdio_server(args.root_folder, args.vector_db_path))
+        asyncio.run(run_stdio_server(args.root_folder))
     else:
         # Run in HTTP mode for LLMCrawl
         import uvicorn
 
-        from .main import ROOT_FOLDER, VECTOR_DB_PATH, app
+        from .main import ROOT_FOLDER, app
 
         # Override config with args
         os.environ["MCP_ROOT_FOLDER"] = args.root_folder
-        os.environ["MCP_VECTOR_DB_PATH"] = args.vector_db_path
 
         logger.info(
             f"Starting Local Access MCP Server in HTTP mode on {args.host}:{args.port}"
         )
         logger.info(f"Root folder: {args.root_folder}")
-        logger.info(f"Vector DB path: {args.vector_db_path}")
 
         uvicorn.run(app, host=args.host, port=args.port)
 
