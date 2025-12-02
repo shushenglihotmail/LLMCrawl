@@ -7,10 +7,11 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import httpx
 
+from ..agents.windows_composition import get_composition_client
 from ..utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from ..utils.logging import log_tool_call, log_tool_result
 
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 class ToolHandler:
     """Handles tool function calls and orchestrates the RAG pipeline."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.crawler_url = "http://crawler:8001"
         self.indexer_url = "http://indexer:8002"
         self.mcp_server_url = os.getenv("MCP_SERVER_URL", "http://mcp-server:8003")
@@ -74,6 +75,9 @@ class ToolHandler:
                 result = await self._handle_azure_devops_tool(
                     tool_name, arguments, request_id
                 )
+                success = True
+            elif tool_name == "query_composition_db":
+                result = await self._handle_composition_tool(arguments, request_id)
                 success = True
             else:
                 result = {"error": f"Unknown tool: {tool_name}"}
@@ -453,7 +457,11 @@ class ToolHandler:
             except httpx.TimeoutException as e:
                 logger.error(f"Azure DevOps MCP tool '{tool_name}' timed out: {e}")
                 return {
-                    "error": f"Tool '{tool_name}' timed out. Try using search_azure_devops_code instead of search_azure_devops_files for large directories."
+                    "error": (
+                        f"Tool '{tool_name}' timed out. Try using "
+                        "search_azure_devops_code instead of "
+                        "search_azure_devops_files for large directories."
+                    )
                 }
             except httpx.RequestError as e:
                 logger.error(f"Azure DevOps MCP server request failed: {e}")
@@ -465,6 +473,30 @@ class ToolHandler:
                 return {
                     "error": f"Azure DevOps MCP server error: {e.response.status_code}"
                 }
+
+    async def _handle_composition_tool(
+        self, arguments: Dict[str, Any], request_id: str
+    ) -> Dict[str, Any]:
+        """
+        Handle Windows Composition Database query tool.
+        """
+        query = arguments.get("query")
+        if not query:
+            return {"error": "Query parameter is required"}
+
+        client = get_composition_client()
+        if not client:
+            return {
+                "error": "Windows Composition Bridge not configured. "
+                "Set WIN_COMP_BRIDGE_URL environment variable."
+            }
+
+        try:
+            result_json = await client.run_query(query)
+            return {"result": result_json}
+        except Exception as e:
+            logger.error(f"Composition query failed: {e}")
+            return {"error": str(e)}
 
 
 # Global tool handler

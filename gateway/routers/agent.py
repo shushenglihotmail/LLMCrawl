@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -158,7 +158,8 @@ async def _search_azdo_files(agent: AgentConfig, parsed: Any) -> List[str]:
                 arguments["branch"] = parsed.branch
 
             logger.info(
-                f"Azure DevOps Code Search: path={parsed.path}, search_text={parsed.search_text}"
+                f"Azure DevOps Code Search: path={parsed.path}, "
+                f"search_text={parsed.search_text}"
             )
             response = await client.post(
                 f"{agent.azure_devops_mcp_url}/invoke",
@@ -184,7 +185,8 @@ async def _search_azdo_files(agent: AgentConfig, parsed: Any) -> List[str]:
                             file_paths.append(path)
 
                 logger.info(
-                    f"Code Search found {len(file_paths)} files for: {parsed.search_text}"
+                    f"Code Search found {len(file_paths)} files for: "
+                    f"{parsed.search_text}"
                 )
                 # Reconstruct azdo URIs for the files (without search_text for direct access)
                 return [_build_azdo_uri(parsed, fp) for fp in file_paths]
@@ -229,14 +231,14 @@ def _build_azdo_uri(parsed: Any, file_path: str) -> str:
 def _extract_content_from_response(file_data: Dict[str, Any]) -> str:
     """Extract content from MCP response, handling various formats."""
     if "content" in file_data:
-        return file_data["content"]
+        return str(file_data["content"])
     elif "result" in file_data:
         result = file_data["result"]
         if isinstance(result, dict):
-            return result.get("content", "")
+            return str(result.get("content", ""))
         elif isinstance(result, list) and len(result) > 0:
             if isinstance(result[0], dict) and "text" in result[0]:
-                return result[0]["text"]
+                return str(result[0]["text"])
             return str(result[0])
         return str(result)
     return ""
@@ -870,6 +872,49 @@ async def _load_tools(
         else:
             logger.info("Exposed crawler tool to LLM")
 
+    # Windows Composition Tool
+    # Only expose if configured via environment variable AND requested by client
+    if os.getenv("WIN_COMP_BRIDGE_URL") and expose_to_llm.get(
+        "windows_composition", False
+    ):
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "query_composition_db",
+                    "description": (
+                        "Query the Windows Composition Database (WCD) via the "
+                        "global $d object. WCD models the relationship between "
+                        "Editions, Packages, Assemblies, Files, and APIs. "
+                        "Common entry points on $d include: Editions, Packages, "
+                        "Assemblies, BuildFiles, RegistryValues, Apis, "
+                        "ProductGroups. You can use methods like "
+                        "GetInclusionGraph() to trace dependencies."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": (
+                                    "The PowerShell command snippet accessing $d. "
+                                    "Examples: "
+                                    "$d.Editions['Professional'].AssemblyFilesDeep, "
+                                    "$d.Packages['*ServerCore*'], "
+                                    "$($d.BuildFiles['*file.dll'])."
+                                    "GetInclusionGraph($d.Editions['Professional']), "
+                                    "$d.RegistryValues['HKEY_CLASSES_ROOT\\*']."
+                                    "ContainingPackages"
+                                ),
+                            }
+                        },
+                        "required": ["query"],
+                    },
+                },
+            }
+        )
+        logger.info("Exposed Windows Composition tool to LLM")
+
     return tools
 
 
@@ -899,12 +944,13 @@ async def _execute_llm_with_tools(
 
     # Initial LLM call
     response = await llm_client.chat_completion(
-        model=request.model,
+        model=request.model or "gpt-4",
         messages=messages,
         tools=tools if tools else None,
         tool_choice="auto" if tools else "none",
         max_tokens=request.max_tokens,
     )
+    response = cast(Dict[str, Any], response)
 
     logger.info(
         f"Initial LLM response - has tool_calls: {bool(response.get('tool_calls'))}"
@@ -947,7 +993,7 @@ async def _execute_llm_with_tools(
         # Next LLM call
         response = await llm_client.chat_completion(
             messages=messages,
-            model=request.model,
+            model=request.model or "gpt-4",
             tools=tools,
             tool_choice="auto",
             max_tokens=request.max_tokens,
@@ -1133,7 +1179,7 @@ async def execute(request: UnifiedWorkflowRequest):
 
 
 @router.get("/health")
-async def health_check():
+async def health_check() -> Any:
     """Agent health check."""
     try:
         agent = get_agent_config()

@@ -1367,6 +1367,9 @@ llmcrawl/
 - **[MS Auth Tools](tools/msauth/README.md)** - One-command authentication setup
 - **[Crawl Strategy & Limitations](docs/CRAWL_STRATEGY.md)** - How crawling works, known limitations, workarounds
 
+### Windows Composition Tool
+- **[Windows Composition Tool](docs/WINDOWS_COMPOSITION_TOOL.md)** - Guide for using the Windows Composition Database tool
+
 ### Testing
 - **[Testing Guide](docs/TESTING_INDEXING.md)** - Unit and integration tests
 
