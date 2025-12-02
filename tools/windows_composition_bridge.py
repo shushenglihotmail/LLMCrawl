@@ -1,8 +1,11 @@
+import atexit
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
+from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
@@ -119,6 +122,24 @@ class PowerShellSession:
             logger.error(f"Failed to start PowerShell session: {e}")
             self.process = None
 
+    def terminate(self) -> None:
+        """Terminate the PowerShell session."""
+        if self.process:
+            logger.info("Terminating PowerShell session...")
+            try:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    logger.warning("PowerShell didn't terminate, killing...")
+                    self.process.kill()
+                    self.process.wait(timeout=2)
+            except Exception as e:
+                logger.error(f"Error terminating PowerShell: {e}")
+            finally:
+                self.process = None
+            logger.info("PowerShell session terminated.")
+
     def run_query(self, script_block: str) -> str:
         """
         Runs a PS command and returns JSON string.
@@ -178,8 +199,20 @@ class PowerShellSession:
 session: Optional[PowerShellSession] = None
 
 
-@app.on_event("startup")
-async def startup_event() -> None:
+def cleanup_session() -> None:
+    """Cleanup function to terminate PowerShell on exit."""
+    global session
+    if session:
+        session.terminate()
+
+
+# Register cleanup for normal exit
+atexit.register(cleanup_session)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup/shutdown."""
     global session
     share_cmd = os.getenv("WIN_COMP_SHARE_CMD")
     if not share_cmd:
@@ -187,6 +220,12 @@ async def startup_event() -> None:
         sys.exit(1)
 
     session = PowerShellSession(share_cmd)
+    yield
+    # Shutdown
+    cleanup_session()
+
+
+app = FastAPI(title="Windows Composition Bridge", lifespan=lifespan)
 
 
 @app.post("/query")
@@ -207,6 +246,15 @@ async def health() -> dict:
 
 
 if __name__ == "__main__":
+    # Handle Ctrl+C gracefully
+    def signal_handler(sig, frame):
+        logger.info("Received shutdown signal, cleaning up...")
+        cleanup_session()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     print("Starting Windows Composition Bridge...")
     print("Make sure to set WIN_COMP_SHARE_CMD environment variable.")
     uvicorn.run(app, host="0.0.0.0", port=8005)

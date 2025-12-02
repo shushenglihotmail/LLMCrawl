@@ -302,13 +302,23 @@ async def _gather_files(
                         },
                     )
                 else:
-                    # Local file
-                    logger.info(f"Reading local file: {file_path}")
+                    # Local file - normalize path for MCP server
+                    # The MCP server has C:/os mounted as /data/files
+                    # Paths like /tmp/file.md should become tmp/file.md (relative)
+                    # so MCP resolves them as /data/files/tmp/file.md
+                    normalized_path = file_path
+                    if file_path.startswith("/") and not file_path.startswith("/data/"):
+                        # Convert absolute Unix-style path to relative for MCP
+                        normalized_path = file_path.lstrip("/")
+                        logger.info(
+                            f"Normalized path '{file_path}' -> '{normalized_path}' for MCP"
+                        )
+                    logger.info(f"Reading local file via MCP: {normalized_path}")
                     response = await client.post(
                         f"{agent.mcp_url}/invoke",
                         json={
                             "tool_name": "read_local_file",
-                            "arguments": {"file_path": file_path},
+                            "arguments": {"file_path": normalized_path},
                         },
                     )
 
