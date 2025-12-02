@@ -42,7 +42,7 @@ class AzureDevOpsMCPServer:
             max_results: Default max results per query (default: 50)
         """
         self.client = AzureDevOpsClient(
-            organization, project, repository, branch, pat, max_results
+            organization, project, repository, branch, pat or "", max_results
         )
         self.tools = self._define_tools()
 
@@ -52,10 +52,11 @@ class AzureDevOpsMCPServer:
             {
                 "name": "search_azure_devops_code",
                 "description": (
-                    "Search for code/files in Azure DevOps repository using Azure DevOps Code Search API. "
-                    "This is the primary tool for finding files and code in Azure DevOps repositories.\n\n"
-                    "The search_text is passed DIRECTLY to Azure DevOps Code Search API. "
-                    "Use Azure DevOps search syntax in search_text:\n\n"
+                    "Search for code/files in Azure DevOps repository using Azure "
+                    "DevOps Code Search API. This is the primary tool for finding "
+                    "files and code in Azure DevOps repositories.\n\n"
+                    "The search_text is passed DIRECTLY to Azure DevOps Code Search "
+                    "API. Use Azure DevOps search syntax in search_text:\n\n"
                     "**Search Syntax Examples:**\n"
                     "- File Extension: `mySearchTerm ext:xml` or `ext:cpp`\n"
                     "- File Name: `file:config` or `file:*config.xml`\n"
@@ -67,7 +68,8 @@ class AzureDevOpsMCPServer:
                     "- Find all XML files: `ext:xml`\n"
                     "- Find specific file: `file:azure-pipelines.yml`\n"
                     "- Find files with pattern: `file:*manifest*.xml`\n\n"
-                    "Use the `path` parameter to limit search scope to a specific folder."
+                    "Use the `path` parameter to limit search scope to a specific "
+                    "folder."
                 ),
                 "inputSchema": {
                     "type": "object",
@@ -75,16 +77,17 @@ class AzureDevOpsMCPServer:
                         "search_text": {
                             "type": "string",
                             "description": (
-                                "Search query text passed directly to Azure DevOps Code Search API. "
-                                "Include filters in this string using Azure DevOps syntax:\n"
+                                "Search query text passed directly to Azure DevOps "
+                                "Code Search API. Include filters in this string "
+                                "using Azure DevOps syntax:\n"
                                 "- keyword (search by keyword)\n"
                                 "- ext:xml (file extension)\n"
                                 "- file:config or file:*pattern* (file name)\n"
                                 "- path:folder (path contains)\n"
                                 "- class:ClassName or func:FuncName (code elements)\n"
                                 "- AND, OR, NOT (boolean operators)\n"
-                                "Examples: 'ext:xml', 'manifest ext:xml', 'file:*config*.json', "
-                                "'CreateWindow AND ext:cpp'"
+                                "Examples: 'ext:xml', 'manifest ext:xml', "
+                                "'file:*config*.json', 'CreateWindow AND ext:cpp'"
                             ),
                         },
                         "path": {
@@ -92,7 +95,8 @@ class AzureDevOpsMCPServer:
                             "description": (
                                 "Path scope - folder path to limit search scope. "
                                 "Must be exact folder path (no wildcards). "
-                                "Examples: '/src', '/vm/compute', '/Nanoserver/merged'. "
+                                "Examples: '/src', '/vm/compute', "
+                                "'/Nanoserver/merged'. "
                                 "Default: '/' (entire repository)"
                             ),
                         },
@@ -102,7 +106,26 @@ class AzureDevOpsMCPServer:
                         },
                         "branch": {
                             "type": "string",
-                            "description": "Branch name (default: configured default branch)",
+                            "description": (
+                                "Branch name (default: configured default branch)"
+                            ),
+                        },
+                        "project": {
+                            "type": "string",
+                            "description": (
+                                "Azure DevOps project name override. "
+                                "Use this to search in a different project than the "
+                                "default. Example: 'OS', 'OneCore'"
+                            ),
+                        },
+                        "repository": {
+                            "type": "string",
+                            "description": (
+                                "Azure DevOps repository name override. "
+                                "Use this to search in a different repository than "
+                                "the default. Example: 'os.2020', "
+                                "'WindowsCompositionData'"
+                            ),
                         },
                     },
                     "required": ["search_text"],
@@ -124,12 +147,32 @@ class AzureDevOpsMCPServer:
                             "description": (
                                 "Absolute path to the file in repository, "
                                 "MUST start with forward slash. "
-                                "Examples: '/src/main.cpp', '/Nanoserver/merged/pkggen/file.json', '/.gitignore'"
+                                "Examples: '/src/main.cpp', "
+                                "'/Nanoserver/merged/pkggen/file.json', '/.gitignore'"
                             ),
                         },
                         "branch": {
                             "type": "string",
-                            "description": "Branch name (default: repository default branch)",
+                            "description": (
+                                "Branch name (default: repository default branch)"
+                            ),
+                        },
+                        "project": {
+                            "type": "string",
+                            "description": (
+                                "Azure DevOps project name override. "
+                                "Use this to search in a different project than the "
+                                "default. Example: 'OS', 'OneCore'"
+                            ),
+                        },
+                        "repository": {
+                            "type": "string",
+                            "description": (
+                                "Azure DevOps repository name override. "
+                                "Use this to search in a different repository than "
+                                "the default. Example: 'os.2020', "
+                                "'WindowsCompositionData'"
+                            ),
                         },
                     },
                     "required": ["file_path"],
@@ -244,7 +287,7 @@ class AzureDevOpsMCPServer:
         logger.info("Starting stdio transport...")
 
         # Initialize server
-        if not await self.initialize(use_interactive_auth=True):
+        if not await self.initialize():
             sys.exit(1)
 
         # Main message loop - wait for initialize request from client

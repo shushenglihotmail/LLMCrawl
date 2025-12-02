@@ -268,6 +268,43 @@ cd deploy
 docker compose up -d --force-recreate
 ```
 
+### Service Management
+
+**Restart Services:**
+
+Use the `restart-services.ps1` script to restart services. This is useful for applying configuration changes or updates.
+
+- **Restart all services (recreate containers):**
+  ```powershell
+  .\scripts\restart-services.ps1
+  ```
+
+- **Rebuild and restart all services (apply code changes):**
+  ```powershell
+  .\scripts\restart-services.ps1 -Build
+  ```
+
+- **Restart specific services:**
+  ```powershell
+  # Restart only the gateway
+  .\scripts\restart-services.ps1 -Service gateway
+
+  # Restart gateway and crawler
+  .\scripts\restart-services.ps1 -Service gateway,crawler
+  ```
+
+- **Full rebuild (no cache):**
+  ```powershell
+  .\scripts\restart-services.ps1 -Full
+  ```
+
+**Available Service Names:**
+- `gateway`
+- `crawler`
+- `indexer`
+- `mcp-server`
+- `azure-devops-mcp-server`
+
 **Unix/Linux/macOS:**
 ```bash
 # Complete setup
