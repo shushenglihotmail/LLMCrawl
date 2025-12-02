@@ -889,7 +889,16 @@ async def _load_tools(
                         "Common entry points on $d include: Editions, Packages, "
                         "Assemblies, BuildFiles, RegistryValues, Apis, "
                         "ProductGroups. You can use methods like "
-                        "GetInclusionGraph() to trace dependencies."
+                        "GetInclusionGraph() to trace dependencies. "
+                        "The output is a text-based tree view, not JSON. "
+                        "Example output for GetInclusionGraph:\n"
+                        "(EDITION):ServerDatacenterNano\n"
+                        "  (PACKAGE):Microsoft-Windows-ServerDatacenterNanoEdition\n"
+                        "    (PACKAGE):Microsoft-Windows-EditionPack-ServerDatacenterNano\n"
+                        "      (FEATUREPACKAGE):Microsoft-Win2\n"
+                        "        (PACKAGE):Runlevel-Win1\n"
+                        "          (COMPONENT):Microsoft-Windows-Csrss\n"
+                        "            (NTTREE):csrss.exe"
                     ),
                     "parameters": {
                         "type": "object",

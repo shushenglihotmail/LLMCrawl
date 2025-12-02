@@ -82,15 +82,38 @@ class PowerShellSession:
                 shell_cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 encoding="utf-8",  # Windows might need cp1252 or utf-8 depending on config
             )
 
-            # Give it a moment to load the DB
-            time.sleep(5)
-            logger.info("PowerShell Environment Ready.")
+            # Handshake to clear startup noise and ensure session is ready
+            handshake = "BRIDGE_READY"
+            logger.info("Waiting for PowerShell session to initialize...")
+
+            if self.process.stdin:
+                # Send the handshake command
+                self.process.stdin.write(f'Write-Output "{handshake}"\n')
+                self.process.stdin.flush()
+
+            while True:
+                if not self.process.stdout:
+                    break
+                line = self.process.stdout.readline()
+                if not line:
+                    if self.process.poll() is not None:
+                        logger.error("Process exited during initialization")
+                    break
+
+                # Log startup messages for debugging
+                clean_line = line.strip()
+                if clean_line:
+                    logger.info(f"Startup: {clean_line}")
+
+                if clean_line == handshake:
+                    logger.info("PowerShell Environment Ready (Handshake received).")
+                    break
 
         except Exception as e:
             logger.error(f"Failed to start PowerShell session: {e}")
@@ -106,10 +129,14 @@ class PowerShellSession:
             if not self.process:
                 return "Error: Could not establish PowerShell session."
 
+        start_marker = "START_OF_RESPONSE"
         end_marker = "END_OF_RESPONSE"
-        # Force output to JSON, compress to single line, print marker
+        # Use Out-String to capture the display output of the command
+        # This ensures we get the text representation (like the tree view)
+        # and captures any side-effect output (like "Loading entities...")
         full_command = (
-            f"{script_block} | ConvertTo-Json -Depth 5 -Compress; "
+            f'Write-Output "{start_marker}"; '
+            f"{script_block} | Out-String -Width 4096; "
             f'Write-Output "{end_marker}"\n'
         )
 
@@ -119,16 +146,26 @@ class PowerShellSession:
                 self.process.stdin.flush()
 
             output = []
+            started = False
             while True:
                 if not self.process.stdout:
                     break
 
                 line = self.process.stdout.readline()
-                if end_marker in line:
+                if not line:
                     break
-                if line == "":
+
+                clean_line = line.strip()
+
+                if start_marker in clean_line:
+                    started = True
+                    continue
+
+                if end_marker in clean_line:
                     break
-                output.append(line.strip())
+
+                if started:
+                    output.append(line)
 
             return "".join(output)
 
