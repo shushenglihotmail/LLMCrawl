@@ -97,9 +97,9 @@ graph TB
 ## ✨ Key Features
 
 ### Web RAG Capabilities
-- **Conversation Memory**: Multi-turn conversations with context preservation (24-hour TTL, user messages only for token efficiency)
+- **Conversation Memory**: Multi-turn conversations with context preservation (24-hour TTL)
+- **Token-Efficient History**: Assistant messages included as placeholders to maintain conversation flow while minimizing token usage
 - **Explicit Clear Chat**: API flag-based conversation clearing (no string matching required)
-- **Token-Efficient History**: Only user messages sent to LLM (not full conversation with assistant responses)
 - **Intelligent Tool Triggering**: Automatic detection of queries needing fresh data (29+ trigger words)
 - **Context-Aware Follow-ups**: Recognizes when follow-up questions relate to previous news queries
 - **Forced Tool Execution**: Prevents incomplete "I'll fetch..." responses by enforcing tool calls

@@ -574,6 +574,7 @@ def _build_system_prompt_general_chat(expose_to_llm: dict) -> str:
         "- Ask clarifying questions when the request is ambiguous\n"
         "- Focus on being helpful rather than technical\n"
         "- If you don't know something, say so honestly\n"
+        "- **Focus**: The input message may contain previous conversation history. You must ONLY answer the NEWEST/LAST question or instruction at the very end. Treat everything before it as read-only context.\n"
     )
 
     return system_prompt
@@ -621,7 +622,7 @@ def _build_system_prompt_code_analysis(expose_to_llm: dict) -> str:
         "- **Code Search**: Prefer `search_azure_devops_code` for finding dependencies and definitions.\n"
         "- **Be Thorough**: Provide comprehensive analysis with specific line references.\n"
         "- **Actionable Feedback**: Give concrete suggestions, not vague recommendations.\n"
-        "- **Focus**: Answer the LATEST message using history only for context.\n"
+        "- **Focus**: The input message may contain previous conversation history. You must ONLY answer the NEWEST/LAST question or instruction at the very end. Treat everything before it as read-only context.\n"
     )
 
     return system_prompt
@@ -672,7 +673,7 @@ def _build_system_prompt_build_system(expose_to_llm: dict) -> str:
         "- **Dependency Analysis**: Always consider transitive dependencies and version compatibility.\n"
         "- **Platform Awareness**: Note platform-specific build configurations and conditions.\n"
         "- **Be Precise**: Provide exact file paths, target names, and configuration values.\n"
-        "- **Focus**: Answer the LATEST message using history only for context.\n"
+        "- **Focus**: The input message may contain previous conversation history. You must ONLY answer the NEWEST/LAST question or instruction at the very end. Treat everything before it as read-only context.\n"
     )
 
     return system_prompt
@@ -741,7 +742,7 @@ def _build_system_prompt_file_explorer(expose_to_llm: dict) -> str:
         "- **Use Multiple Tools**: Combine filename and content searches for better results.\n"
         "- **Show Results Clearly**: List found files with paths and brief descriptions.\n"
         "- **Summarize Patterns**: If many files found, group by folder or type.\n"
-        "- **Focus**: Answer the LATEST message using history only for context.\n\n"
+        "- **Focus**: The input message may contain previous conversation history. You must ONLY answer the NEWEST/LAST question or instruction at the very end. Treat everything before it as read-only context.\n\n"
     )
 
     # Add strong function calling instructions
@@ -803,9 +804,17 @@ def _build_messages(
         for msg in history:
             if msg.get("role") == "user":
                 messages.append({"role": "user", "content": msg["content"]})
+            elif msg.get("role") == "assistant":
+                # Optimization: Include placeholder assistant message to maintain
+                # conversation flow (User -> Assistant -> User) without using tokens
+                # for the full response. This prevents the LLM from thinking previous
+                # user questions are unanswered.
+                messages.append(
+                    {"role": "assistant", "content": "[Response omitted for brevity]"}
+                )
         if history:
             logger.info(
-                f"Loaded {len([m for m in history if m.get('role') == 'user'])} user messages from history"
+                f"Loaded {len([m for m in history if m.get('role') in ['user', 'assistant']])} messages from history (assistant responses truncated)"
             )
 
     # Add current message with context
