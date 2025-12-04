@@ -57,12 +57,19 @@ python scripts/setup_dev.py
    playwright install-deps
    ```
 
-5. **Setup pre-commit hooks:**
+5. **Install LLMLingua-2 for prompt compression (Optional but Recommended):**
+   ```bash
+   # Enables intelligent prompt compression for large contexts
+   # Requires ~2GB disk space for model weights
+   pip install llmlingua torch transformers accelerate
+   ```
+
+6. **Setup pre-commit hooks:**
    ```bash
    pre-commit install
    ```
 
-6. **Configure environment:**
+7. **Configure environment:**
    ```bash
    cd deploy
    cp .env.example .env

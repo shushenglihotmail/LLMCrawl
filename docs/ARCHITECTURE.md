@@ -24,6 +24,7 @@ LLMCrawl is a production-grade Web RAG system that combines LLM chat capabilitie
 │  • Azure OpenAI / Azure Anthropic / OpenAI SDK                   │
 │  • Multi-Provider Routing (OpenAI ChatCompletions / Anthropic    │
 │    Messages API via HTTP)                                        │
+│  • Prompt Compression (LLMLingua-2 / tiktoken fallback)          │
 │  • Conversation Store (In-Memory, 24h TTL)                       │
 │  • Tool Calling Logic (OpenAI only, Anthropic uses text)         │
 │  • Intelligent Trigger Detection (29+ keywords)                  │
@@ -194,6 +195,50 @@ Final Messages = [
     New User Message
 ]
 ```
+
+## Prompt Compression
+
+When prompts exceed LLM context limits, the gateway automatically compresses them using LLMLingua-2.
+
+### Context Limits
+
+| Provider | Context Window | Reserved for Response | Max Input |
+|----------|---------------|----------------------|-----------|
+| Anthropic Claude | 200,000 | 16,000 | 184,000 |
+| OpenAI GPT-4 | 128,000 | 16,000 | 112,000 |
+| Azure OpenAI | 128,000 | 16,000 | 112,000 |
+
+### Compression Strategies
+
+**1. LLMLingua-2 (Default)**
+- BERT-based intelligent compression
+- Preserves semantic meaning while removing redundant tokens
+- 3-6x faster than original LLMLingua
+- CPU-friendly (~500MB-1GB model)
+- Compression ratio: 50-80% size reduction
+
+**2. Tiktoken Truncation (Fallback)**
+- Token-aware truncation when LLMLingua-2 is unavailable
+- Keeps 70% from beginning, 30% from end
+- Adds `[... N tokens truncated ...]` separator
+
+### Compression Priority
+
+Messages are compressed in this order (first = compressed first):
+1. **Tool results** - Often contain large, redundant data
+2. **Old assistant messages** - Previous responses
+3. **Old user messages** - Historical queries
+4. **Recent user messages** - Preserved for context
+5. **System prompts** - Never compressed
+
+### Installation
+
+```bash
+# Optional: Install LLMLingua-2 for intelligent compression
+pip install llmlingua torch transformers accelerate
+```
+
+Without LLMLingua-2, the system falls back to tiktoken truncation automatically.
 
 ## Tool Calling Intelligence
 

@@ -94,7 +94,47 @@ MAX_FILES_PER_REQUEST=80
 MAX_INPUT_TOKENS=100000
 ```
 
-### 4. Vector Database
+### 4. Prompt Compression (LLMLingua-2)
+
+The gateway automatically compresses large prompts that exceed LLM context limits using LLMLingua-2. This is a BERT-based compression model that intelligently removes redundant tokens while preserving meaning.
+
+**Context Limits:**
+- Anthropic Claude: 200,000 tokens
+- OpenAI GPT-4: 128,000 tokens
+- Azure OpenAI: 128,000 tokens
+
+**How it works:**
+1. If prompt exceeds context limit, LLMLingua-2 compresses the largest messages
+2. Compression priority: tool results > old assistant messages > old user messages
+3. System prompts are never compressed
+4. Falls back to token-aware truncation if LLMLingua-2 is not installed
+
+**Environment Variables:**
+```env
+# Optional: Specify LLMLingua-2 model (default is the smaller, faster model)
+LLMLINGUA_MODEL=microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
+# Alternative for better quality (larger model):
+# LLMLINGUA_MODEL=microsoft/llmlingua-2-xlm-roberta-large-meetingbank
+```
+
+**Installing LLMLingua-2 (Optional but Recommended):**
+```bash
+# Install LLMLingua-2 and dependencies (~2GB total)
+pip install llmlingua torch transformers accelerate
+```
+
+**Hardware Requirements for LLMLingua-2:**
+- RAM: 4GB minimum, 8GB recommended
+- CPU: Any modern 2+ core vCPU
+- Disk: ~2GB for model weights and libraries
+- GPU: Not required (runs efficiently on CPU)
+
+**Performance:**
+- LLMLingua-2 on CPU: ~500-1000 tokens/second
+- 5,000 token document: ~5-10 seconds to compress
+- Typical compression ratio: 50-80% size reduction
+
+### 5. Vector Database
 
 ```env
 VECTOR_DB=qdrant
@@ -102,7 +142,7 @@ QDRANT_URL=http://qdrant:6333
 PG_DSN=postgresql://postgres:password@postgres:5432/rag_db
 ```
 
-### 5. Firecrawl Configuration
+### 6. Firecrawl Configuration
 
 ```env
 FIRECRAWL_URL=http://firecrawl:3002
@@ -115,7 +155,7 @@ FIRECRAWL_AUTH_TYPE=none
 # FIRECRAWL_AUTH_STORAGE_STATE=<captured_session_state>
 ```
 
-### 6. Web Crawling
+### 7. Web Crawling
 
 ```env
 ALLOWED_DOMAINS=sec.gov,ft.com,wsj.com,nvidia.com
@@ -124,7 +164,7 @@ MAX_CONCURRENCY=4
 REQUEST_TIMEOUT_MS=20000
 ```
 
-### 7. Service URLs
+### 8. Service URLs
 
 ```env
 # Internal service endpoints (Docker network)
@@ -138,14 +178,14 @@ MCP_SERVER_URL=http://mcp-server:8003
 AZURE_DEVOPS_MCP_URL=http://azure-devops-mcp-server:8004
 ```
 
-### 8. MCP Server (Local Files)
+### 9. MCP Server (Local Files)
 
 ```env
 MCP_ROOT_FOLDER=/data/files
 MCP_VECTOR_DB_PATH=/data/mcp_vector_db
 ```
 
-### 9. Logging & Cache
+### 10. Logging & Cache
 
 ```env
 LOG_LEVEL=INFO

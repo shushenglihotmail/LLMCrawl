@@ -15,6 +15,7 @@ import httpx
 import openai  # noqa: F401
 from openai import AsyncAzureOpenAI, AsyncOpenAI
 
+from gateway.utils.prompt_compressor import compress_if_needed, estimate_messages_tokens
 from gateway.utils.tool_constants import TOOL_CRAWL_AND_REFRESH
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,15 @@ class LLMClient:
             logger.info(
                 f"Model resolution: '{model}' -> '{deployment_name}' (provider: {provider_type})"
             )
+
+            # Compress messages if they exceed context limits
+            original_token_count = estimate_messages_tokens(messages)
+            messages = compress_if_needed(messages, provider_type)
+            compressed_token_count = estimate_messages_tokens(messages)
+            if compressed_token_count < original_token_count:
+                logger.info(
+                    f"Prompt compressed: {original_token_count} -> {compressed_token_count} tokens"
+                )
 
             # Route to appropriate client based on provider type
             if provider_type == "anthropic":

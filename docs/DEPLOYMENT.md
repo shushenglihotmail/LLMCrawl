@@ -28,10 +28,15 @@ Complete step-by-step guide for deploying LLMCrawl in development and production
 
 **Recommended:**
 - CPU: 4+ cores
-- RAM: 8 GB
+- RAM: 8 GB (required if using LLMLingua-2 prompt compression)
 - Disk: 20 GB free space (SSD preferred)
 - Docker: Latest stable
 - Docker Compose: Latest stable
+
+**With LLMLingua-2 Prompt Compression:**
+- RAM: 8 GB minimum (model requires ~1-2GB)
+- Disk: Additional 2 GB for model weights
+- GPU: Not required (runs efficiently on CPU)
 
 ### Required API Keys
 
@@ -51,6 +56,14 @@ Complete step-by-step guide for deploying LLMCrawl in development and production
 - **Git** for cloning repository
 - **Text editor** for configuration files
 - **curl** or **Postman** for testing
+
+### Optional Dependencies
+
+- **LLMLingua-2** - For intelligent prompt compression when context exceeds LLM limits
+  ```bash
+  pip install llmlingua torch transformers accelerate
+  ```
+  Without this, the system falls back to token-aware truncation.
 
 ---
 
