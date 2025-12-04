@@ -165,9 +165,7 @@ class PromptCompressor:
         last_portion = target_tokens - first_portion - 10
 
         first_text = _encoding.decode(tokens[:first_portion])
-        last_text = (
-            _encoding.decode(tokens[-last_portion:]) if last_portion > 0 else ""
-        )
+        last_text = _encoding.decode(tokens[-last_portion:]) if last_portion > 0 else ""
         separator = f"\n\n[... {len(tokens) - target_tokens} tokens truncated ...]\n\n"
 
         result: str = first_text + separator + last_text
