@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from gateway.utils.tool_constants import TOOL_CRAWL_AND_REFRESH
+
 # =============================================================================
 # Pydantic Tool Input Models
 # =============================================================================
@@ -221,21 +223,21 @@ class ToolSchemaConverter:
 # Tool schema that gets registered with the LLM (OpenAI format)
 CRAWL_AND_REFRESH_TOOL = ToolSchemaConverter.to_openai_tool(
     model=CrawlAndRefreshInput,
-    name="crawl_and_refresh",
+    name=TOOL_CRAWL_AND_REFRESH,
     description="Search & crawl the web for up-to-date info; clean, index, and return fresh sources for answering with citations.",
 )
 
 # Claude format (for future use)
 CRAWL_AND_REFRESH_TOOL_CLAUDE = ToolSchemaConverter.to_claude_tool(
     model=CrawlAndRefreshInput,
-    name="crawl_and_refresh",
+    name=TOOL_CRAWL_AND_REFRESH,
     description="Search & crawl the web for up-to-date info; clean, index, and return fresh sources for answering with citations.",
 )
 
 # Gemini format (for future use)
 CRAWL_AND_REFRESH_TOOL_GEMINI = ToolSchemaConverter.to_gemini_tool(
     model=CrawlAndRefreshInput,
-    name="crawl_and_refresh",
+    name=TOOL_CRAWL_AND_REFRESH,
     description="Search & crawl the web for up-to-date info; clean, index, and return fresh sources for answering with citations.",
 )
 
@@ -282,6 +284,6 @@ def build_crawler_tool_with_seed_urls(
 
     return ToolSchemaConverter.to_openai_tool(
         model=CrawlAndRefreshInput,
-        name="crawl_and_refresh",
+        name=TOOL_CRAWL_AND_REFRESH,
         description=description,
     )

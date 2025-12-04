@@ -14,6 +14,16 @@ import httpx
 from ..agents.windows_composition import get_composition_client
 from ..utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from ..utils.logging import log_tool_call, log_tool_result
+from ..utils.tool_constants import (
+    TOOL_AZURE_DEVOPS_GET_FILE,
+    TOOL_AZURE_DEVOPS_SEARCH_CODE,
+    TOOL_CRAWL_AND_REFRESH,
+    TOOL_INDEX_FILES,
+    TOOL_LIST_FILES,
+    TOOL_QUERY_COMPOSITION_DB,
+    TOOL_READ_LOCAL_FILE,
+    TOOL_SEARCH_FILE_CONTENT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +39,10 @@ class ToolHandler:
         # which can take 60-70s for depth=2 with authentication
         self.timeout = 90.0
         self.mcp_tools = [
-            "read_local_file",
-            "list_files",
-            "search_file_content",
-            "index_files",
+            TOOL_READ_LOCAL_FILE,
+            TOOL_LIST_FILES,
+            TOOL_SEARCH_FILE_CONTENT,
+            TOOL_INDEX_FILES,
         ]
 
     async def handle_tool_call(
@@ -59,7 +69,7 @@ class ToolHandler:
         start_time = datetime.now()
 
         try:
-            if tool_name == "crawl_and_refresh":
+            if tool_name == TOOL_CRAWL_AND_REFRESH:
                 result = await self._handle_crawl_and_refresh(
                     arguments, request_id, skip_embedding
                 )
@@ -68,15 +78,14 @@ class ToolHandler:
                 result = await self._handle_mcp_tool(tool_name, arguments, request_id)
                 success = True
             elif tool_name in [
-                "search_azure_devops_code",
-                "search_azure_devops_files",
-                "get_azure_devops_file",
+                TOOL_AZURE_DEVOPS_SEARCH_CODE,
+                TOOL_AZURE_DEVOPS_GET_FILE,
             ]:
                 result = await self._handle_azure_devops_tool(
                     tool_name, arguments, request_id
                 )
                 success = True
-            elif tool_name == "query_composition_db":
+            elif tool_name == TOOL_QUERY_COMPOSITION_DB:
                 result = await self._handle_composition_tool(arguments, request_id)
                 success = True
             else:
@@ -429,7 +438,7 @@ class ToolHandler:
                 logger.warning(f"Failed to parse azdo URI: {file_path}")
 
         # Add branch parameter if not provided and environment variable exists
-        if tool_name == "get_azure_devops_file" and "branch" not in arguments:
+        if tool_name == TOOL_AZURE_DEVOPS_GET_FILE and "branch" not in arguments:
             branch = os.getenv("AZURE_DEVOPS_BRANCH")
             if branch:
                 arguments["branch"] = branch

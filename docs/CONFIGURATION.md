@@ -77,7 +77,16 @@ AZURE_DEVOPS_BRANCH=main
 ### 3. Tool Configuration
 
 ```env
-# Maximum rounds of tool calls per request
+# Per-tool call limits (JSON object: {"tool_name": limit, ...})
+# Use -1 for unlimited calls
+# Available tools:
+#   Azure DevOps: search_azure_devops_code, get_azure_devops_file
+#   Crawler: crawl_and_refresh
+#   Local MCP: read_local_file, list_files, search_file_content, index_files
+#   WCD: query_composition_db
+TOOL_ROUND_LIMITS={"search_azure_devops_code":30,"get_azure_devops_file":30,"crawl_and_refresh":20,"read_local_file":50,"list_files":50,"search_file_content":50,"index_files":50,"query_composition_db":-1}
+
+# Default limit for tools not specified in TOOL_ROUND_LIMITS
 MAX_TOOL_ROUNDS=5
 
 # Code Intelligence Agent limits

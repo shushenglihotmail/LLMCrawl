@@ -28,6 +28,7 @@ from gateway.routers.tools import get_tool_handler
 from gateway.utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from gateway.utils.conversation_store import get_conversation_store
 from gateway.utils.logging import log_request, log_response
+from gateway.utils.tool_constants import DEFAULT_TOOL_LIMITS, TOOL_QUERY_COMPOSITION_DB
 
 logger = logging.getLogger(__name__)
 
@@ -900,7 +901,7 @@ async def _load_tools(
             {
                 "type": "function",
                 "function": {
-                    "name": "query_composition_db",
+                    "name": TOOL_QUERY_COMPOSITION_DB,
                     "description": (
                         "Query the Windows Composition Database (WCD) via the "
                         "global $d object. WCD models the relationship between "
@@ -950,6 +951,50 @@ async def _load_tools(
 # Helper Functions - LLM Execution
 # =============================================================================
 
+# Per-tool round limits loaded from environment variable as JSON
+# Format: {"tool_name": limit, ...}
+# Tools not specified use DEFAULT_TOOL_ROUND_LIMIT
+# Use -1 or a very large number for unlimited
+_tool_limits_json = os.getenv(
+    "TOOL_ROUND_LIMITS",
+    json.dumps(DEFAULT_TOOL_LIMITS),
+)
+
+try:
+    TOOL_ROUND_LIMITS: Dict[str, int] = json.loads(_tool_limits_json)
+except json.JSONDecodeError:
+    logger.warning(f"Invalid TOOL_ROUND_LIMITS JSON, using defaults")
+    TOOL_ROUND_LIMITS = DEFAULT_TOOL_LIMITS.copy()
+
+# Default limit for unknown tools
+DEFAULT_TOOL_ROUND_LIMIT = int(os.getenv("MAX_TOOL_ROUNDS", "5"))
+
+
+def _get_tool_limit(tool_name: str) -> int:
+    """Get the round limit for a specific tool. Returns -1 for unlimited."""
+    return TOOL_ROUND_LIMITS.get(tool_name, DEFAULT_TOOL_ROUND_LIMIT)
+
+
+def _check_tool_limits(
+    tool_calls: List[Dict[str, Any]], tool_usage: Dict[str, int]
+) -> List[str]:
+    """
+    Check if any tools have exceeded their limits.
+
+    Returns list of tools that have exceeded their limits.
+    Tools with limit -1 are unlimited and never exceed.
+    """
+    exceeded = []
+    for tool_call in tool_calls:
+        tool_name = tool_call.get("function", {}).get("name", "unknown")
+        limit = _get_tool_limit(tool_name)
+        if limit == -1:
+            continue  # Unlimited
+        current_usage = tool_usage.get(tool_name, 0)
+        if current_usage >= limit:
+            exceeded.append(tool_name)
+    return exceeded
+
 
 async def _execute_llm_with_tools(
     request: UnifiedWorkflowRequest,
@@ -961,8 +1006,9 @@ async def _execute_llm_with_tools(
     """Execute LLM with tool calling loop."""
     llm_client = LLMClient()
     tool_handler = get_tool_handler()
-    max_tool_rounds = int(os.getenv("MAX_TOOL_ROUNDS", "5"))
     tool_round = 0
+    # Track per-tool usage
+    tool_usage: Dict[str, int] = {}
 
     # Log tools
     if tools:
@@ -984,10 +1030,36 @@ async def _execute_llm_with_tools(
         f"Initial LLM response - has tool_calls: {bool(response.get('tool_calls'))}"
     )
 
-    # Tool execution loop
-    while response.get("tool_calls") and tool_round < max_tool_rounds:
+    # Tool execution loop with per-tool limits (no total limit)
+    while response.get("tool_calls"):
         tool_round += 1
-        logger.info(f"Tool execution round {tool_round}/{max_tool_rounds}")
+
+        # Check which tools have exceeded their limits
+        exceeded_tools = _check_tool_limits(response["tool_calls"], tool_usage)
+
+        if exceeded_tools:
+            # Filter out tool calls that have exceeded their limits
+            valid_tool_calls = [
+                tc
+                for tc in response["tool_calls"]
+                if tc.get("function", {}).get("name", "unknown") not in exceeded_tools
+            ]
+
+            if not valid_tool_calls:
+                # All requested tools have exceeded limits
+                logger.warning(
+                    f"All requested tools exceeded limits: {exceeded_tools}. "
+                    f"Tool usage: {tool_usage}"
+                )
+                break
+
+            logger.info(
+                f"Filtered out tools that exceeded limits: {exceeded_tools}. "
+                f"Proceeding with: {[tc.get('function', {}).get('name') for tc in valid_tool_calls]}"
+            )
+            response["tool_calls"] = valid_tool_calls
+
+        logger.info(f"Tool execution round {tool_round} " f"(tool usage: {tool_usage})")
 
         # Add assistant message with tool calls
         messages.append(
@@ -1001,7 +1073,15 @@ async def _execute_llm_with_tools(
         # Execute each tool call
         for tool_call in response["tool_calls"]:
             tool_name = tool_call.get("function", {}).get("name", "unknown")
-            logger.info(f"Executing tool: {tool_name}")
+
+            # Increment tool usage counter
+            tool_usage[tool_name] = tool_usage.get(tool_name, 0) + 1
+            tool_limit = _get_tool_limit(tool_name)
+
+            logger.info(
+                f"Executing tool: {tool_name} "
+                f"(usage: {tool_usage[tool_name]}/{tool_limit})"
+            )
 
             tool_result = await tool_handler.handle_tool_call(
                 tool_call,
@@ -1030,9 +1110,6 @@ async def _execute_llm_with_tools(
         if not response.get("tool_calls"):
             logger.info(f"LLM finished after {tool_round} tool rounds")
             break
-
-    if tool_round >= max_tool_rounds and response.get("tool_calls"):
-        logger.warning(f"Reached max tool rounds ({max_tool_rounds}), stopping")
 
     response_text = response.get("content") or ""
     tokens_used = response.get("usage", {}).get("total_tokens")

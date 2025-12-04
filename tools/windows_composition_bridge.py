@@ -257,4 +257,12 @@ if __name__ == "__main__":
 
     print("Starting Windows Composition Bridge...")
     print("Make sure to set WIN_COMP_SHARE_CMD environment variable.")
-    uvicorn.run(app, host="0.0.0.0", port=8005)
+
+    # Configure uvicorn with timestamp in access log
+    log_config = uvicorn.config.LOGGING_CONFIG
+    log_config["formatters"]["access"][
+        "fmt"
+    ] = '%(asctime)s - %(levelname)s - %(client_addr)s - "%(request_line)s" %(status_code)s'
+    log_config["formatters"]["access"]["datefmt"] = "%Y-%m-%d %H:%M:%S"
+
+    uvicorn.run(app, host="0.0.0.0", port=8005, log_config=log_config)

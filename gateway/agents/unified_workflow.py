@@ -131,7 +131,7 @@ class UnifiedWorkflowRequest(BaseModel):
 
     crawl_depth: int = Field(1, description="Depth for web crawling (1-5)")
 
-    max_tokens: int = Field(2000, description="Maximum response tokens")
+    max_tokens: int = Field(16000, description="Maximum response tokens")
 
 
 class UnifiedWorkflowResponse(BaseModel):

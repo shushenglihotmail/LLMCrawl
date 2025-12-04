@@ -15,6 +15,8 @@ import httpx
 import openai  # noqa: F401
 from openai import AsyncAzureOpenAI, AsyncOpenAI
 
+from gateway.utils.tool_constants import TOOL_CRAWL_AND_REFRESH
+
 logger = logging.getLogger(__name__)
 
 
@@ -93,7 +95,7 @@ class LLMClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: str = "auto",
         temperature: float = 0.1,
-        max_tokens: int = 2000,
+        max_tokens: int = 16000,
         stream: bool = False,
     ) -> Dict[str, Any] | AsyncGenerator[Dict[str, Any], None]:
         """
@@ -441,19 +443,34 @@ class LLMClient:
             return None
 
         # Try to extract JSON from the content
-        # Look for JSON that starts at the beginning or after a newline
-        json_patterns = [
-            r"^\s*(\{[^{}]*\})",  # JSON at start
-            r"\n\s*(\{[^{}]*\})",  # JSON after newline
-            r"```json?\s*(\{[^{}]*\})\s*```",  # JSON in code block
-        ]
-
+        # Use a smarter approach that handles nested braces in string values
         json_str = None
-        for pattern in json_patterns:
-            match = re.search(pattern, content, re.DOTALL)
-            if match:
-                json_str = match.group(1)
-                break
+
+        # First, try to find JSON in code blocks
+        code_block_match = re.search(r"```json?\s*(\{.*?\})\s*```", content, re.DOTALL)
+        if code_block_match:
+            json_str = code_block_match.group(1)
+        else:
+            # Try to find JSON starting at beginning or after newline
+            # Match from { to the last } that makes valid JSON
+            start_patterns = [r"^\s*\{", r"\n\s*\{"]
+            for pattern in start_patterns:
+                match = re.search(pattern, content)
+                if match:
+                    # Found a potential JSON start, try to extract valid JSON
+                    start_idx = match.end() - 1  # Include the {
+                    # Try progressively longer substrings until we get valid JSON
+                    for end_idx in range(start_idx + 2, len(content) + 1):
+                        candidate = content[start_idx:end_idx]
+                        if candidate.count("{") == candidate.count("}"):
+                            try:
+                                json.loads(candidate)
+                                json_str = candidate
+                                break
+                            except json.JSONDecodeError:
+                                continue
+                    if json_str:
+                        break
 
         if not json_str:
             return None
@@ -471,7 +488,7 @@ class LLMClient:
                 tool.get("function", {}).get("parameters", {}).get("properties", {})
             )
 
-            if tool_name == "crawl_and_refresh":
+            if tool_name == TOOL_CRAWL_AND_REFRESH:
                 # Check if JSON has the expected fields for crawl_and_refresh
                 if "query" in parsed_json:
                     # This looks like a crawl_and_refresh call!
@@ -480,7 +497,7 @@ class LLMClient:
                         "id": f"call_{uuid.uuid4().hex[:24]}",
                         "type": "function",
                         "function": {
-                            "name": "crawl_and_refresh",
+                            "name": TOOL_CRAWL_AND_REFRESH,
                             "arguments": json.dumps(parsed_json),
                         },
                     }
