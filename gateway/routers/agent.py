@@ -23,7 +23,7 @@ from gateway.agents.unified_workflow import (
     UnifiedWorkflowResponse,
     WorkflowType,
 )
-from gateway.llm.client import DEFAULT_MAX_RESPONSE_TOKENS, LLMClient
+from gateway.llm.client import LLMClient
 from gateway.routers.tools import get_tool_handler
 from gateway.utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from gateway.utils.conversation_store import get_conversation_store
@@ -1016,13 +1016,12 @@ async def _execute_llm_with_tools(
             f"Passing {len(tools)} tools to LLM: {[t.get('function', {}).get('name', '?') for t in tools]}"
         )
 
-    # Initial LLM call
+    # Initial LLM call (max_tokens is model-specific, handled by LLM client)
     response = await llm_client.chat_completion(
         model=request.model or "gpt-4",
         messages=messages,
         tools=tools if tools else None,
         tool_choice="auto" if tools else "none",
-        max_tokens=DEFAULT_MAX_RESPONSE_TOKENS,
     )
     response = cast(Dict[str, Any], response)
 
@@ -1104,7 +1103,6 @@ async def _execute_llm_with_tools(
             model=request.model or "gpt-4",
             tools=tools,
             tool_choice="auto",
-            max_tokens=DEFAULT_MAX_RESPONSE_TOKENS,
         )
 
         if not response.get("tool_calls"):

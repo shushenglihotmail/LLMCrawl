@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HiChat - AI Chat Client</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+
+<body>
+    <div class="container" id="mainContainer">
+        <button class="fullscreen-exit-btn" id="fullscreenExitBtn" onclick="toggleFullscreen()"
+            title="Exit Fullscreen (ESC)">✕</button>
+        <div class="header">
+            <h1>🤖 HiChat - AI Chat Client</h1>
+            <div class="controls">
+                <select class="workflow-selector" id="workflowSelector">
+                    <option value="general_chat">💬 General Chat</option>
+                    <option value="code_analysis">🔍 Code Analysis</option>
+                    <option value="build_system_analysis">🔧 Build System</option>
+                    <option value="file_explorer">📁 File Explorer</option>
+                </select>
+                <select class="model-selector" id="modelSelector">
+                    <option>Loading models...</option>
+                </select>
+                <button class="fullscreen-btn" id="fullscreenBtn" onclick="toggleFullscreen()"
+                    title="Toggle Fullscreen">⛶</button>
+            </div>
+        </div>
+
+        <div class="chat-area-wrapper" id="chatAreaWrapper">
+            <div class="chat-hover-actions" id="chatHoverActions">
+                <button class="hover-action-btn" id="saveMarkdownBtn" onclick="saveConversationToMarkdown()"
+                    title="Save conversation to Markdown">
+                    💾
+                </button>
+            </div>
+            <div class="chat-area" id="chatArea">
+                <div class="message assistant">
+                    <div class="message-content">
+                        <div class="markdown-content">
+                            <strong>Welcome to HiChat! 👋</strong><br><br>
+                            I'm ready to help you. You can:
+                            <ul>
+                                <li>Ask questions and get AI-powered answers</li>
+                                <li>Choose different AI models</li>
+                                <li>Use different workflows for specialized tasks</li>
+                                <li>See formatted responses with markdown support</li>
+                            </ul>
+                            Start typing your message below!
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <div>Thinking...</div>
+        </div>
+
+        <div class="input-area">
+            <div class="input-box">
+                <!-- Collapsible Context Panel -->
+                <div class="unified-panel" id="unifiedPanel">
+                    <div class="panel-header" onclick="togglePanel()">
+                        <h3>📎 Context & Sources</h3>
+                        <button class="collapse-btn" id="collapseBtn">▼</button>
+                    </div>
+                    <div class="panel-content">
+                        <!-- Target Paths (Azure DevOps) -->
+                        <div class="form-group">
+                            <label>
+                                Target Paths (optional, one per line)
+                                <span class="help-icon">?
+                                    <span class="help-tooltip">
+                                        <div class="help-tooltip-line"><strong>Azure DevOps Code Search:</strong></div>
+                                        <div class="help-tooltip-line"><code>azdo:/path:searchText</code> - Search in
+                                            path scope</div>
+                                        <div class="help-tooltip-line"><strong>Search Text Syntax (Azure DevOps
+                                                API):</strong></div>
+                                        <div class="help-tooltip-line">• <code>ext:xml</code> - Find by extension</div>
+                                        <div class="help-tooltip-line">• <code>file:*config*.xml</code> - File name
+                                            pattern</div>
+                                        <div class="help-tooltip-line">• <code>myTerm path:Services</code> - Path
+                                            contains</div>
+                                        <div class="help-tooltip-line">• <code>class:MyClass</code> - Code element
+                                            (C#/Java)</div>
+                                        <div class="help-tooltip-line">• <code>(term1 OR term2) ext:xml</code> - Boolean
+                                        </div>
+                                        <div class="help-tooltip-line"><strong>Examples:</strong></div>
+                                        <div class="help-tooltip-line">• <code>azdo:/vm/compute:ext:xml</code></div>
+                                        <div class="help-tooltip-line">• <code>azdo:/:file:*manifest*.xml</code></div>
+                                        <div class="help-tooltip-line">•
+                                            <code>azdo://Project/repo/path:ext:cs?branch=main</code></div>
+                                    </span>
+                                </span>
+                            </label>
+                            <textarea id="targetPaths" rows="2"
+                                placeholder="azdo:/vm/compute:ext:xml&#10;azdo://OneCore/WindowsCompositionData/path:file:*.config?branch=main"></textarea>
+                        </div>
+
+                        <!-- Reference Files (Local or Azure DevOps) -->
+                        <div class="form-group">
+                            <label>
+                                Reference Files (optional, one per line)
+                                <span class="help-icon">?
+                                    <span class="help-tooltip">
+                                        <div class="help-tooltip-line"><strong>Local files for context:</strong></div>
+                                        <div class="help-tooltip-line">• <code>/docs/ARCHITECTURE.md</code> - Local file
+                                        </div>
+                                        <div class="help-tooltip-line">• <code>/examples/**</code> - Local folder
+                                            (recursive)</div>
+                                        <div class="help-tooltip-line"><strong>Azure DevOps (use search
+                                                syntax):</strong></div>
+                                        <div class="help-tooltip-line">• <code>azdo:/docs:file:readme.md</code></div>
+                                        <div class="help-tooltip-line">• <code>azdo:/src:ext:h</code> - All .h files in
+                                            /src</div>
+                                        <div class="help-tooltip-line">•
+                                            <code>azdo://Project/repo/path:ext:cs?branch=main</code></div>
+                                    </span>
+                                </span>
+                            </label>
+                            <textarea id="referenceFiles" rows="2"
+                                placeholder="/docs/guide.md&#10;azdo:/examples:ext:cpp?branch=main"></textarea>
+                        </div>
+
+                        <!-- Seed URLs for Web Crawling -->
+                        <div class="form-group">
+                            <label>Seed URLs (optional, comma-separated)</label>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <input type="text" id="seedUrlsInput"
+                                    placeholder="https://docs.example.com, https://wiki.internal.com" style="flex: 1;">
+                                <label
+                                    style="display: flex; align-items: center; gap: 5px; margin: 0; white-space: nowrap;">
+                                    <span style="font-size: 13px;">Depth:</span>
+                                    <input type="number" id="crawlDepth" value="1" min="1" max="5" style="width: 60px;">
+                                </label>
+                                <button class="download-btn" id="downloadBtn" onclick="exportToMarkdown()"
+                                    disabled>Download</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Always Visible: Message Input -->
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <label><strong>Your Message</strong></label>
+                    <textarea id="messageInput" rows="3"
+                        placeholder="Ask your question or describe your task...&#10;&#10;Example: Explain how the authentication system works"></textarea>
+                </div>
+
+                <!-- Always Visible: Control Flags and Expose to LLM (inline) -->
+                <div class="flags-row">
+                    <div class="flags-group">
+                        <span class="flags-label">Control:</span>
+                        <label class="switch-item">
+                            <input type="checkbox" id="enableEmbedding">
+                            <span>Embedding</span>
+                        </label>
+                    </div>
+                    <div class="flags-group">
+                        <span class="flags-label">Expose:</span>
+                        <label class="switch-item">
+                            <input type="checkbox" id="exposeLocalMcp">
+                            <span>Local MCP</span>
+                        </label>
+                        <label class="switch-item">
+                            <input type="checkbox" id="exposeAzureMcp">
+                            <span>Azure MCP</span>
+                        </label>
+                        <label class="switch-item">
+                            <input type="checkbox" id="exposeCrawler">
+                            <span>Crawler</span>
+                        </label>
+                        <label class="switch-item">
+                            <input type="checkbox" id="exposeWindowsComposition">
+                            <span>Win Comp DB</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="button-row">
+                    <button class="send-btn" id="sendBtn" onclick="submitRequest()">Send Message</button>
+                    <button class="clear-btn" onclick="clearChat()">Clear Chat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>

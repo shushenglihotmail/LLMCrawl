@@ -21,9 +21,9 @@ from gateway.utils.tool_constants import TOOL_CRAWL_AND_REFRESH
 logger = logging.getLogger(__name__)
 
 # Default maximum tokens for LLM response output
-# Claude Opus 4.5 supports up to 64K output tokens
-# OpenAI GPT-4 supports up to 16K output tokens
-DEFAULT_MAX_RESPONSE_TOKENS = 64000
+# This is the fallback when model-specific limit is not configured
+# Most models support at least 4096-8192 output tokens
+DEFAULT_MAX_RESPONSE_TOKENS = 8192
 
 
 class LLMClient:
@@ -54,23 +54,23 @@ class LLMClient:
         self.client = self.openai_client
         logger.info(f"Initialized LLM client: {self.provider}")
 
-    def get_model_config(self, model_name: str) -> tuple[str, str]:
+    def get_model_config(self, model_name: str) -> tuple[str, str, int]:
         """
-        Get Azure deployment name and provider type for a given model name.
+        Get Azure deployment name, provider type, and max output tokens for a given model name.
 
-        For Azure: Maps from model name (user selection) to deployment_name and provider_type.
-        For OpenAI: Returns model_name as-is with 'openai' provider.
+        For Azure: Maps from model name (user selection) to deployment_name, provider_type, and max_output_tokens.
+        For OpenAI: Returns model_name as-is with 'openai' provider and default max tokens.
 
         Args:
             model_name: The model name selected by user (e.g., 'claude-sonnet-4-5')
 
         Returns:
-            Tuple of (deployment_name, provider_type)
+            Tuple of (deployment_name, provider_type, max_output_tokens)
         """
         if self.provider != "azure":
-            return model_name, "openai"
+            return model_name, "openai", DEFAULT_MAX_RESPONSE_TOKENS
 
-        # Parse LLM_MODELS to find deployment_name and provider_type
+        # Parse LLM_MODELS to find deployment_name, provider_type, and max_output_tokens
         try:
             models_json = os.getenv("LLM_MODELS", "[]")
             models_config = json.loads(models_json)
@@ -79,20 +79,29 @@ class LLMClient:
                 if model.get("name") == model_name:
                     deployment_name = model.get("deployment_name", model_name)
                     provider_type = model.get("provider_type", "openai")
+                    # Get max_output_tokens from config, or use provider-specific defaults
+                    max_output_tokens = model.get("max_output_tokens")
+                    if max_output_tokens is None:
+                        # Provider-specific defaults
+                        if provider_type == "anthropic":
+                            max_output_tokens = 64000  # Claude supports up to 64K
+                        else:
+                            max_output_tokens = 16384  # GPT-4 supports up to 16K
                     logger.info(
-                        f"Resolved model '{model_name}' to deployment '{deployment_name}' (provider: {provider_type})"
+                        f"Resolved model '{model_name}' to deployment '{deployment_name}' "
+                        f"(provider: {provider_type}, max_output_tokens: {max_output_tokens})"
                     )
-                    return deployment_name, provider_type
+                    return deployment_name, provider_type, max_output_tokens
 
-            # Model not found in config, assume OpenAI
+            # Model not found in config, assume OpenAI with default
             logger.warning(
                 f"Model '{model_name}' not found in LLM_MODELS config, assuming OpenAI"
             )
-            return model_name, "openai"
+            return model_name, "openai", DEFAULT_MAX_RESPONSE_TOKENS
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse LLM_MODELS: {e}")
-            return model_name, "openai"
+            return model_name, "openai", DEFAULT_MAX_RESPONSE_TOKENS
 
     async def chat_completion(
         self,
@@ -101,7 +110,7 @@ class LLMClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: str = "auto",
         temperature: float = 0.1,
-        max_tokens: int = DEFAULT_MAX_RESPONSE_TOKENS,
+        max_tokens: Optional[int] = None,
         stream: bool = False,
     ) -> Dict[str, Any] | AsyncGenerator[Dict[str, Any], None]:
         """
@@ -113,17 +122,25 @@ class LLMClient:
             tools: Available tools for function calling
             tool_choice: "auto", "none", or specific tool
             temperature: Sampling temperature
-            max_tokens: Maximum response tokens (respects MAX_INPUT_TOKENS)
+            max_tokens: Maximum response tokens (if None, uses model-specific default)
             stream: Whether to stream the response
 
         Returns:
             Chat completion response or stream generator
         """
         try:
-            # Resolve deployment name and provider type
-            deployment_name, provider_type = self.get_model_config(model)
+            # Resolve deployment name, provider type, and max output tokens
+            deployment_name, provider_type, model_max_tokens = self.get_model_config(
+                model
+            )
+
+            # Use provided max_tokens or model-specific default
+            effective_max_tokens = (
+                max_tokens if max_tokens is not None else model_max_tokens
+            )
             logger.info(
-                f"Model resolution: '{model}' -> '{deployment_name}' (provider: {provider_type})"
+                f"Model resolution: '{model}' -> '{deployment_name}' "
+                f"(provider: {provider_type}, max_tokens: {effective_max_tokens})"
             )
 
             # Compress messages if they exceed context limits
@@ -143,7 +160,7 @@ class LLMClient:
                     tools,
                     tool_choice,
                     temperature,
-                    max_tokens,
+                    effective_max_tokens,
                     stream,
                 )
             else:
@@ -153,7 +170,7 @@ class LLMClient:
                     tools,
                     tool_choice,
                     temperature,
-                    max_tokens,
+                    effective_max_tokens,
                     stream,
                 )
 

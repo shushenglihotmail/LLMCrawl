@@ -151,6 +151,30 @@ graph TB
 - **Full Documentation**: [mcp_servers/azure_devops_mcp_server/README.md](mcp_servers/azure_devops_mcp_server/README.md) - Complete guide
 - **VS Code Integration**: Configure as MCP client for Copilot tool use
 
+## 🖥️ HiChat Web Client
+
+A Python-based web client for interacting with the LLMCrawl gateway. Provides a modern chat UI with markdown rendering, mermaid diagrams, and conversation history.
+
+### Installation
+
+```bash
+# Install with client extras
+pip install -e ".[client]"
+
+# Run the web client
+hichat
+# Opens browser to http://localhost:8080
+```
+
+### Features
+- Modern web UI with markdown and mermaid diagram support
+- Multiple workflow support (General Chat, Code Analysis, Build System, File Explorer)
+- Model selection from gateway
+- Conversation history with save-to-markdown
+- Fullscreen mode
+
+📖 **See [clients/hichat/README.md](clients/hichat/README.md)** for full documentation
+
 ## 🚀 Quick Start
 
 ### 1. Clone and Setup Environment
