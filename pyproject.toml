@@ -40,10 +40,41 @@ dev = [
 
 [project.scripts]
 hichat = "clients.hichat.main:main"
+llmcrawl = "llmcrawl_cli.deploy:main"
+
+[tool.setuptools]
+include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["clients*", "gateway*", "crawler*", "indexer*", "mcp_servers*"]
-exclude = ["tests*", "docs*", "deploy*", "ref*", "data*", "logs*"]
+include = [
+  "clients*",
+  "gateway*",
+  "crawler*",
+  "indexer*",
+  "mcp_servers*",
+  "llmcrawl_cli*",
+  "deploy*",
+]
+exclude = ["tests*", "docs*", "ref*", "logs*"]
+
+[tool.setuptools.package-data]
+"*" = ["static/*", "static/**/*"]
+"deploy" = [
+  "*.yml",
+  "*.yaml",
+  "*.env.example",
+  ".env.example",
+  "Dockerfile.*",
+  "prometheus.yml",
+  "requirements/*",
+  "grafana-provisioning/*",
+  "grafana-provisioning/**/*",
+  "gateway/*",
+  "crawler/*",
+  "indexer/*",
+  "mcp_servers/*",
+  "mcp_servers/**/*",
+]
 
 [tool.black]
 line-length = 88
