@@ -95,8 +95,7 @@ The `workflow` field is now part of `UnifiedWorkflowRequest`:
         "azure_devops_mcp": true,
         "crawler": false
     },
-    "model": "gpt-4",
-    "max_tokens": 2000
+    "model": "gpt-4"
 }
 ```
 

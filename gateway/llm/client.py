@@ -20,6 +20,11 @@ from gateway.utils.tool_constants import TOOL_CRAWL_AND_REFRESH
 
 logger = logging.getLogger(__name__)
 
+# Default maximum tokens for LLM response output
+# Claude Opus 4.5 supports up to 64K output tokens
+# OpenAI GPT-4 supports up to 16K output tokens
+DEFAULT_MAX_RESPONSE_TOKENS = 64000
+
 
 class LLMClient:
     """Unified client for OpenAI and Azure OpenAI with tool calling support."""
@@ -96,7 +101,7 @@ class LLMClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: str = "auto",
         temperature: float = 0.1,
-        max_tokens: int = 16000,
+        max_tokens: int = DEFAULT_MAX_RESPONSE_TOKENS,
         stream: bool = False,
     ) -> Dict[str, Any] | AsyncGenerator[Dict[str, Any], None]:
         """
@@ -278,6 +283,9 @@ class LLMClient:
                 )
 
         # Prepare request payload
+        # Log max_tokens to debug Azure output limits
+        logger.info(f"Anthropic request: max_tokens={max_tokens}")
+
         payload = {
             "model": model,
             "messages": anthropic_messages,
@@ -350,10 +358,28 @@ class LLMClient:
                             }
                         )
 
+            stop_reason = data.get("stop_reason")
+            usage = data.get("usage", {})
+
+            # Log response details for debugging
+            logger.info(
+                f"Anthropic response: stop_reason={stop_reason}, "
+                f"input_tokens={usage.get('input_tokens')}, "
+                f"output_tokens={usage.get('output_tokens')}"
+            )
+
+            # Warn if response was truncated due to max_tokens
+            if stop_reason == "max_tokens":
+                logger.warning(
+                    f"Response truncated: hit max_tokens limit. "
+                    f"Output tokens: {usage.get('output_tokens')}"
+                )
+
             result = {
                 "content": content,
                 "role": "assistant",
-                "finish_reason": data.get("stop_reason"),
+                "finish_reason": stop_reason,
+                "usage": usage,
             }
 
             if tool_calls:

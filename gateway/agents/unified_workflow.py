@@ -74,8 +74,7 @@ class UnifiedWorkflowRequest(BaseModel):
         },
         "model": "gpt-4",
         "conversation_id": "uuid-here",
-        "crawl_depth": 1,
-        "max_tokens": 2000
+        "crawl_depth": 1
     }
     """
 
@@ -130,8 +129,6 @@ class UnifiedWorkflowRequest(BaseModel):
     )
 
     crawl_depth: int = Field(1, description="Depth for web crawling (1-5)")
-
-    max_tokens: int = Field(16000, description="Maximum response tokens")
 
 
 class UnifiedWorkflowResponse(BaseModel):
