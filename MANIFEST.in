@@ -14,6 +14,9 @@ recursive-include deploy/mcp_servers *
 # Include static files for hichat
 recursive-include clients/hichat/static *
 
+# Include tools
+recursive-include tools *
+
 # Include README
 include README.md
 include INSTALL.md

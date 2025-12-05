@@ -40,7 +40,7 @@ dev = [
 
 [project.scripts]
 hichat = "clients.hichat.main:main"
-llmcrawl = "llmcrawl_cli.deploy:main"
+llmcrawl = "llmcrawl_cli.main:main"
 
 [tool.setuptools]
 include-package-data = true
@@ -54,6 +54,7 @@ include = [
   "mcp_servers*",
   "llmcrawl_cli*",
   "deploy*",
+  "tools*",
 ]
 exclude = ["tests*", "docs*", "ref*", "logs*"]
 

@@ -6,11 +6,12 @@ This guide walks you through installing and running LLMCrawl on a fresh machine.
 
 1. [Prerequisites](#prerequisites)
 2. [Installation](#installation)
-3. [Configuration](#configuration)
-4. [Starting Services](#starting-services)
-5. [Using HiChat Client](#using-hichat-client)
-6. [Management Commands](#management-commands)
-7. [Troubleshooting](#troubleshooting)
+3. [Upgrading](#upgrading)
+4. [Configuration](#configuration)
+5. [Starting Services](#starting-services)
+6. [Using HiChat Client](#using-hichat-client)
+7. [Management Commands](#management-commands)
+8. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -82,6 +83,56 @@ llmcrawl --help
 
 ---
 
+## Upgrading
+
+When a new version is available, follow these steps:
+
+### Step 1: Install the New Version
+
+```bash
+# From wheel file
+pip install --upgrade llmcrawl-1.1.0-py3-none-any.whl
+
+# Or from source
+cd LLMCrawl
+git pull
+pip install -e .
+```
+
+### Step 2: Upgrade Deployment
+
+```bash
+# Navigate to your deployment directory
+cd llmcrawl-deploy
+
+# Upgrade deployment files (preserves your .env settings)
+llmcrawl deploy --upgrade
+```
+
+This command will:
+1. **Backup** your current `.env` and config files to `backups/`
+2. **Update** all deployment files (docker-compose.yml, Dockerfiles, etc.)
+3. **Merge** your existing `.env` settings into the new configuration
+4. **Rebuild and restart** all services
+
+### Upgrade Options
+
+```bash
+# Upgrade without restarting services (manual restart later)
+llmcrawl deploy --upgrade --no-restart
+
+# Then manually restart when ready
+llmcrawl deploy --up
+```
+
+### After Upgrade
+
+- Check `backups/` folder if you need to restore any settings
+- Review `.env` for any new configuration options
+- Restart any standalone tools (WCD bridge, HiChat CLI) if running
+
+---
+
 ## Configuration
 
 ### Step 1: Initialize Deployment
@@ -99,10 +150,14 @@ llmcrawl-deploy/
 ├── .env.example            # Reference configuration
 ├── Dockerfile.*            # Service build files
 ├── prometheus.yml          # Monitoring config
-├── requirements/           # Python dependencies
 ├── grafana-provisioning/   # Grafana dashboards
+├── data/files/             # Default MCP file mount point
 └── logs/                   # Service logs
 ```
+
+**Note:** The `tools/` (authentication, WCD bridge) are accessed via CLI commands:
+- `llmcrawl auth` - Internal site authentication
+- `llmcrawl wcd-bridge` - Windows Composition Database bridge
 
 ### Step 2: Configure Your Settings
 
@@ -216,16 +271,11 @@ To crawl internal sites that require authentication (e.g., www.osgwiki.com), you
 
 **Setup:**
 
-1. **Run the authentication tool** (from the project root):
-
-```powershell
-# Windows
-python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page
-```
+1. **Run the authentication command:**
 
 ```bash
-# Linux/Mac
-python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page
+# Authenticate to an internal site
+llmcrawl auth https://www.osgwiki.com/wiki/Main_Page
 ```
 
 2. **What the tool does:**
@@ -239,21 +289,27 @@ python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page
 3. **Options:**
 
 ```bash
+# See all options
+llmcrawl auth --help
+
 # Skip auto-apply to .env (just save cookies to .auth/ folder)
-python tools/msauth/authenticate.py https://www.osgwiki.com --no-apply
+llmcrawl auth https://www.osgwiki.com --no-apply
 
 # Skip container restart
-python tools/msauth/authenticate.py https://www.osgwiki.com --no-restart
+llmcrawl auth https://www.osgwiki.com --no-restart
 
 # Skip authentication test
-python tools/msauth/authenticate.py https://www.osgwiki.com --no-test
+llmcrawl auth https://www.osgwiki.com --no-test
+
+# Custom profile name
+llmcrawl auth https://internal-site.com --name my_site
 ```
 
 4. **Cookie Expiration:**
    - Authentication cookies expire after some time (typically hours to days)
-   - If crawling starts failing with authentication errors, re-run the tool:
+   - If crawling starts failing with authentication errors, re-run the command:
      ```bash
-     python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page
+     llmcrawl auth https://www.osgwiki.com/wiki/Main_Page
      ```
    - The tool will refresh the cookies and restart the crawler automatically
 
@@ -271,12 +327,15 @@ The WCD tool allows querying the Windows Composition Database for component info
 
 1. **Start the WCD Bridge service** on your host:
 
-```powershell
-# From the project root
-.\scripts\start_wcd_bridge.ps1 -WinCompShareCmd "\\winbuilds\release\rs_sparc_ctr_exp\29498.1001.251201-1700"
+```bash
+# Using build share path (recommended)
+llmcrawl wcd-bridge --build "\\winbuilds\release\rs_sparc_ctr_exp\29498.1001.251201-1700"
 
 # For a different architecture:
-.\scripts\start_wcd_bridge.ps1 -WinCompShareCmd "\\winbuilds\release\rs_sparc_ctr_exp\29498.1001.251201-1700" -Arch "arm64fre"
+llmcrawl wcd-bridge --build "\\winbuilds\release\..." --arch arm64fre
+
+# See all options
+llmcrawl wcd-bridge --help
 ```
 
 2. **Configure in `.env`:**
@@ -494,11 +553,14 @@ llmcrawl deploy --up
 | Task | Command |
 |------|---------|
 | Initialize deployment | `llmcrawl deploy --init` |
+| **Upgrade deployment** | `llmcrawl deploy --upgrade` |
 | Start services | `llmcrawl deploy --up` |
 | Stop services | `llmcrawl deploy --down` |
 | View status | `llmcrawl deploy --status` |
 | View logs | `llmcrawl deploy --logs` |
 | Restart services | `llmcrawl deploy --restart` |
+| Authenticate to internal site | `llmcrawl auth <url>` |
+| Start WCD bridge | `llmcrawl wcd-bridge --build <path>` |
 | Open HiChat | http://localhost:8080 |
 | API Documentation | http://localhost:8000/docs |
 

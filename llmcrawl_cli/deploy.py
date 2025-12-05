@@ -6,6 +6,7 @@ Manages deployment of LLMCrawl services using Docker Compose.
 
 Usage:
     llmcrawl deploy --init              # Initialize deployment folder
+    llmcrawl deploy --upgrade           # Upgrade deployment after pip upgrade
     llmcrawl deploy --up                # Start all services
     llmcrawl deploy --down              # Stop all services
     llmcrawl deploy --logs              # View service logs
@@ -13,11 +14,12 @@ Usage:
 """
 
 import argparse
-import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
+from typing import Dict, Optional
 
 
 def get_package_deploy_dir() -> Path:
@@ -108,7 +110,7 @@ def init_deployment(target_dir: Path, force: bool = False) -> bool:
         print("   Use --force to overwrite, or --dir to specify a different location.")
         return False
 
-    print(f"📦 Initializing LLMCrawl deployment...")
+    print("📦 Initializing LLMCrawl deployment...")
     print(f"   Source: {source_dir}")
     print(f"   Target: {target_dir}")
 
@@ -188,7 +190,7 @@ def init_deployment(target_dir: Path, force: bool = False) -> bool:
     env_file = target_dir / ".env"
     if env_example.exists() and not env_file.exists():
         shutil.copy2(env_example, env_file)
-        print(f"   ✓ Created .env from .env.example")
+        print("   ✓ Created .env from .env.example")
 
     print()
     print("=" * 60)
@@ -200,6 +202,190 @@ def init_deployment(target_dir: Path, force: bool = False) -> bool:
     print("  2. Edit .env with your API keys and settings")
     print("  3. Run: llmcrawl deploy --up")
     print()
+
+    return True
+
+
+def parse_env_file(env_path: Path) -> Dict[str, str]:
+    """Parse a .env file and return a dictionary of key-value pairs."""
+    env_vars: Dict[str, str] = {}
+    if not env_path.exists():
+        return env_vars
+
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            # Skip empty lines and comments
+            if not line or line.startswith("#"):
+                continue
+            # Parse KEY=VALUE
+            if "=" in line:
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip()
+                # Remove surrounding quotes if present
+                if (value.startswith('"') and value.endswith('"')) or (
+                    value.startswith("'") and value.endswith("'")
+                ):
+                    value = value[1:-1]
+                env_vars[key] = value
+    return env_vars
+
+
+def merge_env_files(old_env: dict, new_example: Path) -> str:
+    """Merge old .env values into new .env.example template."""
+    if not new_example.exists():
+        return ""
+
+    with open(new_example, "r", encoding="utf-8") as f:
+        template = f.read()
+
+    # Replace values in template with old values where keys match
+    lines = template.split("\n")
+    result_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key in old_env and old_env[key]:
+                # Preserve the old value
+                # Handle values that might need quoting
+                value = old_env[key]
+                if " " in value or "=" in value:
+                    value = f'"{value}"'
+                result_lines.append(f"{key}={value}")
+                continue
+        result_lines.append(line)
+
+    return "\n".join(result_lines)
+
+
+def upgrade_deployment(target_dir: Path, restart: bool = True) -> bool:
+    """Upgrade deployment files while preserving user configuration."""
+    source_dir = get_package_deploy_dir()
+
+    if not source_dir.exists():
+        print(f"❌ Error: Deploy source directory not found: {source_dir}")
+        print("   Make sure LLMCrawl is properly installed.")
+        return False
+
+    if not target_dir.exists():
+        print(f"❌ Error: Deployment directory not found: {target_dir}")
+        print("   Run 'llmcrawl deploy --init' first.")
+        return False
+
+    print("🔄 Upgrading LLMCrawl deployment...")
+    print(f"   Source: {source_dir}")
+    print(f"   Target: {target_dir}")
+    print()
+
+    # Step 1: Backup current .env
+    env_file = target_dir / ".env"
+    backup_dir = target_dir / "backups"
+    backup_dir.mkdir(exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if env_file.exists():
+        backup_env = backup_dir / f".env.backup_{timestamp}"
+        shutil.copy2(env_file, backup_env)
+        print(f"   ✓ Backed up .env to backups/.env.backup_{timestamp}")
+
+        # Parse old .env
+        old_env_vars = parse_env_file(env_file)
+    else:
+        old_env_vars = {}
+        print("   ⚠ No .env file found, will use defaults")
+
+    # Step 2: Copy new config files
+    files_to_copy = [
+        "docker-compose.yml",
+        ".env.example",
+        "prometheus.yml",
+    ]
+
+    dockerfiles = [
+        "Dockerfile.crawler",
+        "Dockerfile.gateway",
+        "Dockerfile.indexer",
+        "Dockerfile.mcp_server",
+        "Dockerfile.demo",
+    ]
+
+    for filename in files_to_copy + dockerfiles:
+        src = source_dir / filename
+        dst = target_dir / filename
+        if src.exists():
+            # Backup old file if it exists and is different
+            if dst.exists():
+                backup_file = backup_dir / f"{filename}.backup_{timestamp}"
+                shutil.copy2(dst, backup_file)
+            shutil.copy2(src, dst)
+            print(f"   ✓ Updated {filename}")
+        else:
+            print(f"   ⚠ Skipped {filename} (not found in package)")
+
+    # Step 3: Update directories
+    dirs_to_copy = [
+        "requirements",
+        "grafana-provisioning",
+    ]
+
+    for dirname in dirs_to_copy:
+        src = source_dir / dirname
+        dst = target_dir / dirname
+        if src.exists():
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst)
+            print(f"   ✓ Updated {dirname}/")
+
+    # Update service directories
+    for service_dir in ["gateway", "crawler", "indexer", "mcp_servers"]:
+        src = source_dir / service_dir
+        dst = target_dir / service_dir
+        if src.exists():
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst)
+            print(f"   ✓ Updated {service_dir}/")
+
+    # Step 4: Merge .env with new .env.example
+    new_example = target_dir / ".env.example"
+    if old_env_vars and new_example.exists():
+        merged_env = merge_env_files(old_env_vars, new_example)
+        with open(env_file, "w", encoding="utf-8") as f:
+            f.write(merged_env)
+        print("   ✓ Merged your settings into new .env")
+    elif new_example.exists():
+        shutil.copy2(new_example, env_file)
+        print("   ✓ Created .env from .env.example")
+
+    print()
+    print("=" * 60)
+    print("✅ Deployment upgraded successfully!")
+    print("=" * 60)
+    print()
+    print(f"Backups saved to: {backup_dir}")
+    print()
+
+    # Step 5: Restart services if requested
+    if restart:
+        print("🔄 Rebuilding and restarting services...")
+        print()
+        result = cmd_up(target_dir, detach=True)
+        if result != 0:
+            print()
+            print("⚠️  Services may need manual restart.")
+            print("   Run: llmcrawl deploy --up")
+            return False
+    else:
+        print("Next steps:")
+        print("  1. Review the merged .env file")
+        print("  2. Check backups/ folder if you need to restore anything")
+        print("  3. Run: llmcrawl deploy --up")
+        print()
 
     return True
 
@@ -269,7 +455,9 @@ def cmd_down(deploy_dir: Path) -> int:
     return run_compose(["down"], deploy_dir)
 
 
-def cmd_logs(deploy_dir: Path, follow: bool = True, service: str = None) -> int:
+def cmd_logs(
+    deploy_dir: Path, follow: bool = True, service: Optional[str] = None
+) -> int:
     """View service logs."""
     args = ["logs"]
     if follow:
@@ -286,7 +474,7 @@ def cmd_status(deploy_dir: Path) -> int:
     return run_compose(["ps"], deploy_dir)
 
 
-def cmd_restart(deploy_dir: Path, service: str = None) -> int:
+def cmd_restart(deploy_dir: Path, service: Optional[str] = None) -> int:
     """Restart services."""
     args = ["restart"]
     if service:
@@ -308,6 +496,7 @@ def main() -> None:
         epilog="""
 Examples:
   llmcrawl deploy --init              Initialize deployment folder
+  llmcrawl deploy --upgrade           Upgrade after pip install (preserves .env)
   llmcrawl deploy --up                Start all services
   llmcrawl deploy --down              Stop all services
   llmcrawl deploy --logs              View logs (Ctrl+C to exit)
@@ -324,6 +513,11 @@ Examples:
         "--init",
         action="store_true",
         help="Initialize deployment folder with config files",
+    )
+    action_group.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="Upgrade deployment after pip upgrade (preserves .env settings)",
     )
     action_group.add_argument("--up", action="store_true", help="Start all services")
     action_group.add_argument("--down", action="store_true", help="Stop all services")
@@ -355,6 +549,11 @@ Examples:
         "--no-follow", action="store_true", help="Don't follow logs (for --logs)"
     )
     parser.add_argument(
+        "--no-restart",
+        action="store_true",
+        help="Don't restart services after upgrade (for --upgrade)",
+    )
+    parser.add_argument(
         "service",
         nargs="?",
         default=None,
@@ -374,6 +573,9 @@ Examples:
 
     if args.init:
         success = init_deployment(deploy_dir, force=args.force)
+        exit_code = 0 if success else 1
+    elif args.upgrade:
+        success = upgrade_deployment(deploy_dir, restart=not args.no_restart)
         exit_code = 0 if success else 1
     elif args.up:
         exit_code = cmd_up(deploy_dir, detach=not args.no_detach)
