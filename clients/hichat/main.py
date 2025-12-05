@@ -17,18 +17,14 @@ import asyncio
 import json
 import logging
 import os
-import platform
-import subprocess
-import sys
 import webbrowser
 from pathlib import Path
-from typing import Optional
 
 import httpx
+import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-import uvicorn
 
 # Configure logging
 logging.basicConfig(
@@ -59,7 +55,7 @@ config = {
 
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_index():
+async def serve_index() -> FileResponse:
     """Serve the main HTML page."""
     index_path = STATIC_DIR / "index.html"
     if not index_path.exists():
@@ -68,7 +64,7 @@ async def serve_index():
 
 
 @app.get("/api/config")
-async def get_config():
+async def get_config() -> dict:
     """Return current configuration."""
     return {
         "mode": "service",
@@ -80,7 +76,7 @@ async def get_config():
 
 
 @app.get("/api/models")
-async def get_models():
+async def get_models() -> dict:
     """Fetch available models from gateway."""
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -96,7 +92,7 @@ async def get_models():
 
 
 @app.post("/api/agent/execute")
-async def execute_agent(request: Request):
+async def execute_agent(request: Request) -> JSONResponse:
     """Proxy agent execution requests to the gateway."""
     try:
         body = await request.json()
@@ -133,14 +129,48 @@ async def execute_agent(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON in request body")
 
 
+@app.post("/api/agent/cancel/{conversation_id}")
+async def cancel_agent_request(conversation_id: str) -> JSONResponse:
+    """Cancel an active agent request."""
+    try:
+        logger.info(f"Sending cancel request for conversation: {conversation_id}")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{config['gateway_url']}/agent/cancel/{conversation_id}"
+            )
+            return JSONResponse(
+                status_code=response.status_code, content=response.json()
+            )
+    except httpx.HTTPError as e:
+        logger.error(f"Cancel request failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Cancel request failed: {str(e)}")
+
+
+@app.get("/api/agent/status/{conversation_id}")
+async def get_agent_status(conversation_id: str) -> JSONResponse:
+    """Get the status of an agent request."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{config['gateway_url']}/agent/status/{conversation_id}"
+            )
+            return JSONResponse(
+                status_code=response.status_code, content=response.json()
+            )
+    except httpx.HTTPError as e:
+        logger.error(f"Status request failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Status request failed: {str(e)}")
+
+
 # Mount static files (CSS, JS)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-def open_browser(url: str, delay: float = 1.0):
+def open_browser(url: str, delay: float = 1.0) -> None:
     """Open the default browser after a short delay."""
 
-    async def _open():
+    async def _open() -> None:
         await asyncio.sleep(delay)
         try:
             webbrowser.open(url)
@@ -152,7 +182,7 @@ def open_browser(url: str, delay: float = 1.0):
     asyncio.create_task(_open())
 
 
-def main():
+def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
         description="HiChat Web Client - AI Chat Interface for LLMCrawl"
@@ -200,7 +230,7 @@ def main():
     if not args.no_browser:
 
         @app.on_event("startup")
-        async def startup_event():
+        async def startup_event() -> None:
             open_browser(url)
 
     # Run the server

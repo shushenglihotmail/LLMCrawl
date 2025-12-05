@@ -172,6 +172,7 @@ hichat
 - Model selection from gateway
 - Conversation history with save-to-markdown
 - Fullscreen mode
+- **Stop button** - Cancel ongoing requests with server-side cancellation (prevents duplicate requests)
 
 📖 **See [clients/hichat/README.md](clients/hichat/README.md)** for full documentation
 

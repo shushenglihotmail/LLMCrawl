@@ -95,7 +95,8 @@
                                         <div class="help-tooltip-line">• <code>azdo:/vm/compute:ext:xml</code></div>
                                         <div class="help-tooltip-line">• <code>azdo:/:file:*manifest*.xml</code></div>
                                         <div class="help-tooltip-line">•
-                                            <code>azdo://Project/repo/path:ext:cs?branch=main</code></div>
+                                            <code>azdo://Project/repo/path:ext:cs?branch=main</code>
+                                        </div>
                                     </span>
                                 </span>
                             </label>
@@ -120,7 +121,8 @@
                                         <div class="help-tooltip-line">• <code>azdo:/src:ext:h</code> - All .h files in
                                             /src</div>
                                         <div class="help-tooltip-line">•
-                                            <code>azdo://Project/repo/path:ext:cs?branch=main</code></div>
+                                            <code>azdo://Project/repo/path:ext:cs?branch=main</code>
+                                        </div>
                                     </span>
                                 </span>
                             </label>
@@ -185,7 +187,7 @@
 
                 <div class="button-row">
                     <button class="send-btn" id="sendBtn" onclick="submitRequest()">Send Message</button>
-                    <button class="clear-btn" onclick="clearChat()">Clear Chat</button>
+                    <button class="clear-btn" id="clearBtn" onclick="handleClearOrStop()">Clear Chat</button>
                 </div>
             </div>
         </div>

@@ -10,6 +10,7 @@ A lightweight Python web client for interacting with LLMCrawl gateway service.
 - Model selection from gateway
 - Conversation history with save-to-markdown
 - Fullscreen mode
+- **Stop button** - Cancel ongoing requests with server-side cancellation support
 
 ## Installation
 
@@ -72,3 +73,18 @@ The Python server:
 1. Serves static files (HTML, CSS, JS)
 2. Provides `/api/config` and `/api/models` endpoints
 3. Proxies `/api/agent/execute` to the gateway's `/agent/chat`
+4. Proxies `/api/agent/cancel/{conversation_id}` for request cancellation
+5. Proxies `/api/agent/status/{conversation_id}` for status polling
+
+## Stop Button Feature
+
+During an ongoing request (while "Thinking..." is displayed), the "Clear Chat" button becomes a red "Stop" button. When clicked:
+
+1. Client aborts the HTTP request
+2. Sends cancel request to gateway (`POST /agent/cancel/{conversation_id}`)
+3. Gateway marks the request as cancelled
+4. Agent checks cancellation flag at checkpoints (before each tool execution)
+5. Client polls status endpoint until agent is fully stopped
+6. UI resets and button returns to "Clear Chat"
+
+This ensures that both client and server-side operations are properly stopped, preventing duplicate requests and resource waste.

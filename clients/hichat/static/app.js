@@ -17,21 +17,21 @@ let mermaidCounter = 0;
 async function renderMermaidDiagrams(container) {
     // Find all code blocks with language 'mermaid'
     const codeBlocks = container.querySelectorAll('pre code.language-mermaid');
-    
+
     for (const codeBlock of codeBlocks) {
         const pre = codeBlock.parentElement;
         const mermaidCode = codeBlock.textContent;
-        
+
         // Create a container for the rendered diagram
         const diagramDiv = document.createElement('div');
         diagramDiv.className = 'mermaid-diagram';
         const diagramId = 'mermaid-' + (++mermaidCounter);
-        
+
         try {
             // Render the mermaid diagram
             const { svg } = await mermaid.render(diagramId, mermaidCode);
             diagramDiv.innerHTML = svg;
-            
+
             // Replace the code block with the rendered diagram
             pre.parentNode.replaceChild(diagramDiv, pre);
         } catch (error) {
@@ -49,24 +49,24 @@ function validateAzdoUri(uri) {
     if (!uri.startsWith('azdo:')) {
         return { valid: false, error: 'Azure DevOps URI must start with "azdo:"' };
     }
-    
+
     const rest = uri.substring(5);
-    
+
     if (!rest.startsWith('/')) {
         return { valid: false, error: 'Path must start with "/" after "azdo:"' };
     }
-    
+
     const hasSearchText = rest.includes(':');
     if (!hasSearchText) {
         return { valid: false, error: 'Azure DevOps URI must include searchText after colon (e.g., azdo:/path:ext:xml)' };
     }
-    
+
     const beforeQuery = rest.split('?')[0];
     const searchTextPart = beforeQuery.substring(beforeQuery.lastIndexOf(':') + 1);
     if (!searchTextPart || searchTextPart.trim() === '') {
         return { valid: false, error: 'Search text cannot be empty after colon' };
     }
-    
+
     return { valid: true };
 }
 
@@ -74,33 +74,33 @@ function validateLocalPath(path) {
     if (!path.startsWith('/')) {
         return { valid: false, error: 'Local path must start with "/"' };
     }
-    
+
     const invalidChars = /[<>"|?]/;
     if (invalidChars.test(path)) {
         return { valid: false, error: 'Path contains invalid characters: < > " |' };
     }
-    
+
     if (path === '/') {
         return { valid: false, error: 'Path cannot be just "/" - specify a file or folder' };
     }
-    
+
     return { valid: true };
 }
 
 function validateTargetPath(path) {
     path = path.trim();
     if (!path) return { valid: true };
-    
+
     if (path.startsWith('azdo:')) {
         return validateAzdoUri(path);
     }
-    
+
     if (path.startsWith('/')) {
         return validateLocalPath(path);
     }
-    
-    return { 
-        valid: false, 
+
+    return {
+        valid: false,
         error: 'Path must be a local path starting with "/" or Azure DevOps URI starting with "azdo:"'
     };
 }
@@ -108,24 +108,24 @@ function validateTargetPath(path) {
 function validateReferencePath(path) {
     path = path.trim();
     if (!path) return { valid: true };
-    
+
     if (path.startsWith('azdo:')) {
         return validateAzdoUri(path);
     }
-    
+
     if (path.startsWith('/')) {
         return validateLocalPath(path);
     }
-    
-    return { 
-        valid: false, 
+
+    return {
+        valid: false,
         error: 'Reference path must be a local path starting with "/" or Azure DevOps URI starting with "azdo:"'
     };
 }
 
 function validateAllPaths() {
     const errors = [];
-    
+
     const targetPathsText = document.getElementById('targetPaths').value.trim();
     if (targetPathsText) {
         const targetPaths = targetPathsText.split('\n').map(p => p.trim()).filter(p => p);
@@ -136,7 +136,7 @@ function validateAllPaths() {
             }
         });
     }
-    
+
     const referenceFilesText = document.getElementById('referenceFiles').value.trim();
     if (referenceFilesText) {
         const referenceFiles = referenceFilesText.split('\n').map(p => p.trim()).filter(p => p);
@@ -147,12 +147,12 @@ function validateAllPaths() {
             }
         });
     }
-    
+
     return errors;
 }
 
 function showValidationError(errors) {
-    const errorMessage = '⚠️ Invalid Path Format\n\n' + errors.join('\n\n') + 
+    const errorMessage = '⚠️ Invalid Path Format\n\n' + errors.join('\n\n') +
         '\n\n📖 Valid formats:\n' +
         '• Target Paths: azdo:/path:searchText\n' +
         '• Reference Files: /local/path or azdo:/path:searchText';
@@ -160,32 +160,32 @@ function showValidationError(errors) {
 }
 
 // Dynamic tooltip positioning
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const seedUrlsInput = document.getElementById('seedUrlsInput');
     if (seedUrlsInput) {
         seedUrlsInput.addEventListener('input', updateDownloadButtonState);
     }
-    
+
     const helpIcons = document.querySelectorAll('.help-icon');
-    
+
     helpIcons.forEach(icon => {
-        icon.addEventListener('mouseenter', function(e) {
+        icon.addEventListener('mouseenter', function (e) {
             const tooltip = this.querySelector('.help-tooltip');
             if (!tooltip) return;
-            
+
             const iconRect = this.getBoundingClientRect();
             const tooltipRect = tooltip.getBoundingClientRect();
             const viewportHeight = window.innerHeight;
-            
+
             const spaceAbove = iconRect.top;
             const spaceBelow = viewportHeight - iconRect.bottom;
-            
+
             if (spaceBelow > tooltipRect.height + 10 || spaceBelow > spaceAbove) {
                 tooltip.style.top = (iconRect.bottom + 8) + 'px';
             } else {
                 tooltip.style.top = (iconRect.top - tooltipRect.height - 8) + 'px';
             }
-            
+
             tooltip.style.left = (iconRect.left + iconRect.width / 2) + 'px';
             tooltip.style.transform = 'translateX(-50%)';
         });
@@ -199,6 +199,8 @@ let historyIndex = -1;
 let unsavedInput = '';
 let clearHistoryFlag = false;
 let currentWorkflow = 'general_chat';
+let currentAbortController = null;
+let isRequestInProgress = false;
 
 // Workflow UI configuration
 const WORKFLOW_UI_CONFIG = {
@@ -243,7 +245,7 @@ const WORKFLOW_UI_CONFIG = {
 // Apply workflow UI restrictions
 function applyWorkflowRestrictions(workflow) {
     const config = WORKFLOW_UI_CONFIG[workflow] || WORKFLOW_UI_CONFIG.general_chat;
-    
+
     // Target Paths
     const targetPathsTextarea = document.getElementById('targetPaths');
     const targetPathsLabel = targetPathsTextarea.closest('.form-group').querySelector('label');
@@ -255,7 +257,7 @@ function applyWorkflowRestrictions(workflow) {
     } else {
         targetPathsLabel.style.opacity = '1';
     }
-    
+
     // Reference Files
     const referenceFilesTextarea = document.getElementById('referenceFiles');
     const referenceFilesLabel = referenceFilesTextarea.closest('.form-group').querySelector('label');
@@ -267,7 +269,7 @@ function applyWorkflowRestrictions(workflow) {
     } else {
         referenceFilesLabel.style.opacity = '1';
     }
-    
+
     // Azure DevOps MCP checkbox
     const azureMcpCheckbox = document.getElementById('exposeAzureMcp');
     const azureMcpLabel = azureMcpCheckbox.closest('.switch-item');
@@ -285,12 +287,12 @@ function applyWorkflowRestrictions(workflow) {
     if (!config.windowsCompositionExposable) {
         winCompCheckbox.checked = false;
     }
-    
+
     console.log('Applied workflow restrictions for:', workflow, config);
 }
 
 // Workflow selector change handler
-document.getElementById('workflowSelector').addEventListener('change', function() {
+document.getElementById('workflowSelector').addEventListener('change', function () {
     currentWorkflow = this.value;
     applyWorkflowRestrictions(currentWorkflow);
     console.log('Workflow changed to:', currentWorkflow);
@@ -305,36 +307,36 @@ function togglePanel() {
 }
 
 // Message history navigation
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const messageInput = document.getElementById('messageInput');
-    
-    messageInput.addEventListener('keydown', function(e) {
+
+    messageInput.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             submitRequest();
             return;
         }
-        
+
         if (e.key === 'ArrowUp') {
             e.preventDefault();
             if (messageHistory.length === 0) return;
-            
+
             if (historyIndex === -1) {
                 unsavedInput = messageInput.value;
                 historyIndex = messageHistory.length - 1;
             } else if (historyIndex > 0) {
                 historyIndex--;
             }
-            
+
             if (historyIndex >= 0) {
                 messageInput.value = messageHistory[historyIndex];
             }
         }
-        
+
         if (e.key === 'ArrowDown') {
             e.preventDefault();
             if (messageHistory.length === 0) return;
-            
+
             if (historyIndex < messageHistory.length - 1 && historyIndex >= 0) {
                 historyIndex++;
                 messageInput.value = messageHistory[historyIndex];
@@ -368,10 +370,10 @@ async function loadModels() {
         }
         const data = await response.json();
         const modelsData = data.models;
-        
+
         const modelSelector = document.getElementById('modelSelector');
         modelSelector.innerHTML = '';
-        
+
         modelsData.forEach(model => {
             const option = document.createElement('option');
             option.value = model.name;
@@ -393,7 +395,7 @@ async function loadModels() {
 async function submitRequest() {
     const messageInput = document.getElementById('messageInput');
     const message = messageInput.value.trim();
-    
+
     if (!message) {
         alert('Please enter a message.');
         return;
@@ -411,13 +413,20 @@ async function submitRequest() {
     const sendBtn = document.getElementById('sendBtn');
     const loading = document.getElementById('loading');
     const downloadBtn = document.getElementById('downloadBtn');
-    
+    const clearBtn = document.getElementById('clearBtn');
+
     sendBtn.disabled = true;
     messageInput.disabled = true;
     downloadBtn.disabled = true;
     loading.classList.add('active');
 
-    // Collapse the panel after sending
+    // Toggle Clear Chat button to Stop button
+    isRequestInProgress = true;
+    clearBtn.textContent = 'Stop';
+    clearBtn.classList.add('stop-mode');
+
+    // Create AbortController for this request
+    currentAbortController = new AbortController();    // Collapse the panel after sending
     const panel = document.getElementById('unifiedPanel');
     const btn = document.getElementById('collapseBtn');
     if (!panel.classList.contains('collapsed')) {
@@ -436,18 +445,18 @@ async function submitRequest() {
     const targetPaths = document.getElementById('targetPaths').value.trim()
         ? document.getElementById('targetPaths').value.split('\n').map(p => p.trim()).filter(p => p)
         : null;
-    
+
     const referenceFiles = document.getElementById('referenceFiles').value.trim()
         ? document.getElementById('referenceFiles').value.split('\n').map(p => p.trim()).filter(p => p)
         : null;
-    
+
     const seedUrls = document.getElementById('seedUrlsInput').value.trim()
         ? document.getElementById('seedUrlsInput').value.split(',').map(url => url.trim()).filter(url => url)
         : null;
-    
+
     const enableEmbedding = document.getElementById('enableEmbedding').checked;
     const crawlDepth = parseInt(document.getElementById('crawlDepth').value) || 1;
-    
+
     const exposeToLlm = {
         local_mcp: document.getElementById('exposeLocalMcp').checked,
         azure_devops_mcp: document.getElementById('exposeAzureMcp').checked,
@@ -479,7 +488,8 @@ async function submitRequest() {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(requestBody)
+            body: JSON.stringify(requestBody),
+            signal: currentAbortController.signal
         });
 
         if (!response.ok) {
@@ -488,7 +498,7 @@ async function submitRequest() {
         }
 
         const data = await response.json();
-        
+
         if (data.conversation_id) {
             conversationId = data.conversation_id;
         }
@@ -501,7 +511,7 @@ async function submitRequest() {
             if (ctx.reference_files > 0) parts.push(ctx.reference_files + ' reference files');
             if (ctx.crawled_urls > 0) parts.push(ctx.crawled_urls + ' crawled URLs');
             if (ctx.web_search_results > 0) parts.push(ctx.web_search_results + ' web results');
-            
+
             if (parts.length > 0) {
                 contextInfo = '\n\n*Context gathered: ' + parts.join(', ') + '*';
             }
@@ -513,19 +523,31 @@ async function submitRequest() {
         });
 
     } catch (error) {
-        console.error('Request error:', error);
-        addMessage('assistant', 'Error: ' + error.message, null, true);
+        if (error.name === 'AbortError') {
+            console.log('Request was stopped by user');
+            addMessage('assistant', '*Request stopped by user.*', null, false);
+        } else {
+            console.error('Request error:', error);
+            addMessage('assistant', 'Error: ' + error.message, null, true);
+        }
     } finally {
+        // Reset UI state
         sendBtn.disabled = false;
         messageInput.disabled = false;
         loading.classList.remove('active');
         updateDownloadButtonState();
         messageInput.focus();
+
+        // Reset Stop button back to Clear Chat
+        isRequestInProgress = false;
+        currentAbortController = null;
+        clearBtn.textContent = 'Clear Chat';
+        clearBtn.classList.remove('stop-mode');
     }
 }
 
 function generateUUID() {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
         const r = Math.random() * 16 | 0;
         const v = c === 'x' ? r : (r & 0x3 | 0x8);
         return v.toString(16);
@@ -536,7 +558,7 @@ function addMessage(role, content, meta = null, isError = false) {
     const chatArea = document.getElementById('chatArea');
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message ' + role;
-    
+
     let metaHTML = '';
     if (meta) {
         metaHTML = '<div class="message-meta">Model: ' + meta.model + ' | Tokens: ' + meta.tokens + '</div>';
@@ -544,13 +566,13 @@ function addMessage(role, content, meta = null, isError = false) {
 
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
-    
+
     if (role === 'assistant' && !isError) {
         const markdownDiv = document.createElement('div');
         markdownDiv.className = 'markdown-content';
         markdownDiv.innerHTML = marked.parse(content);
         contentDiv.appendChild(markdownDiv);
-        
+
         setTimeout(() => renderMermaidDiagrams(markdownDiv), 0);
     } else {
         contentDiv.textContent = content;
@@ -607,7 +629,7 @@ async function exportToMarkdown() {
         }
 
         const result = await response.json();
-        
+
         const downloadUrl = currentConfig.serviceUrl + result.download_url;
         const link = document.createElement('a');
         link.href = downloadUrl;
@@ -616,7 +638,7 @@ async function exportToMarkdown() {
         link.click();
         document.body.removeChild(link);
 
-        addMessage('assistant', 
+        addMessage('assistant',
             '**Download Complete!** ✅\n\n' +
             '- **Pages Downloaded:** ' + result.pages_exported + '\n' +
             '- **File Size:** ' + result.file_size_kb + ' KB\n' +
@@ -642,6 +664,83 @@ function updateDownloadButtonState() {
     downloadBtn.disabled = !hasSeedUrls;
 }
 
+function handleClearOrStop() {
+    if (isRequestInProgress) {
+        stopRequest();
+    } else {
+        clearChat();
+    }
+}
+
+async function stopRequest() {
+    if (!conversationId) {
+        console.log('No conversation to stop');
+        return;
+    }
+
+    const clearBtn = document.getElementById('clearBtn');
+    clearBtn.textContent = 'Stopping...';
+    clearBtn.disabled = true;
+
+    try {
+        // First, abort the client-side fetch
+        if (currentAbortController) {
+            console.log('Aborting client-side request...');
+            currentAbortController.abort();
+        }
+
+        // Then, call the server to cancel the agent
+        console.log('Sending cancel request to server for conversation:', conversationId);
+        const cancelResponse = await fetch(`/api/agent/cancel/${conversationId}`, {
+            method: 'POST'
+        });
+        const cancelData = await cancelResponse.json();
+        console.log('Cancel response:', cancelData);
+
+        // Poll for completion - wait until agent is fully stopped
+        let attempts = 0;
+        const maxAttempts = 30; // 30 seconds max wait
+        while (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+
+            const statusResponse = await fetch(`/api/agent/status/${conversationId}`);
+            const statusData = await statusResponse.json();
+            console.log('Status check:', statusData);
+
+            if (!statusData.busy) {
+                console.log('Agent fully stopped');
+                break;
+            }
+            attempts++;
+        }
+
+        if (attempts >= maxAttempts) {
+            console.warn('Timeout waiting for agent to stop');
+        }
+
+    } catch (error) {
+        console.error('Error stopping request:', error);
+    } finally {
+        // Reset UI - the finally block in submitRequest may have already done this
+        // but we do it again in case the fetch was already aborted
+        isRequestInProgress = false;
+        currentAbortController = null;
+        clearBtn.textContent = 'Clear Chat';
+        clearBtn.classList.remove('stop-mode');
+        clearBtn.disabled = false;
+
+        const sendBtn = document.getElementById('sendBtn');
+        const messageInput = document.getElementById('messageInput');
+        const loading = document.getElementById('loading');
+
+        sendBtn.disabled = false;
+        messageInput.disabled = false;
+        loading.classList.remove('active');
+        updateDownloadButtonState();
+        messageInput.focus();
+    }
+}
+
 function clearChat() {
     const chatArea = document.getElementById('chatArea');
     chatArea.innerHTML = '';
@@ -663,7 +762,7 @@ let isFullscreen = false;
 function toggleFullscreen() {
     const container = document.getElementById('mainContainer');
     isFullscreen = !isFullscreen;
-    
+
     if (isFullscreen) {
         container.classList.add('fullscreen-mode');
         document.body.style.overflow = 'hidden';
@@ -673,7 +772,7 @@ function toggleFullscreen() {
     }
 }
 
-document.addEventListener('keydown', function(e) {
+document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && isFullscreen) {
         toggleFullscreen();
     }
@@ -686,24 +785,24 @@ document.addEventListener('keydown', function(e) {
 function saveConversationToMarkdown() {
     const chatArea = document.getElementById('chatArea');
     const messages = chatArea.querySelectorAll('.message');
-    
+
     if (messages.length === 0) {
         alert('No conversation to save.');
         return;
     }
-    
+
     let markdown = '# HiChat Conversation\n\n';
     markdown += `**Date:** ${new Date().toLocaleString()}\n\n`;
     markdown += `**Workflow:** ${currentWorkflow}\n\n`;
     markdown += '---\n\n';
-    
+
     messages.forEach((msg, index) => {
         const isUser = msg.classList.contains('user');
         const role = isUser ? '👤 **User**' : '🤖 **Assistant**';
-        
+
         const contentEl = msg.querySelector('.message-content');
         let content = '';
-        
+
         if (isUser) {
             content = contentEl.textContent.trim();
         } else {
@@ -714,23 +813,23 @@ function saveConversationToMarkdown() {
                 content = contentEl.textContent.trim();
             }
         }
-        
+
         markdown += `## ${role}\n\n`;
         markdown += content + '\n\n';
-        
+
         if (index < messages.length - 1) {
             markdown += '---\n\n';
         }
     });
-    
+
     const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     link.href = url;
     link.download = `hichat-conversation-${timestamp}.md`;
-    
+
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -739,38 +838,38 @@ function saveConversationToMarkdown() {
 
 function extractMarkdownFromElement(element) {
     let result = '';
-    
+
     const clone = element.cloneNode(true);
-    
+
     const codeBlocks = clone.querySelectorAll('pre code');
     codeBlocks.forEach((block, i) => {
         const language = block.className.replace('language-', '') || '';
         const code = block.textContent;
         block.parentElement.outerHTML = `\n\`\`\`${language}\n${code}\n\`\`\`\n`;
     });
-    
+
     const inlineCode = clone.querySelectorAll('code');
     inlineCode.forEach(code => {
         code.outerHTML = '`' + code.textContent + '`';
     });
-    
+
     for (let i = 1; i <= 6; i++) {
         const headers = clone.querySelectorAll(`h${i}`);
         headers.forEach(h => {
             h.outerHTML = '\n' + '#'.repeat(i) + ' ' + h.textContent + '\n';
         });
     }
-    
+
     const bolds = clone.querySelectorAll('strong, b');
     bolds.forEach(b => {
         b.outerHTML = '**' + b.textContent + '**';
     });
-    
+
     const italics = clone.querySelectorAll('em, i');
     italics.forEach(i => {
         i.outerHTML = '*' + i.textContent + '*';
     });
-    
+
     const uls = clone.querySelectorAll('ul');
     uls.forEach(ul => {
         const items = ul.querySelectorAll('li');
@@ -780,7 +879,7 @@ function extractMarkdownFromElement(element) {
         });
         ul.outerHTML = listText;
     });
-    
+
     const ols = clone.querySelectorAll('ol');
     ols.forEach(ol => {
         const items = ol.querySelectorAll('li');
@@ -790,21 +889,21 @@ function extractMarkdownFromElement(element) {
         });
         ol.outerHTML = listText;
     });
-    
+
     const links = clone.querySelectorAll('a');
     links.forEach(a => {
         const href = a.getAttribute('href') || '';
         const text = a.textContent;
         a.outerHTML = `[${text}](${href})`;
     });
-    
+
     const paragraphs = clone.querySelectorAll('p');
     paragraphs.forEach(p => {
         p.outerHTML = p.textContent + '\n\n';
     });
-    
+
     result = clone.textContent || clone.innerText;
     result = result.replace(/\n{3,}/g, '\n\n').trim();
-    
+
     return result;
 }

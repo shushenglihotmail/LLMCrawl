@@ -37,6 +37,49 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 # Initialize agent config (singleton)
 _agent_config: Optional[AgentConfig] = None
 
+# =============================================================================
+# Active Request Tracking (for cancellation)
+# =============================================================================
+
+# Track active requests by conversation_id
+# Key: conversation_id, Value: {"cancelled": bool, "request_id": str}
+_active_requests: Dict[str, Dict[str, Any]] = {}
+
+
+def _mark_request_active(conversation_id: str, request_id: str) -> None:
+    """Mark a conversation as having an active request."""
+    _active_requests[conversation_id] = {
+        "cancelled": False,
+        "request_id": request_id,
+    }
+
+
+def _mark_request_cancelled(conversation_id: str) -> bool:
+    """Mark a conversation's request as cancelled. Returns True if there was an active request."""
+    if conversation_id in _active_requests:
+        _active_requests[conversation_id]["cancelled"] = True
+        logger.info(f"Marked request for conversation {conversation_id} as cancelled")
+        return True
+    return False
+
+
+def _is_request_cancelled(conversation_id: str) -> bool:
+    """Check if the current request has been cancelled."""
+    return _active_requests.get(conversation_id, {}).get("cancelled", False)
+
+
+def _clear_active_request(conversation_id: str) -> None:
+    """Clear active request tracking for a conversation."""
+    if conversation_id in _active_requests:
+        del _active_requests[conversation_id]
+        logger.debug(f"Cleared active request for conversation {conversation_id}")
+
+
+def _is_conversation_busy(conversation_id: str) -> bool:
+    """Check if a conversation has an active (non-cancelled) request."""
+    req = _active_requests.get(conversation_id)
+    return req is not None and not req.get("cancelled", False)
+
 
 # =============================================================================
 # Helper Functions - Path Expansion
@@ -1002,8 +1045,17 @@ async def _execute_llm_with_tools(
     tools: List[Dict[str, Any]],
     request_id: str,
     context_gathered: Dict[str, int],
+    conversation_id: str,
 ) -> Tuple[str, Optional[int]]:
-    """Execute LLM with tool calling loop."""
+    """Execute LLM with tool calling loop.
+
+    Checks for cancellation between tool calls and LLM rounds.
+    """
+    # Check for cancellation at start
+    if _is_request_cancelled(conversation_id):
+        logger.info(f"Request cancelled before LLM execution: {conversation_id}")
+        return "*Request was cancelled.*", None
+
     llm_client = LLMClient()
     tool_handler = get_tool_handler()
     tool_round = 0
@@ -1032,6 +1084,13 @@ async def _execute_llm_with_tools(
     # Tool execution loop with per-tool limits (no total limit)
     while response.get("tool_calls"):
         tool_round += 1
+
+        # Check for cancellation before each tool round
+        if _is_request_cancelled(conversation_id):
+            logger.info(
+                f"Request cancelled during tool round {tool_round}: {conversation_id}"
+            )
+            return "*Request was cancelled by user.*", None
 
         # Check which tools have exceeded their limits
         exceeded_tools = _check_tool_limits(response["tool_calls"], tool_usage)
@@ -1071,6 +1130,13 @@ async def _execute_llm_with_tools(
 
         # Execute each tool call
         for tool_call in response["tool_calls"]:
+            # Check for cancellation before each tool call
+            if _is_request_cancelled(conversation_id):
+                logger.info(
+                    f"Request cancelled before tool execution: {conversation_id}"
+                )
+                return "*Request was cancelled by user.*", None
+
             tool_name = tool_call.get("function", {}).get("name", "unknown")
 
             # Increment tool usage counter
@@ -1178,6 +1244,17 @@ async def execute(request: UnifiedWorkflowRequest):
         if not request.conversation_id:
             logger.info(f"New conversation: {conversation_id}")
 
+    # Check if there's already an active request for this conversation
+    if _is_conversation_busy(conversation_id):
+        logger.warning(f"Conversation {conversation_id} already has an active request")
+        raise HTTPException(
+            status_code=409,
+            detail="This conversation already has an active request. Please wait for it to complete or cancel it first.",
+        )
+
+    # Mark this request as active
+    _mark_request_active(conversation_id, request_id)
+
     try:
         agent = get_agent_config()
         context_gathered = {
@@ -1245,7 +1322,7 @@ async def execute(request: UnifiedWorkflowRequest):
 
         # Step 5: Execute LLM with tools
         response_text, tokens_used = await _execute_llm_with_tools(
-            request, messages, tools, request_id, context_gathered
+            request, messages, tools, request_id, context_gathered, conversation_id
         )
 
         # Step 6: Save conversation history
@@ -1279,6 +1356,42 @@ async def execute(request: UnifiedWorkflowRequest):
             status_code = 429
 
         raise HTTPException(status_code=status_code, detail=error_msg)
+
+    finally:
+        # Always clear active request tracking when done
+        _clear_active_request(conversation_id)
+
+
+@router.post("/cancel/{conversation_id}")
+async def cancel_request(conversation_id: str) -> Dict[str, Any]:
+    """
+    Cancel an active request for a conversation.
+
+    Returns immediately after marking the request as cancelled.
+    The actual cancellation happens at the next check point in the agent loop.
+    """
+    if _mark_request_cancelled(conversation_id):
+        logger.info(f"Cancel request received for conversation: {conversation_id}")
+        return {"status": "cancelling", "conversation_id": conversation_id}
+    else:
+        logger.info(f"No active request to cancel for conversation: {conversation_id}")
+        return {"status": "no_active_request", "conversation_id": conversation_id}
+
+
+@router.get("/status/{conversation_id}")
+async def get_request_status(conversation_id: str) -> Dict[str, Any]:
+    """
+    Get the status of a conversation's request.
+
+    Returns whether the conversation is busy (has an active request).
+    """
+    is_busy = _is_conversation_busy(conversation_id)
+    is_cancelled = _is_request_cancelled(conversation_id)
+    return {
+        "conversation_id": conversation_id,
+        "busy": is_busy,
+        "cancelled": is_cancelled,
+    }
 
 
 @router.get("/health")

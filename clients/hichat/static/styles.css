@@ -50,7 +50,9 @@ body {
     align-items: center;
 }
 
-.mode-selector, .model-selector, .workflow-selector {
+.mode-selector,
+.model-selector,
+.workflow-selector {
     background: rgba(255, 255, 255, 0.2);
     border: 1px solid rgba(255, 255, 255, 0.3);
     color: white;
@@ -60,7 +62,9 @@ body {
     font-size: 14px;
 }
 
-.mode-selector option, .model-selector option, .workflow-selector option {
+.mode-selector option,
+.model-selector option,
+.workflow-selector option {
     background: #667eea;
     color: white;
 }
@@ -87,6 +91,7 @@ body {
         opacity: 0;
         transform: translateY(10px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -218,10 +223,26 @@ button {
 .clear-btn {
     background: #f0f0f0;
     color: #666;
+    transition: background-color 0.2s, color 0.2s;
 }
 
 .clear-btn:hover {
     background: #e0e0e0;
+}
+
+.clear-btn.stop-mode {
+    background: #dc3545;
+    color: white;
+}
+
+.clear-btn.stop-mode:hover {
+    background: #c82333;
+}
+
+.clear-btn:disabled {
+    background: #ffc107;
+    color: #333;
+    cursor: wait;
 }
 
 /* Loading */
@@ -247,8 +268,13 @@ button {
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 /* Markdown Content */
@@ -276,13 +302,16 @@ button {
     padding: 0;
 }
 
-.markdown-content ul, .markdown-content ol {
+.markdown-content ul,
+.markdown-content ol {
     margin-left: 20px;
     margin-top: 10px;
     margin-bottom: 10px;
 }
 
-.markdown-content h1, .markdown-content h2, .markdown-content h3 {
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
     margin-top: 15px;
     margin-bottom: 10px;
 }
@@ -405,7 +434,7 @@ button {
     font-style: normal;
     white-space: nowrap;
     z-index: 10000;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     max-width: 350px;
     pointer-events: none;
 }
@@ -420,7 +449,7 @@ button {
 }
 
 .help-tooltip-line code {
-    background: rgba(255,255,255,0.15);
+    background: rgba(255, 255, 255, 0.15);
     padding: 2px 6px;
     border-radius: 3px;
     font-family: 'Courier New', monospace;
@@ -526,7 +555,8 @@ button {
 .chat-hover-actions {
     position: absolute;
     top: 10px;
-    right: 30px;  /* Moved left to avoid scrollbar overlap */
+    right: 30px;
+    /* Moved left to avoid scrollbar overlap */
     z-index: 100;
     opacity: 0;
     transition: opacity 0.3s ease;
@@ -632,5 +662,6 @@ button {
 .fullscreen-mode .chat-hover-actions {
     opacity: 1;
     top: 15px;
-    right: 80px;  /* More room for exit button */
+    right: 80px;
+    /* More room for exit button */
 }
