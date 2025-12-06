@@ -22,6 +22,11 @@ from pathlib import Path
 from typing import Dict, Optional
 
 
+def get_package_root_dir() -> Path:
+    """Get the package root directory (where gateway/, crawler/, etc. are)."""
+    return Path(__file__).parent.parent
+
+
 def get_package_deploy_dir() -> Path:
     """Get the deploy directory from the installed package."""
     # When installed via pip, the deploy folder is included as package data
@@ -149,7 +154,7 @@ def init_deployment(target_dir: Path, force: bool = False) -> bool:
         else:
             print(f"   ⚠ Skipped {filename} (not found)")
 
-    # Copy directories
+    # Copy directories from deploy folder
     for dirname in dirs_to_copy:
         src = source_dir / dirname
         dst = target_dir / dirname
@@ -161,15 +166,18 @@ def init_deployment(target_dir: Path, force: bool = False) -> bool:
         else:
             print(f"   ⚠ Skipped {dirname}/ (not found)")
 
-    # Copy service config directories (gateway, crawler, indexer, mcp_servers)
+    # Copy service source code from package root (for Docker builds)
+    package_root = get_package_root_dir()
     for service_dir in ["gateway", "crawler", "indexer", "mcp_servers"]:
-        src = source_dir / service_dir
+        src = package_root / service_dir
         dst = target_dir / service_dir
         if src.exists():
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(src, dst)
             print(f"   ✓ Copied {service_dir}/")
+        else:
+            print(f"   ⚠ Skipped {service_dir}/ (not found in package)")
 
     # Create logs directory
     logs_dir = target_dir / "logs"
@@ -250,10 +258,13 @@ def merge_env_files(old_env: dict, new_example: Path) -> str:
             key = stripped.split("=", 1)[0].strip()
             if key in old_env and old_env[key]:
                 # Preserve the old value
-                # Handle values that might need quoting
                 value = old_env[key]
-                if " " in value or "=" in value:
-                    value = f'"{value}"'
+                # Don't add quotes around JSON values (starts with [ or {)
+                # Docker Compose handles unquoted JSON fine
+                # Only quote simple values with special chars (but not JSON)
+                if not (value.startswith("[") or value.startswith("{")):
+                    if " " in value or "=" in value:
+                        value = f'"{value}"'
                 result_lines.append(f"{key}={value}")
                 continue
         result_lines.append(line)
@@ -326,7 +337,7 @@ def upgrade_deployment(target_dir: Path, restart: bool = True) -> bool:
         else:
             print(f"   ⚠ Skipped {filename} (not found in package)")
 
-    # Step 3: Update directories
+    # Step 3: Update directories from deploy folder
     dirs_to_copy = [
         "requirements",
         "grafana-provisioning",
@@ -341,9 +352,10 @@ def upgrade_deployment(target_dir: Path, restart: bool = True) -> bool:
             shutil.copytree(src, dst)
             print(f"   ✓ Updated {dirname}/")
 
-    # Update service directories
+    # Update service source code from package root
+    package_root = get_package_root_dir()
     for service_dir in ["gateway", "crawler", "indexer", "mcp_servers"]:
-        src = source_dir / service_dir
+        src = package_root / service_dir
         dst = target_dir / service_dir
         if src.exists():
             if dst.exists():
@@ -355,7 +367,7 @@ def upgrade_deployment(target_dir: Path, restart: bool = True) -> bool:
     new_example = target_dir / ".env.example"
     if old_env_vars and new_example.exists():
         merged_env = merge_env_files(old_env_vars, new_example)
-        with open(env_file, "w", encoding="utf-8") as f:
+        with open(env_file, "w", encoding="utf-8", newline="\n") as f:
             f.write(merged_env)
         print("   ✓ Merged your settings into new .env")
     elif new_example.exists():
@@ -390,6 +402,38 @@ def upgrade_deployment(target_dir: Path, restart: bool = True) -> bool:
     return True
 
 
+def ensure_docker_network(network_name: str = "webrag-network") -> bool:
+    """Ensure the Docker network exists, create if not."""
+    try:
+        # Check if network exists
+        result = subprocess.run(
+            ["docker", "network", "inspect", network_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return True
+
+        # Network doesn't exist, create it
+        print(f"🌐 Creating Docker network: {network_name}")
+        result = subprocess.run(
+            ["docker", "network", "create", network_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            print(f"   ✓ Network {network_name} created")
+            return True
+        else:
+            print(f"   ⚠ Failed to create network: {result.stderr}")
+            return False
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        print(f"   ⚠ Error checking/creating network: {e}")
+        return False
+
+
 def run_compose(args: list, deploy_dir: Path) -> int:
     """Run docker compose with the given arguments."""
     if not deploy_dir.exists():
@@ -419,6 +463,9 @@ def cmd_up(deploy_dir: Path, detach: bool = True) -> int:
         print("❌ Error: Docker is not running or not installed.")
         print("   Please install and start Docker Desktop.")
         return 1
+
+    # Ensure the Docker network exists
+    ensure_docker_network("webrag-network")
 
     print("🚀 Starting LLMCrawl services...")
     args = ["up", "--build"]

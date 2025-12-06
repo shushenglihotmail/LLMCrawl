@@ -115,8 +115,8 @@ services:
   # Gateway Service
   gateway:
     build:
-      context: ..
-      dockerfile: deploy/Dockerfile.gateway
+      context: .
+      dockerfile: Dockerfile.gateway
     container_name: web-rag-gateway
     ports:
       - "8000:8000"
@@ -135,7 +135,7 @@ services:
       - .env
     volumes:
       - ./logs:/app/logs
-      - ../gateway:/app/gateway:rw
+      - ./gateway:/app/gateway:rw
     networks:
       - webrag-network
     depends_on:
@@ -153,8 +153,8 @@ services:
   # Crawler Service
   crawler:
     build:
-      context: ..
-      dockerfile: deploy/Dockerfile.crawler
+      context: .
+      dockerfile: Dockerfile.crawler
     container_name: web-rag-crawler
     ports:
       - "8001:8001"
@@ -170,7 +170,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - /tmp:/tmp
-      - ../crawler:/app/crawler:rw
+      - ./crawler:/app/crawler:rw
     networks:
       - webrag-network
     depends_on:
@@ -187,8 +187,8 @@ services:
   # Indexer Service
   indexer:
     build:
-      context: ..
-      dockerfile: deploy/Dockerfile.indexer
+      context: .
+      dockerfile: Dockerfile.indexer
     container_name: web-rag-indexer
     ports:
       - "8002:8002"
@@ -204,7 +204,7 @@ services:
       - .env
     volumes:
       - ./logs:/app/logs
-      - ../indexer:/app/indexer:rw
+      - ./indexer:/app/indexer:rw
     networks:
       - webrag-network
     depends_on:
@@ -221,8 +221,8 @@ services:
   # MCP Server for local file operations
   mcp-server:
     build:
-      context: ..
-      dockerfile: deploy/Dockerfile.mcp_server
+      context: .
+      dockerfile: Dockerfile.mcp_server
     container_name: web-rag-mcp-server
     ports:
       - "8003:8003"
@@ -237,7 +237,7 @@ services:
       - ./logs:/app/logs
       - ${MCP_HOST_FOLDER:-./data/files}:/data/files
       - mcp_vector_db:/data/mcp_vector_db
-      - ../mcp_servers/local_access_mcp_server:/app/mcp_server:rw
+      - ./mcp_servers/local_access_mcp_server:/app/mcp_server:rw
     command: uvicorn mcp_server.main:app --host 0.0.0.0 --port 8003 --reload
     networks:
       - webrag-network
@@ -251,7 +251,7 @@ services:
   # Azure DevOps MCP Server
   azure-devops-mcp-server:
     build:
-      context: ../mcp_servers/azure_devops_mcp_server
+      context: ./mcp_servers/azure_devops_mcp_server
       dockerfile: Dockerfile
     container_name: web-rag-azure-devops-mcp
     ports:
@@ -284,8 +284,8 @@ services:
   # Demo Web Client (optional)
   demo-client:
     build:
-      context: ..
-      dockerfile: deploy/Dockerfile.demo
+      context: .
+      dockerfile: Dockerfile.demo
     container_name: web-rag-demo
     ports:
       - "3000:3000"

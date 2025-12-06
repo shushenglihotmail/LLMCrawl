@@ -14,6 +14,11 @@ recursive-include deploy/mcp_servers *
 # Include static files for hichat
 recursive-include clients/hichat/static *
 
+# Include mcp_servers Dockerfiles and non-Python files
+include mcp_servers/azure_devops_mcp_server/Dockerfile
+include mcp_servers/azure_devops_mcp_server/*.md
+include mcp_servers/azure_devops_mcp_server/pyproject.toml
+
 # Include tools
 recursive-include tools *
 

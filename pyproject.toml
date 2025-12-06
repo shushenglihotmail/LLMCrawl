@@ -76,6 +76,7 @@ exclude = ["tests*", "docs*", "ref*", "logs*"]
   "mcp_servers/*",
   "mcp_servers/**/*",
 ]
+"mcp_servers.azure_devops_mcp_server" = ["Dockerfile", "*.md", "*.toml"]
 
 [tool.black]
 line-length = 88
