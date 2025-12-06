@@ -1,9 +1,11 @@
 import atexit
 import logging
 import os
+import queue
 import signal
 import subprocess
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -44,12 +46,32 @@ class QueryRequest(BaseModel):
 class PowerShellSession:
     """
     Manages a persistent PowerShell session for Windows Composition Database.
+    Uses a background thread for reading stdout to avoid blocking.
     """
 
     def __init__(self, init_cmd: str):
         self.init_cmd = init_cmd
         self.process: Optional[subprocess.Popen] = None
+        self.output_queue: queue.Queue = queue.Queue()
+        self.reader_thread: Optional[threading.Thread] = None
+        self._stop_reader = threading.Event()
+        self._lock = threading.Lock()
         self._initialize_session()
+
+    def _stdout_reader(self) -> None:
+        """Background thread to read stdout and put lines in queue."""
+        while not self._stop_reader.is_set():
+            if not self.process or not self.process.stdout:
+                break
+            try:
+                line = self.process.stdout.readline()
+                if line:
+                    self.output_queue.put(line)
+                elif self.process.poll() is not None:
+                    # Process has exited
+                    break
+            except Exception:
+                break
 
     def _initialize_session(self) -> None:
         """Initialize the PowerShell session."""
@@ -58,22 +80,9 @@ class PowerShellSession:
 
         logger.info(f"Initializing PowerShell session with {self.init_cmd}...")
 
-        # Construct the startup command
-        # We use -Command to run the script and remain in the session
-        # On Windows Host, we can run .cmd files directly or via cmd /c, but usually
-        # if it's a .cmd that launches PowerShell, we might need to be careful.
-        # Assuming the .cmd sets up environment and drops into PS.
-
-        # If init_cmd is a .cmd file, we should probably run it via cmd.exe
-        # But we want to interact with the PowerShell session it spawns.
-        # If the .cmd file ends with "powershell -NoExit ...", then running it will start PS.
-
-        # Strategy: Run the command as is.
         startup_command = f'& "{self.init_cmd}"'
 
         try:
-            # Use powershell.exe (Windows PowerShell) or pwsh.exe (Core)
-            # Default to powershell.exe for maximum compatibility with legacy WCD tools
             shell_cmd = [
                 "powershell.exe",
                 "-NoExit",
@@ -88,35 +97,44 @@ class PowerShellSession:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                encoding="utf-8",  # Windows might need cp1252 or utf-8 depending on config
+                encoding="utf-8",
             )
+
+            # Start background reader thread
+            self._stop_reader.clear()
+            self.reader_thread = threading.Thread(
+                target=self._stdout_reader, daemon=True
+            )
+            self.reader_thread.start()
 
             # Handshake to clear startup noise and ensure session is ready
             handshake = "BRIDGE_READY"
             logger.info("Waiting for PowerShell session to initialize...")
 
             if self.process.stdin:
-                # Send the handshake command
                 self.process.stdin.write(f'Write-Output "{handshake}"\n')
                 self.process.stdin.flush()
 
-            while True:
-                if not self.process.stdout:
-                    break
-                line = self.process.stdout.readline()
-                if not line:
+            # Wait for handshake with timeout
+            start_time = time.time()
+            timeout = 60  # 60 second timeout for initialization
+            while time.time() - start_time < timeout:
+                try:
+                    line = self.output_queue.get(timeout=1)
+                    clean_line = line.strip()
+                    if clean_line:
+                        logger.info(f"Startup: {clean_line}")
+                    if clean_line == handshake:
+                        logger.info(
+                            "PowerShell Environment Ready (Handshake received)."
+                        )
+                        return
+                except queue.Empty:
                     if self.process.poll() is not None:
                         logger.error("Process exited during initialization")
-                    break
+                        break
 
-                # Log startup messages for debugging
-                clean_line = line.strip()
-                if clean_line:
-                    logger.info(f"Startup: {clean_line}")
-
-                if clean_line == handshake:
-                    logger.info("PowerShell Environment Ready (Handshake received).")
-                    break
+            logger.error("Timeout waiting for PowerShell initialization")
 
         except Exception as e:
             logger.error(f"Failed to start PowerShell session: {e}")
@@ -124,6 +142,11 @@ class PowerShellSession:
 
     def terminate(self) -> None:
         """Terminate the PowerShell session."""
+        # Stop the reader thread first
+        self._stop_reader.set()
+        if self.reader_thread and self.reader_thread.is_alive():
+            self.reader_thread.join(timeout=2)
+
         if self.process:
             logger.info("Terminating PowerShell session...")
             try:
@@ -140,59 +163,72 @@ class PowerShellSession:
                 self.process = None
             logger.info("PowerShell session terminated.")
 
-    def run_query(self, script_block: str) -> str:
+    def run_query(self, script_block: str, timeout: int = 55) -> str:
         """
-        Runs a PS command and returns JSON string.
+        Runs a PS command and returns the result string.
+        Uses non-blocking I/O with timeout to prevent deadlocks.
         """
-        if not self.process or self.process.poll() is not None:
-            logger.warning("PowerShell session died or not started. Restarting...")
-            self._initialize_session()
-            if not self.process:
-                return "Error: Could not establish PowerShell session."
+        with self._lock:  # Serialize queries
+            if not self.process or self.process.poll() is not None:
+                logger.warning("PowerShell session died or not started. Restarting...")
+                self._initialize_session()
+                if not self.process:
+                    return "Error: Could not establish PowerShell session."
 
-        start_marker = "START_OF_RESPONSE"
-        end_marker = "END_OF_RESPONSE"
-        # Use Out-String to capture the display output of the command
-        # This ensures we get the text representation (like the tree view)
-        # and captures any side-effect output (like "Loading entities...")
-        full_command = (
-            f'Write-Output "{start_marker}"; '
-            f"{script_block} | Out-String -Width 4096; "
-            f'Write-Output "{end_marker}"\n'
-        )
+            start_marker = "START_OF_RESPONSE"
+            end_marker = "END_OF_RESPONSE"
+            full_command = (
+                f'Write-Output "{start_marker}"\n'
+                f"{script_block} | Out-String -Width 4096\n"
+                f'Write-Output "{end_marker}"\n'
+            )
 
-        try:
-            if self.process.stdin:
-                self.process.stdin.write(full_command)
-                self.process.stdin.flush()
+            try:
+                # Clear any pending output in queue
+                while not self.output_queue.empty():
+                    try:
+                        self.output_queue.get_nowait()
+                    except queue.Empty:
+                        break
 
-            output = []
-            started = False
-            while True:
-                if not self.process.stdout:
-                    break
+                if self.process.stdin:
+                    self.process.stdin.write(full_command)
+                    self.process.stdin.flush()
 
-                line = self.process.stdout.readline()
-                if not line:
-                    break
+                output = []
+                started = False
+                start_time = time.time()
 
-                clean_line = line.strip()
+                while time.time() - start_time < timeout:
+                    try:
+                        line = self.output_queue.get(timeout=1)
+                        clean_line = line.strip()
 
-                if start_marker in clean_line:
-                    started = True
-                    continue
+                        if start_marker in clean_line:
+                            started = True
+                            continue
 
-                if end_marker in clean_line:
-                    break
+                        if end_marker in clean_line:
+                            break
 
-                if started:
-                    output.append(line)
+                        if started:
+                            output.append(line)
 
-            return "".join(output)
+                    except queue.Empty:
+                        # Check if process is still alive
+                        if self.process.poll() is not None:
+                            logger.error("PowerShell process died during query")
+                            return "Error: PowerShell process terminated unexpectedly"
+                        continue
+                else:
+                    logger.error(f"Query timed out after {timeout} seconds")
+                    return f"Error: Query timed out after {timeout} seconds"
 
-        except Exception as e:
-            logger.error(f"Error running query: {e}")
-            return f"Error executing query: {str(e)}"
+                return "".join(output)
+
+            except Exception as e:
+                logger.error(f"Error running query: {e}")
+                return f"Error executing query: {str(e)}"
 
 
 # Global session
@@ -211,7 +247,7 @@ atexit.register(cleanup_session)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     """Lifespan context manager for startup/shutdown."""
     global session
     share_cmd = os.getenv("WIN_COMP_SHARE_CMD")
@@ -247,7 +283,7 @@ async def health() -> dict:
 
 if __name__ == "__main__":
     # Handle Ctrl+C gracefully
-    def signal_handler(sig, frame):
+    def signal_handler(sig: int, frame: object) -> None:
         logger.info("Received shutdown signal, cleaning up...")
         cleanup_session()
         sys.exit(0)
@@ -260,9 +296,11 @@ if __name__ == "__main__":
 
     # Configure uvicorn with timestamp in access log
     log_config = uvicorn.config.LOGGING_CONFIG
-    log_config["formatters"]["access"][
-        "fmt"
-    ] = '%(asctime)s - %(levelname)s - %(client_addr)s - "%(request_line)s" %(status_code)s'
+    access_fmt = (
+        "%(asctime)s - %(levelname)s - %(client_addr)s - "
+        '"%(request_line)s" %(status_code)s'
+    )
+    log_config["formatters"]["access"]["fmt"] = access_fmt
     log_config["formatters"]["access"]["datefmt"] = "%Y-%m-%d %H:%M:%S"
 
     uvicorn.run(app, host="0.0.0.0", port=8005, log_config=log_config)

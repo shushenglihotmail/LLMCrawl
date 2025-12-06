@@ -102,8 +102,8 @@ async def execute_agent(request: Request) -> JSONResponse:
         )
 
         async with httpx.AsyncClient(
-            timeout=300.0
-        ) as client:  # 5 min timeout for long requests
+            timeout=600.0
+        ) as client:  # 10 min timeout for long requests
             response = await client.post(
                 f"{config['gateway_url']}/agent/chat", json=body
             )
