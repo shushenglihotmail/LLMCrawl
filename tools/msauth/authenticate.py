@@ -321,7 +321,7 @@ def get_existing_storage_state(env_file: Path = ENV_FILE) -> Dict:
         content = f.read()
 
     # Look for existing FIRECRAWL_AUTH_STORAGE_STATE (not commented)
-    match = re.search(r'^FIRECRAWL_AUTH_STORAGE_STATE=(.+)$', content, re.MULTILINE)
+    match = re.search(r"^FIRECRAWL_AUTH_STORAGE_STATE=(.+)$", content, re.MULTILINE)
     if match:
         try:
             return json.loads(match.group(1))
@@ -352,20 +352,21 @@ def merge_storage_states(existing: Dict, new: Dict, new_domain: str) -> Dict:
 
     # Filter out excluded domains from existing cookies
     filtered_existing = [
-        c for c in existing_cookies
+        c
+        for c in existing_cookies
         if not any(excluded in c.get("domain", "") for excluded in EXCLUDED_DOMAINS)
     ]
 
     # Filter out cookies from the new domain (will be replaced with new ones)
     # Also filter out excluded domains
     kept_cookies = [
-        c for c in filtered_existing
-        if new_domain not in c.get("domain", "")
+        c for c in filtered_existing if new_domain not in c.get("domain", "")
     ]
 
     # Filter new cookies to exclude unwanted domains
     filtered_new = [
-        c for c in new_cookies
+        c
+        for c in new_cookies
         if not any(excluded in c.get("domain", "") for excluded in EXCLUDED_DOMAINS)
     ]
 
@@ -387,7 +388,9 @@ def merge_storage_states(existing: Dict, new: Dict, new_domain: str) -> Dict:
     }
 
 
-def apply_to_env(storage_state: Dict, env_file: Path = ENV_FILE, target_domain: str = None) -> bool:
+def apply_to_env(
+    storage_state: Dict, env_file: Path = ENV_FILE, target_domain: str = None
+) -> bool:
     """
     Apply storage_state to .env file, merging with existing cookies.
 
@@ -408,7 +411,9 @@ def apply_to_env(storage_state: Dict, env_file: Path = ENV_FILE, target_domain: 
     # Get existing storage state and merge
     if target_domain:
         existing_state = get_existing_storage_state(env_file)
-        merged_state = merge_storage_states(existing_state, storage_state, target_domain)
+        merged_state = merge_storage_states(
+            existing_state, storage_state, target_domain
+        )
     else:
         merged_state = storage_state
 
@@ -420,7 +425,7 @@ def apply_to_env(storage_state: Dict, env_file: Path = ENV_FILE, target_domain: 
     storage_state_json = json.dumps(merged_state, separators=(",", ":"))
 
     # Check if FIRECRAWL_AUTH_STORAGE_STATE exists (including commented)
-    if re.search(r'^#?\s*FIRECRAWL_AUTH_STORAGE_STATE=', content, re.MULTILINE):
+    if re.search(r"^#?\s*FIRECRAWL_AUTH_STORAGE_STATE=", content, re.MULTILINE):
         # Replace existing line (commented or not)
         pattern = r"^#?\s*FIRECRAWL_AUTH_STORAGE_STATE=.*$"
         replacement = f"FIRECRAWL_AUTH_STORAGE_STATE={storage_state_json}"
@@ -525,7 +530,12 @@ def test_authentication(url: str) -> bool:
 
     try:
         import requests
+    except ImportError:
+        print("⚠️  Skipping authentication test - 'requests' module not installed")
+        print("   Install with: pip install requests")
+        return False
 
+    try:
         # Call the crawler API
         response = requests.post(
             "http://localhost:8001/crawl",

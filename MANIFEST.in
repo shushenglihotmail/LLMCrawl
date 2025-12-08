@@ -1,15 +1,11 @@
 # Include deploy folder and all its contents
-recursive-include deploy *
 include deploy/.env.example
 include deploy/docker-compose.yml
 include deploy/prometheus.yml
 include deploy/Dockerfile.*
 recursive-include deploy/requirements *
 recursive-include deploy/grafana-provisioning *
-recursive-include deploy/gateway *
-recursive-include deploy/crawler *
-recursive-include deploy/indexer *
-recursive-include deploy/mcp_servers *
+recursive-include deploy/data *
 
 # Include static files for hichat
 recursive-include clients/hichat/static *

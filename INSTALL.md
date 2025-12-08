@@ -54,7 +54,32 @@ python --version
 
 ## Installation
 
-### Option 1: Install from Wheel File (Recommended)
+### Step 1: Create a Virtual Environment (Recommended)
+
+Create a dedicated virtual environment to keep LLMCrawl and its dependencies isolated:
+
+```bash
+# Create a folder for LLMCrawl
+mkdir llmcrawl
+cd llmcrawl
+
+# Create virtual environment
+python -m venv venv
+
+# Activate the virtual environment
+# Windows (PowerShell):
+.\venv\Scripts\Activate.ps1
+# Windows (Command Prompt):
+.\venv\Scripts\activate.bat
+# Linux/Mac:
+source venv/bin/activate
+```
+
+You should see `(venv)` in your terminal prompt when activated.
+
+### Step 2: Install LLMCrawl
+
+#### Option A: Install from Wheel File (Recommended)
 
 If you received a `.whl` file:
 
@@ -66,7 +91,7 @@ pip install llmcrawl-1.0.0-py3-none-any.whl
 llmcrawl --help
 ```
 
-### Option 2: Install from Source
+#### Option B: Install from Source
 
 If you have access to the source code:
 
@@ -102,10 +127,8 @@ pip install -e .
 ### Step 2: Upgrade Deployment
 
 ```bash
-# Navigate to your deployment directory
-cd llmcrawl-deploy
-
-# Upgrade deployment files (preserves your .env settings)
+# Run from the folder containing llmcrawl-deploy/
+# (The command automatically finds ./llmcrawl-deploy)
 llmcrawl deploy --upgrade
 ```
 
@@ -271,14 +294,25 @@ To crawl internal sites that require authentication (e.g., www.osgwiki.com), you
 
 **Setup:**
 
-1. **Run the authentication command:**
+1. **Install required dependencies** (one-time setup):
+
+```bash
+# Make sure your virtual environment is activated
+# (the same venv where you installed llmcrawl)
+
+# Install playwright and other auth tool dependencies
+pip install playwright httpx requests
+playwright install chromium
+```
+
+2. **Run the authentication command:**
 
 ```bash
 # Authenticate to an internal site
 llmcrawl auth https://www.osgwiki.com/wiki/Main_Page
 ```
 
-2. **What the tool does:**
+3. **What the tool does:**
    - Opens Microsoft Edge with a temporary profile
    - Waits for you to log in to the internal site
    - Extracts authentication cookies after successful login
@@ -286,7 +320,7 @@ llmcrawl auth https://www.osgwiki.com/wiki/Main_Page
    - Restarts the crawler container to apply changes
    - Tests that authentication works
 
-3. **Options:**
+4. **Options:**
 
 ```bash
 # See all options
@@ -305,7 +339,7 @@ llmcrawl auth https://www.osgwiki.com --no-test
 llmcrawl auth https://internal-site.com --name my_site
 ```
 
-4. **Cookie Expiration:**
+5. **Cookie Expiration:**
    - Authentication cookies expire after some time (typically hours to days)
    - If crawling starts failing with authentication errors, re-run the command:
      ```bash
@@ -358,10 +392,8 @@ WIN_COMP_BRIDGE_URL=http://host.docker.internal:8005
 ### Start All Services
 
 ```bash
-# Make sure you're in the deployment directory
-cd llmcrawl-deploy
-
-# Start all services
+# Run from the folder containing llmcrawl-deploy/
+# (The command automatically finds ./llmcrawl-deploy)
 llmcrawl deploy --up
 ```
 
