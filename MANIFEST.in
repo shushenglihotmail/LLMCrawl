@@ -18,9 +18,12 @@ include mcp_servers/azure_devops_mcp_server/pyproject.toml
 # Include tools
 recursive-include tools *
 
-# Include README
+# Include documentation
 include README.md
 include INSTALL.md
+include docs/DIAGNOSTICS.md
+include docs/MONITORING.md
+include docs/CONFIGURATION.md
 
 # Exclude unnecessary files
 global-exclude __pycache__

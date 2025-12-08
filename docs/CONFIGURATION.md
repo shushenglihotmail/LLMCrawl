@@ -1,248 +1,401 @@
 # LLMCrawl Configuration Guide
 
-## Environment Variables Location
+Complete guide for configuring LLMCrawl environment variables and settings.
 
-**⚠️ IMPORTANT: Use `deploy/.env` for all configuration**
+## Table of Contents
 
-All Docker services read environment variables from **`deploy/.env`** only. Do not create a `.env` file in the root directory.
+- [Quick Start](#quick-start)
+- [Configuration File Location](#configuration-file-location)
+- [Required Configuration](#required-configuration)
+- [LLM Configuration](#llm-configuration)
+- [Tool Configuration](#tool-configuration)
+- [Service Configuration](#service-configuration)
+- [Vector Database](#vector-database)
+- [Logging and Cache](#logging-and-cache)
+- [Applying Changes](#applying-changes)
+- [Troubleshooting](#troubleshooting)
+- [Security Best Practices](#security-best-practices)
 
-```
-LLMCrawl/
-├── deploy/
-│   └── .env              ← USE THIS FILE (services read from here)
-└── .env                  ← DO NOT CREATE (ignored by services)
-```
+---
 
 ## Quick Start
 
-1. **Copy the example file:**
-   ```bash
-   cd deploy
-   cp .env.example .env
-   ```
+```bash
+# 1. Navigate to deployment folder
+cd llmcrawl-deploy
 
-2. **Edit `deploy/.env`** with your credentials:
-   ```bash
-   # Required: Azure OpenAI credentials
-   AZURE_OPENAI_API_KEY=your-key-here
-   AZURE_OPENAI_ENDPOINT=https://your-resource.cognitiveservices.azure.com/
+# 2. Edit configuration
+notepad .env        # Windows
+# or: nano .env     # Linux/Mac
 
-   # Required: Azure DevOps PAT (if using Azure DevOps MCP)
-   AZURE_DEVOPS_PAT=your-pat-here
-   ```
+# 3. Apply changes (restart services)
+llmcrawl deploy --down
+llmcrawl deploy --up
+```
 
-3. **Start services:**
-   ```bash
-   docker compose up -d
-   ```
+---
 
-4. **After changing `.env`, recreate containers:**
-   ```bash
-   docker compose up -d --force-recreate
-   ```
-   > **Note:** `docker compose restart` does NOT reload `.env` changes!
+## Configuration File Location
 
-## Configuration Sections
+**⚠️ IMPORTANT:** Configuration is in `llmcrawl-deploy/.env`
 
-### 1. LLM Configuration
+```
+your-folder/
+└── llmcrawl-deploy/
+    ├── .env              ← EDIT THIS FILE
+    ├── .env.example      ← Reference (copy to .env if missing)
+    ├── docker-compose.yml
+    └── ...
+```
 
-```env
-# Azure OpenAI (Recommended)
-AZURE_OPENAI_API_KEY=your-key-here
-AZURE_OPENAI_ENDPOINT=https://your-resource.cognitiveservices.azure.com/
-AZURE_OPENAI_API_VERSION=2025-01-01-preview
-AZURE_ANTHROPIC_ENDPOINT=https://your-resource.services.ai.azure.com/anthropic/
+The `.env` file was created when you ran `llmcrawl deploy --init`.
+
+---
+
+## Required Configuration
+
+At minimum, configure one LLM provider:
+
+### Option A: Azure OpenAI (Recommended)
+
+```bash
+# Azure OpenAI Configuration
+AZURE_OPENAI_API_KEY=your-azure-openai-key
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_VERSION=2024-02-15-preview
 LLM_PROVIDER=azure
 
-# Available Models (JSON array)
+# Model Configuration (JSON array)
+LLM_MODELS=[{"name":"gpt-4","display_name":"GPT-4","deployment_name":"your-gpt4-deployment","provider_type":"openai"}]
+```
+
+### Option B: OpenAI Direct
+
+```bash
+# OpenAI Configuration
+OPENAI_API_KEY=sk-your-openai-key
+LLM_PROVIDER=openai
+```
+
+### Option C: Anthropic Claude (via Azure)
+
+```bash
+# Azure with Anthropic
+AZURE_ANTHROPIC_ENDPOINT=https://your-resource.services.ai.azure.com/anthropic/
+AZURE_OPENAI_API_KEY=your-azure-key
+
+# Add Claude to models
+LLM_MODELS=[{"name":"claude-sonnet","display_name":"Claude Sonnet","deployment_name":"claude-sonnet","provider_type":"anthropic"}]
+```
+
+---
+
+## LLM Configuration
+
+### Available Models
+
+Configure multiple models for user selection:
+
+```bash
+# JSON array of available models
 LLM_MODELS=[
-  {"name":"gpt-5-chat","display_name":"GPT-5 Chat","deployment_name":"gpt-5-chat","provider_type":"openai"},
-  {"name":"claude-sonnet-4-5","display_name":"Claude Sonnet 4-5","deployment_name":"claude-sonnet-4-5","provider_type":"anthropic"}
+  {"name":"gpt-4","display_name":"GPT-4","deployment_name":"gpt-4-deployment","provider_type":"openai"},
+  {"name":"gpt-4o","display_name":"GPT-4o","deployment_name":"gpt-4o-deployment","provider_type":"openai"},
+  {"name":"claude-sonnet","display_name":"Claude Sonnet","deployment_name":"claude-sonnet","provider_type":"anthropic"}
 ]
+```
 
-# Embedding Model
+**Model Properties:**
+- `name`: Internal identifier
+- `display_name`: Shown in UI
+- `deployment_name`: Azure deployment name (must match your Azure resource)
+- `provider_type`: `openai` or `anthropic`
+
+### Embedding Model
+
+```bash
+# OpenAI embedding model
 EMBED_MODEL=text-embedding-3-large
+
+# Or Azure embedding deployment
+AZURE_EMBED_DEPLOYMENT=text-embedding-3-large
 ```
 
-### 2. Azure DevOps MCP Server
+### Context and Token Limits
 
-```env
-# Personal Access Token (required for Azure DevOps integration)
-AZURE_DEVOPS_PAT=your-pat-here
+```bash
+# Maximum context tokens (depends on model)
+MAX_CONTEXT_TOKENS=128000
 
-# Default branch (optional, can be overridden per request)
-AZURE_DEVOPS_BRANCH=main
-```
-
-### 3. Tool Configuration
-
-```env
-# Per-tool call limits (JSON object: {"tool_name": limit, ...})
-# Use -1 for unlimited calls
-# Available tools:
-#   Azure DevOps: search_azure_devops_code, get_azure_devops_file
-#   Crawler: crawl_and_refresh
-#   Local MCP: read_local_file, list_files, search_file_content, index_files
-#   WCD: query_composition_db
-TOOL_ROUND_LIMITS={"search_azure_devops_code":30,"get_azure_devops_file":30,"crawl_and_refresh":20,"read_local_file":50,"list_files":50,"search_file_content":50,"index_files":50,"query_composition_db":-1}
-
-# Default limit for tools not specified in TOOL_ROUND_LIMITS
-MAX_TOOL_ROUNDS=5
-
-# Code Intelligence Agent limits
-MAX_FILES_PER_REQUEST=80
+# Maximum input tokens for code analysis
 MAX_INPUT_TOKENS=100000
 ```
 
-### 4. Prompt Compression (LLMLingua-2)
+---
 
-The gateway automatically compresses large prompts that exceed LLM context limits using LLMLingua-2. This is a BERT-based compression model that intelligently removes redundant tokens while preserving meaning.
+## Tool Configuration
 
-**Context Limits:**
-- Anthropic Claude: 200,000 tokens
-- OpenAI GPT-4: 128,000 tokens
-- Azure OpenAI: 128,000 tokens
+### Azure DevOps Integration
 
-**How it works:**
-1. If prompt exceeds context limit, LLMLingua-2 compresses the largest messages
-2. Compression priority: tool results > old assistant messages > old user messages
-3. System prompts are never compressed
-4. Falls back to token-aware truncation if LLMLingua-2 is not installed
-
-**Environment Variables:**
-```env
-# Optional: Specify LLMLingua-2 model (default is the smaller, faster model)
-LLMLINGUA_MODEL=microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
-# Alternative for better quality (larger model):
-# LLMLINGUA_MODEL=microsoft/llmlingua-2-xlm-roberta-large-meetingbank
-```
-
-**Installing LLMLingua-2 (Optional but Recommended):**
 ```bash
-# Install LLMLingua-2 and dependencies (~2GB total)
-pip install llmlingua torch transformers accelerate
+# Personal Access Token (required for Azure DevOps tools)
+AZURE_DEVOPS_PAT=your-pat-here
+
+# Default settings (can be overridden per request)
+AZURE_DEVOPS_ORG=your-organization
+AZURE_DEVOPS_PROJECT=your-project
+AZURE_DEVOPS_REPO=your-repo
+AZURE_DEVOPS_BRANCH=main
 ```
 
-**Hardware Requirements for LLMLingua-2:**
-- RAM: 4GB minimum, 8GB recommended
-- CPU: Any modern 2+ core vCPU
-- Disk: ~2GB for model weights and libraries
-- GPU: Not required (runs efficiently on CPU)
+**How to create a PAT:**
+1. Go to `https://dev.azure.com/{your-org}/_usersSettings/tokens`
+2. Create new token with **Code (Read)** scope
+3. Copy the token to `.env`
 
-**Performance:**
-- LLMLingua-2 on CPU: ~500-1000 tokens/second
-- 5,000 token document: ~5-10 seconds to compress
-- Typical compression ratio: 50-80% size reduction
+### Local File Access (MCP Server)
 
-### 5. Vector Database
+```bash
+# Host folder to mount (accessible to LLM)
+# Windows: Use forward slashes
+MCP_HOST_FOLDER=C:/src
 
-```env
-VECTOR_DB=qdrant
-QDRANT_URL=http://qdrant:6333
-PG_DSN=postgresql://postgres:password@postgres:5432/rag_db
+# Linux/Mac:
+# MCP_HOST_FOLDER=/home/user/src
 ```
 
-### 6. Firecrawl Configuration
+### Tool Call Limits
 
-```env
-FIRECRAWL_URL=http://firecrawl:3002
-FIRECRAWL_API_KEY=your_firecrawl_key_here
+```bash
+# Per-tool call limits (JSON object)
+# -1 = unlimited
+TOOL_ROUND_LIMITS={"search_azure_devops_code":30,"get_azure_devops_file":30,"crawl_and_refresh":20,"read_local_file":50,"list_files":50,"search_file_content":50}
 
-# Authentication (optional, for authenticated sites)
-FIRECRAWL_AUTH_TYPE=none
-# FIRECRAWL_AUTH_TYPE=cookies
-# AUTH_TEST_URL=https://your-site.com
-# FIRECRAWL_AUTH_STORAGE_STATE=<captured_session_state>
+# Default limit for tools not specified above
+MAX_TOOL_ROUNDS=5
+
+# Maximum files per code analysis request
+MAX_FILES_PER_REQUEST=80
 ```
 
-### 7. Web Crawling
+### Windows Composition Database (WCD)
 
-```env
-ALLOWED_DOMAINS=sec.gov,ft.com,wsj.com,nvidia.com
-RESPECT_ROBOTS=true
-MAX_CONCURRENCY=4
-REQUEST_TIMEOUT_MS=20000
+```bash
+# WCD Bridge URL (if running wcd-bridge on host)
+WIN_COMP_BRIDGE_URL=http://host.docker.internal:8005
 ```
 
-### 8. Service URLs
+---
 
-```env
-# Internal service endpoints (Docker network)
-GATEWAY_HOST=0.0.0.0
+## Service Configuration
+
+### Service Ports
+
+```bash
+# Change ports if defaults conflict with other services
 GATEWAY_PORT=8000
-CRAWLER_HOST=0.0.0.0
 CRAWLER_PORT=8001
-INDEXER_HOST=0.0.0.0
 INDEXER_PORT=8002
+MCP_SERVER_PORT=8003
+HICHAT_PORT=8080
+```
+
+### Internal Service URLs
+
+These are used for container-to-container communication:
+
+```bash
+# Usually don't need to change these
+CRAWLER_URL=http://crawler:8001
+INDEXER_URL=http://indexer:8002
 MCP_SERVER_URL=http://mcp-server:8003
 AZURE_DEVOPS_MCP_URL=http://azure-devops-mcp-server:8004
 ```
 
-### 9. MCP Server (Local Files)
+### Web Crawling
 
-```env
-MCP_ROOT_FOLDER=/data/files
-MCP_VECTOR_DB_PATH=/data/mcp_vector_db
+```bash
+# Allowed domains for crawling (comma-separated)
+ALLOWED_DOMAINS=example.com,docs.microsoft.com
+
+# Respect robots.txt
+RESPECT_ROBOTS=true
+
+# Concurrent crawl requests
+MAX_CONCURRENCY=4
+
+# Request timeout (milliseconds)
+REQUEST_TIMEOUT_MS=20000
+
+# Gateway timeout (seconds)
+GATEWAY_TIMEOUT=45
+
+# Crawler timeout (seconds)
+CRAWLER_TIMEOUT=25
 ```
 
-### 10. Logging & Cache
+### Authentication for Internal Sites
 
-```env
+```bash
+# Authentication type: none, cookies, headers, basic
+FIRECRAWL_AUTH_TYPE=cookies
+
+# Test URL for auth verification
+AUTH_TEST_URL=https://internal-site.com
+
+# Captured session state (set by llmcrawl auth command)
+FIRECRAWL_AUTH_STORAGE_STATE=<captured_state>
+```
+
+> **Tip:** Use `llmcrawl auth <url>` to automatically capture and configure authentication cookies.
+
+---
+
+## Vector Database
+
+```bash
+# Vector database type: qdrant or pgvector
+VECTOR_DB=qdrant
+
+# Qdrant URL (default, runs in container)
+QDRANT_URL=http://qdrant:6333
+
+# PostgreSQL (for pgvector)
+# PG_DSN=postgresql://user:password@postgres:5432/rag_db
+```
+
+---
+
+## Logging and Cache
+
+```bash
+# Log level: DEBUG, INFO, WARNING, ERROR
 LOG_LEVEL=INFO
+
+# Log format: json or text
 LOG_FORMAT=json
+
+# Redis URL (for caching)
 REDIS_URL=redis://redis:6379/0
+
+# Cache TTL (seconds)
 CACHE_TTL_SECONDS=3600
 ```
 
-## Docker Compose Reference
+---
 
-The `deploy/docker-compose.yml` file:
-- Reads environment variables from `deploy/.env` (relative path: `env_file: - .env`)
-- All services use these same environment variables
-- Changes to `.env` require `docker compose up -d --force-recreate`
+## Applying Changes
+
+**⚠️ IMPORTANT:** After editing `.env`, you must restart services to apply changes.
+
+### Using llmcrawl CLI
+
+```bash
+# Recommended: Stop and start
+llmcrawl deploy --down
+llmcrawl deploy --up
+```
+
+### Using Docker Compose Directly
+
+```bash
+cd llmcrawl-deploy
+
+# Force recreate to reload .env
+docker compose up -d --force-recreate
+```
+
+> **Note:** `docker compose restart` does NOT reload `.env` changes!
+
+---
 
 ## Troubleshooting
 
 ### Changes Not Applied
+
 **Problem:** Modified `.env` but services still use old values
 
-**Solution:** Use `--force-recreate` to reload environment:
+**Solution:**
 ```bash
-cd deploy
-docker compose up -d --force-recreate
+# Stop completely and restart
+llmcrawl deploy --down
+llmcrawl deploy --up
 ```
 
-### Wrong .env File
-**Problem:** Created `.env` in root directory
+### Missing API Key Error
 
-**Solution:** Delete root `.env` and use `deploy/.env` only:
+**Problem:** "Invalid API key" or "API key not found"
+
+**Solution:**
 ```bash
-rm .env
-cd deploy
-# Edit deploy/.env instead
+# Check if key is set in .env
+cd llmcrawl-deploy
+grep API_KEY .env
+
+# Verify no typos, extra spaces, or quotes around value
+# CORRECT:
+OPENAI_API_KEY=sk-abc123
+
+# WRONG:
+OPENAI_API_KEY="sk-abc123"   # No quotes!
+OPENAI_API_KEY= sk-abc123    # No leading space!
 ```
 
-### Missing Configuration
-**Problem:** Service fails with "missing environment variable"
+### Model Not Found
 
-**Solution:** Check `deploy/.env` has the required variable:
+**Problem:** "Deployment not found" or "Model not found"
+
+**Solution:**
+1. Verify deployment name in Azure Portal matches `deployment_name` in `LLM_MODELS`
+2. Check the model JSON is valid (no trailing commas, proper quotes)
+3. Ensure `provider_type` is correct (`openai` or `anthropic`)
+
+### Azure DevOps 401 Error
+
+**Problem:** "Unauthorized" when using Azure DevOps tools
+
+**Solution:**
+1. Verify PAT hasn't expired
+2. Check PAT has **Code (Read)** scope
+3. Ensure `AZURE_DEVOPS_PAT` is set correctly in `.env`
+
+### Port Already in Use
+
+**Problem:** "Port 8000 is already in use"
+
+**Solution:**
 ```bash
-cd deploy
-grep VARIABLE_NAME .env
+# Option 1: Stop conflicting service
+# Option 2: Change port in .env
+GATEWAY_PORT=8100
 ```
+
+---
 
 ## Security Best Practices
 
-1. **Never commit** `deploy/.env` to git (already in `.gitignore`)
-2. **Protect API keys** - Use environment variables, not hardcoded values
-3. **Rotate credentials** regularly (PATs, API keys)
-4. **Use separate** dev/prod configurations
+1. **Never commit `.env`** - It's in `.gitignore` for a reason
+2. **Use environment variables** - Don't hardcode credentials in code
+3. **Rotate credentials regularly** - Update API keys and PATs periodically
+4. **Use separate configurations** - Different `.env` for dev/staging/prod
+5. **Limit file access** - Only mount necessary folders in `MCP_HOST_FOLDER`
+6. **Restrict domains** - Use `ALLOWED_DOMAINS` to limit crawlable sites
+
+---
+
+## Complete .env Example
+
+See `llmcrawl-deploy/.env.example` for a complete example with all options.
+
+```bash
+# View example configuration
+cat llmcrawl-deploy/.env.example
+```
+
+---
 
 ## Related Documentation
 
-- [README.md](../README.md) - Main project documentation
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture
-- [deploy/.env.example](../deploy/.env.example) - Example configuration file
-- [MULTI_PROVIDER_LLM.md](MULTI_PROVIDER_LLM.md) - LLM provider setup
-- [tools/msauth/README.md](../tools/msauth/README.md) - Firecrawl authentication
-- [mcp_servers/azure_devops_mcp_server/README.md](../mcp_servers/azure_devops_mcp_server/README.md) - Azure DevOps MCP setup
+- **[INSTALL.md](../INSTALL.md)** - Installation and setup guide
+- **[DIAGNOSTICS.md](DIAGNOSTICS.md)** - Troubleshooting and debugging
+- **[MONITORING.md](MONITORING.md)** - Metrics and dashboards

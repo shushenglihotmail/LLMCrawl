@@ -1359,21 +1359,19 @@ llmcrawl/
 ├── monitoring/      # Prometheus/Grafana configs
 └── docs/            # Additional documentation
     ├── ARCHITECTURE.md             # System architecture and design
-    ├── AUTHENTICATION.md           # Full authentication guide
-    ├── AUTHENTICATION_QUICKSTART.md # 5-minute setup guide
-    ├── AZURE_AD_AUTH.md            # Microsoft AAD/Entra ID guide
-    ├── CRAWL_STRATEGY.md           # Crawl strategy & limitations
-    ├── MONITORING.md               # Health checks and metrics
-    └── TESTING_INDEXING.md         # Testing guide
+    ├── CONFIGURATION.md            # Environment variables and settings
+    ├── DIAGNOSTICS.md              # Troubleshooting and debugging
+    └── MONITORING.md               # Health checks and metrics
 ```
 
 ## 📖 Documentation
 
 ### Core Documentation
 - **[Visual Overview](docs/VISUAL_OVERVIEW.md)** - Quick visual guide with diagrams and cheatsheet ⭐
+- **[Installation Guide](INSTALL.md)** - Complete installation and deployment instructions
+- **[Configuration Guide](docs/CONFIGURATION.md)** - All environment variables and settings
 - **[Architecture Overview](docs/ARCHITECTURE.md)** - System design, data flows, and component interactions
-- **[Deployment Guide](docs/DEPLOYMENT.md)** - Complete deployment instructions for dev and production
-- **[Development Guide](docs/DEVELOPMENT.md)** - Setting up development environment
+- **[Diagnostics Guide](docs/DIAGNOSTICS.md)** - Troubleshooting, debugging, and viewing logs
 - **[Monitoring Guide](docs/MONITORING.md)** - Observability, metrics, and dashboards
 
 ### MCP Servers

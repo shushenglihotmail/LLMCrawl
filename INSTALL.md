@@ -524,6 +524,34 @@ llmcrawl deploy --pull
 
 ---
 
+## Enabling Monitoring (Optional)
+
+For visual diagnostics with Prometheus and Grafana:
+
+```bash
+# Start all services WITH monitoring stack
+llmcrawl deploy --up -- --profile monitoring
+
+# Or via docker-compose directly
+cd llmcrawl-deploy
+docker compose --profile monitoring up -d
+```
+
+### Monitoring Endpoints
+
+| Service    | URL                        | Purpose              |
+|------------|----------------------------|----------------------|
+| Prometheus | http://localhost:9090      | Metrics & queries    |
+| Grafana    | http://localhost:3001      | Visual dashboards    |
+
+### Grafana Login
+- **Username:** admin
+- **Password:** admin (change on first login)
+
+See [docs/MONITORING.md](docs/MONITORING.md) for dashboard setup and [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) for troubleshooting with Prometheus queries.
+
+---
+
 ## Troubleshooting
 
 ### Docker Not Running
@@ -601,6 +629,7 @@ llmcrawl deploy --up
 ## Getting Help
 
 - **Documentation**: See `docs/` folder for detailed guides
+- **Troubleshooting**: See `docs/DIAGNOSTICS.md` for debugging and common errors
 - **Issues**: Check logs with `llmcrawl deploy --logs`
 - **Architecture**: See `docs/ARCHITECTURE.md`
 - **Configuration**: See `docs/CONFIGURATION.md`
