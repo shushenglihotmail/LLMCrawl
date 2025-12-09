@@ -344,3 +344,240 @@ If you encounter issues:
 3. Verify configuration in `.env` file
 4. Test individual services with health checks
 5. Reset environment if needed: `make clean && make dev-up`
+
+---
+
+## Docker Deployment (Developer Reference)
+
+This section covers service-by-service deployment for developers. For user installation, see [INSTALL.md](../INSTALL.md).
+
+### Service-by-Service Deployment
+
+#### 1. Vector Database Setup
+
+**Option A: Qdrant (Recommended)**
+```bash
+# Qdrant will start automatically with docker-compose
+# Accessible at http://localhost:6333
+# Web UI at http://localhost:6333/dashboard
+```
+
+**Option B: PostgreSQL with pgvector**
+```bash
+# Set in .env
+VECTOR_DB=pgvector
+PG_DSN=postgresql://postgres:password@postgres:5432/rag_db
+```
+
+#### 2. Supporting Services
+
+```bash
+# Redis (for caching and Firecrawl)
+docker-compose up -d redis
+
+# Firecrawl (web crawling service)
+docker-compose up -d firecrawl
+
+# Check Firecrawl health
+curl http://localhost:3002/health
+```
+
+#### 3. Core Application Services
+
+```bash
+# Start in dependency order
+docker-compose up -d qdrant postgres redis
+docker-compose up -d firecrawl
+docker-compose up -d indexer
+docker-compose up -d crawler
+docker-compose up -d mcp-server
+docker-compose up -d gateway
+
+# Verify all services
+docker-compose ps
+```
+
+#### 4. MCP Server Volume Configuration
+
+```yaml
+services:
+  mcp-server:
+    volumes:
+      - C:/your/local/folder:/data/files  # Windows
+      # - /path/to/your/folder:/data/files  # Linux/Mac
+    environment:
+      - MCP_ROOT_FOLDER=/data/files
+      - OPENAI_API_KEY=${OPENAI_API_KEY}  # Optional, for semantic search
+```
+
+---
+
+## End-to-End Testing
+
+### Automated Test Suite
+
+```bash
+# Run all unit tests
+make test
+
+# Run integration tests (requires services to be running)
+make test-integration
+
+# Or run tests manually
+docker-compose exec gateway python -m pytest tests/ -v
+docker-compose exec crawler python -m pytest tests/ -v
+docker-compose exec indexer python -m pytest tests/ -v
+```
+
+### Manual End-to-End Test
+
+```bash
+# 1. Start all services
+docker-compose up -d
+
+# 2. Wait for services to be ready (30-60 seconds)
+sleep 60
+
+# 3. Run the comprehensive integration test
+python tests/integration/test_end_to_end.py
+```
+
+### Step-by-Step Verification
+
+#### Test 1: Service Health Checks
+```bash
+# All should return {"status": "healthy"}
+curl http://localhost:8000/health  # Gateway
+curl http://localhost:8001/health  # Crawler
+curl http://localhost:8002/health  # Indexer
+curl http://localhost:8003/health  # MCP Server
+curl http://localhost:6333/health  # Qdrant
+```
+
+#### Test 2: Manual Crawling
+```bash
+curl -X POST http://localhost:8001/crawl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Tesla earnings Q3 2024",
+    "seed_urls": ["https://ir.tesla.com"],
+    "freshness_days": 30,
+    "max_results": 3
+  }' | jq .
+```
+
+#### Test 3: Manual Indexing
+```bash
+curl -X POST http://localhost:8002/index \
+  -H "Content-Type: application/json" \
+  -d '{
+    "docs": [{
+      "url": "https://example.com/test",
+      "title": "Test Document",
+      "markdown": "This is test content about AI.",
+      "published_at": "2024-01-15T10:00:00Z"
+    }]
+  }' | jq .
+```
+
+#### Test 4: Manual Retrieval
+```bash
+curl -X POST http://localhost:8002/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "artificial intelligence",
+    "k": 5
+  }' | jq .
+```
+
+#### Test 5: End-to-End Chat
+```bash
+curl -X POST http://localhost:8000/agent/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What are the latest NVIDIA earnings?",
+    "stream": false
+  }' | jq .
+```
+
+### Performance Testing
+
+```bash
+# Test concurrent requests
+for i in {1..5}; do
+  curl -X POST http://localhost:8000/agent/chat \
+    -H "Content-Type: application/json" \
+    -d '{"message": "What is machine learning?"}' &
+done
+wait
+
+# Monitor response times
+time curl -X POST http://localhost:8000/agent/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Latest AI news?"}'
+```
+
+---
+
+## Developer API Examples
+
+These curl examples are for testing and development. See the HiChat client for user-friendly access.
+
+### Direct Crawl API
+```bash
+curl -X POST http://localhost:8001/crawl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Tesla earnings Q3 2024",
+    "seed_urls": ["https://ir.tesla.com"],
+    "freshness_days": 7,
+    "depth": 2
+  }'
+```
+
+### Direct Index API
+```bash
+curl -X POST http://localhost:8002/index \
+  -H "Content-Type: application/json" \
+  -d '{
+    "docs": [{
+      "url": "https://example.com/article",
+      "title": "Example Article",
+      "markdown": "# Article Content...",
+      "published_at": "2024-01-15"
+    }]
+  }'
+```
+
+### Chat with Skip Embedding
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Summarize this page",
+    "seed_urls": ["https://example.com/article"],
+    "skip_embedding": true
+  }'
+```
+
+### Export to Markdown
+```bash
+curl -X POST http://localhost:8000/api/v1/export/markdown \
+  -H "Content-Type: application/json" \
+  -d '{
+    "seed_urls": ["https://example.com/article"],
+    "depth": 2,
+    "freshness_days": 30
+  }'
+```
+
+### MCP Server Direct API
+```bash
+# List available tools
+curl http://localhost:8003/tools
+
+# List files
+curl -X POST http://localhost:8003/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"tool_name": "list_files", "arguments": {"folder_path": "."}}'
+```
