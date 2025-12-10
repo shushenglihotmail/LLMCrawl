@@ -18,7 +18,7 @@ quick-start-windows:
 
 # Docker operations (from deploy folder)
 up:
-	cd deploy && docker-compose up -d
+	cd deploy && docker-compose -f docker-compose.dev.yml up -d
 	@echo "Services are running!"
 	@echo "Gateway: http://localhost:8000"
 	@echo "Crawler: http://localhost:8001"
@@ -26,22 +26,22 @@ up:
 	@echo "Qdrant Dashboard: http://localhost:6333/dashboard"
 
 down:
-	cd deploy && docker-compose down
+	cd deploy && docker-compose -f docker-compose.dev.yml down
 
 logs:
-	cd deploy && docker-compose logs -f
+	cd deploy && docker-compose -f docker-compose.dev.yml logs -f
 
 rebuild:
-	cd deploy && docker-compose up -d --build
+	cd deploy && docker-compose -f docker-compose.dev.yml up -d --build
 
 build:
-	cd deploy && docker-compose build --no-cache
+	cd deploy && docker-compose -f docker-compose.dev.yml build --no-cache
 
 # Development shortcuts (aliases for up/down/logs)
 dev: dev-up
 
 dev-up:
-	cd deploy && docker-compose up -d
+	cd deploy && docker-compose -f docker-compose.dev.yml up -d
 	@echo "Services are running!"
 	@echo "Gateway: http://localhost:8000"
 	@echo "Crawler: http://localhost:8001"
@@ -49,16 +49,16 @@ dev-up:
 	@echo "Qdrant Dashboard: http://localhost:6333/dashboard"
 
 dev-down:
-	cd deploy && docker-compose down
+	cd deploy && docker-compose -f docker-compose.dev.yml down
 
 dev-logs:
-	cd deploy && docker-compose logs -f
+	cd deploy && docker-compose -f docker-compose.dev.yml logs -f
 
 # Testing
 test:
-	cd deploy && docker-compose exec gateway python -m pytest tests/ -v
-	cd deploy && docker-compose exec crawler python -m pytest tests/ -v
-	cd deploy && docker-compose exec indexer python -m pytest tests/ -v
+	cd deploy && docker-compose -f docker-compose.dev.yml exec gateway python -m pytest tests/ -v
+	cd deploy && docker-compose -f docker-compose.dev.yml exec crawler python -m pytest tests/ -v
+	cd deploy && docker-compose -f docker-compose.dev.yml exec indexer python -m pytest tests/ -v
 
 test-dev:
 	pytest tests/ -v --cov=. --cov-report=html
@@ -71,29 +71,29 @@ pre-commit:
 	pre-commit run --all-files
 
 lint:
-	cd deploy && docker-compose exec gateway python -m black . --check
-	cd deploy && docker-compose exec gateway python -m isort . --check-only
-	cd deploy && docker-compose exec gateway python -m flake8 .
+	cd deploy && docker-compose -f docker-compose.dev.yml exec gateway python -m black . --check
+	cd deploy && docker-compose -f docker-compose.dev.yml exec gateway python -m isort . --check-only
+	cd deploy && docker-compose -f docker-compose.dev.yml exec gateway python -m flake8 .
 
 format:
-	cd deploy && docker-compose exec gateway python -m black .
-	cd deploy && docker-compose exec gateway python -m isort .
+	cd deploy && docker-compose -f docker-compose.dev.yml exec gateway python -m black .
+	cd deploy && docker-compose -f docker-compose.dev.yml exec gateway python -m isort .
 
 # Database operations
 db-reset:
-	cd deploy && docker-compose down -v
-	cd deploy && docker-compose up -d qdrant postgres redis
+	cd deploy && docker-compose -f docker-compose.dev.yml down -v
+	cd deploy && docker-compose -f docker-compose.dev.yml up -d qdrant postgres redis
 
 # Monitoring and Metrics
 monitoring-up:
-	cd deploy && docker-compose --profile monitoring up -d
+	cd deploy && docker-compose -f docker-compose.dev.yml --profile monitoring up -d
 	@echo "Monitoring stack started!"
 	@echo "Prometheus: http://localhost:9090"
 	@echo "Grafana: http://localhost:3001 (admin/admin)"
 	@echo "Qdrant Dashboard: http://localhost:6333/dashboard"
 
 monitoring-down:
-	cd deploy && docker-compose stop prometheus grafana
+	cd deploy && docker-compose -f docker-compose.dev.yml stop prometheus grafana
 
 metrics:
 	@echo "Opening monitoring dashboards..."
@@ -119,7 +119,7 @@ metrics-all:
 
 # Cleanup
 clean:
-	cd deploy && docker-compose down -v --remove-orphans
+	cd deploy && docker-compose -f docker-compose.dev.yml down -v --remove-orphans
 	docker system prune -f
 	docker volume prune -f
 

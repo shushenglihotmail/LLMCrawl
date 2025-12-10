@@ -94,7 +94,7 @@ $DeployPath = Join-Path $PSScriptRoot "../deploy"
 if (Test-Path $DeployPath) {
     Push-Location $DeployPath
     try {
-        $logs = docker-compose -f docker-compose.yml logs --tail=100 crawler 2>$null |
+        $logs = docker-compose -f docker-compose.dev.yml logs --tail=100 crawler 2>$null |
         Select-String -Pattern "401|Unauthorized" |
         Select-Object -Last 3
     }

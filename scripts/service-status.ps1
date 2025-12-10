@@ -39,7 +39,7 @@ function Show-Status {
     try {
         # Check docker compose services
         Write-Host "`nContainer Status:" -ForegroundColor Yellow
-        docker compose -f docker-compose.yml ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+        docker compose -f docker-compose.dev.yml ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
     }
     finally {
         Pop-Location
@@ -72,7 +72,7 @@ function Show-Status {
 
     Write-Host "`nUseful Commands:" -ForegroundColor Yellow
     Write-Host "  Restart with rebuild:  .\scripts\restart-services.ps1 -Build" -ForegroundColor Gray
-    Write-Host "  View logs:             docker compose -f deploy/docker-compose.yml logs -f gateway" -ForegroundColor Gray
+    Write-Host "  View logs:             docker compose -f deploy/docker-compose.dev.yml logs -f gateway" -ForegroundColor Gray
     Write-Host "  Stop all:              .\scripts\stop-services.ps1" -ForegroundColor Gray
 }
 

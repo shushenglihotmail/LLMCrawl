@@ -83,18 +83,18 @@ try {
             Write-Host "`nMode: STOP + REMOVE CONTAINERS (volumes preserved)" -ForegroundColor Yellow
         }
 
-        Write-Host "Executing: docker compose -f docker-compose.yml $($Args -join ' ')" -ForegroundColor Gray
-        & docker compose -f docker-compose.yml @Args
+        Write-Host "Executing: docker compose -f docker-compose.dev.yml $($Args -join ' ')" -ForegroundColor Gray
+        & docker compose -f docker-compose.dev.yml @Args
 
         Write-Host "`nServices stopped and containers removed." -ForegroundColor Green
     } else {
         if ($Services.Count -gt 0) {
             Write-Host "`nMode: STOP (containers preserved)" -ForegroundColor Yellow
             Write-Host "Target: $($Services -join ', ')" -ForegroundColor White
-            & docker compose -f docker-compose.yml stop @Services
+            & docker compose -f docker-compose.dev.yml stop @Services
         } else {
             Write-Host "`nMode: STOP ALL (containers preserved)" -ForegroundColor Yellow
-            docker compose -f docker-compose.yml stop
+            docker compose -f docker-compose.dev.yml stop
         }
 
         Write-Host "`nServices stopped (containers preserved)." -ForegroundColor Green

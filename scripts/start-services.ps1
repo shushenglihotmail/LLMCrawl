@@ -71,11 +71,11 @@ try {
         Write-Host "Target: Infrastructure only" -ForegroundColor White
     }
 
-    Write-Host "`nExecuting: docker compose -f docker-compose.yml $($Args -join ' ')" -ForegroundColor Gray
+    Write-Host "`nExecuting: docker compose -f docker-compose.dev.yml $($Args -join ' ')" -ForegroundColor Gray
     Write-Host ""
 
     # Start services
-    & docker compose -f docker-compose.yml @Args
+    & docker compose -f docker-compose.dev.yml @Args
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`nFailed to start services. Check docker compose logs for details." -ForegroundColor Red
@@ -88,7 +88,7 @@ try {
 
     # Show status
     Write-Host "`nService Status:" -ForegroundColor Cyan
-    docker compose -f docker-compose.yml ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+    docker compose -f docker-compose.dev.yml ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
 
     Write-Host "`nService URLs:" -ForegroundColor Cyan
     Write-Host "  Gateway:           http://localhost:8000" -ForegroundColor White
@@ -101,14 +101,14 @@ try {
     Write-Host "  PostgreSQL:        localhost:5432" -ForegroundColor White
 
     Write-Host "`nUseful commands:" -ForegroundColor Yellow
-    Write-Host "  View logs:     docker compose -f deploy/docker-compose.yml logs -f gateway" -ForegroundColor Gray
+    Write-Host "  View logs:     docker compose -f deploy/docker-compose.dev.yml logs -f gateway" -ForegroundColor Gray
     Write-Host "  Stop:          .\scripts\stop-services.ps1" -ForegroundColor Gray
     Write-Host "  Restart:       .\scripts\restart-services.ps1 -Build" -ForegroundColor Gray
 
     # Follow logs if requested
     if ($Logs) {
         Write-Host "`nFollowing logs (Ctrl+C to exit)..." -ForegroundColor Yellow
-        docker compose -f docker-compose.yml logs -f gateway crawler indexer mcp-server
+        docker compose -f docker-compose.dev.yml logs -f gateway crawler indexer mcp-server
     }
 }
 finally {

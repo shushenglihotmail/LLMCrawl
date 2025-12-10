@@ -107,6 +107,25 @@ ALLOWED_DOMAINS=sec.gov,ft.com,wsj.com,nvidia.com,reuters.com,bloomberg.com
 - **Firecrawl API Key** (optional): Get from [Firecrawl](https://firecrawl.dev/)
 - **Azure OpenAI** (alternative): Configure if using Azure instead of OpenAI
 
+## Docker Compose Files
+
+The project has two Docker Compose files for different use cases:
+
+| File | Purpose | Paths |
+|------|---------|-------|
+| `docker-compose.dev.yml` | Local development | Uses `../` paths (source from repo root) |
+| `docker-compose.yml` | Wheel/production deployment | Uses `./` paths (source copied into deploy folder) |
+
+**For local development**, all scripts and the Makefile use `docker-compose.dev.yml` which:
+- References source code from the repository root (`../gateway`, `../crawler`, etc.)
+- Mounts source directories for hot reload
+- Suitable when running from a git clone
+
+**For wheel installations** (`pip install llmcrawl`), the `docker-compose.yml` file:
+- Uses relative paths (`./gateway`, `./crawler`, etc.)
+- Works when `llmcrawl deploy` copies source to `llmcrawl-deploy/`
+- Suitable for production deployments
+
 ## Development Workflow
 
 ### 1. Start Development Environment

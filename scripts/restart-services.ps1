@@ -96,10 +96,10 @@ try {
             $BuildArgs += $Services
         }
 
-        Write-Host "`nExecuting: docker compose -f docker-compose.yml $($BuildArgs -join ' ')" -ForegroundColor Gray
+        Write-Host "`nExecuting: docker compose -f docker-compose.dev.yml $($BuildArgs -join ' ')" -ForegroundColor Gray
         Write-Host ""
 
-        & docker compose -f docker-compose.yml @BuildArgs
+        & docker compose -f docker-compose.dev.yml @BuildArgs
 
         if ($LASTEXITCODE -ne 0) {
             Write-Host "`nFailed to build services" -ForegroundColor Red
@@ -123,11 +123,11 @@ try {
         $Args += $Services
     }
 
-    Write-Host "`nExecuting: docker compose -f docker-compose.yml $($Args -join ' ')" -ForegroundColor Gray
+    Write-Host "`nExecuting: docker compose -f docker-compose.dev.yml $($Args -join ' ')" -ForegroundColor Gray
     Write-Host ""
 
     # Execute
-    & docker compose -f docker-compose.yml @Args
+    & docker compose -f docker-compose.dev.yml @Args
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`nFailed to restart services" -ForegroundColor Red
@@ -140,7 +140,7 @@ try {
 
     # Show service status
     Write-Host "`nService Status:" -ForegroundColor Cyan
-    docker compose -f docker-compose.yml ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+    docker compose -f docker-compose.dev.yml ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
 
     Write-Host "`nService URLs:" -ForegroundColor Cyan
     Write-Host "  Gateway:           http://localhost:8000" -ForegroundColor White
@@ -156,10 +156,10 @@ try {
     if ($Logs) {
         Write-Host "`nFollowing logs (Ctrl+C to exit)..." -ForegroundColor Yellow
         if ($Services.Count -gt 0) {
-            docker compose -f docker-compose.yml logs -f @Services
+            docker compose -f docker-compose.dev.yml logs -f @Services
         }
         else {
-            docker compose -f docker-compose.yml logs -f gateway crawler indexer mcp-server
+            docker compose -f docker-compose.dev.yml logs -f gateway crawler indexer mcp-server
         }
     }
 }
