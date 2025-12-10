@@ -54,8 +54,9 @@ include = [
   "llmcrawl_cli*",
   "deploy*",
   "tools*",
+  "docs*",
 ]
-exclude = ["tests*", "docs*", "ref*", "logs*"]
+exclude = ["tests*", "ref*", "logs*"]
 
 [tool.setuptools.package-data]
 "*" = ["static/*", "static/**/*"]
@@ -72,7 +73,7 @@ exclude = ["tests*", "docs*", "ref*", "logs*"]
   "README.md",
   "data/files/*",
 ]
-"deploy.docs" = ["*.md"]
+"docs" = ["*.md"]
 "mcp_servers.azure_devops_mcp_server" = ["Dockerfile", "*.toml"]
 
 [tool.black]

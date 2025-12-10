@@ -44,6 +44,25 @@ def get_package_root_dir() -> Path:
         return Path(__file__).parent.parent
 
 
+def get_package_docs_dir() -> Path:
+    """Get the docs directory from the installed package."""
+    package_root = get_package_root_dir()
+    docs_dir = package_root / "docs"
+
+    if docs_dir.exists():
+        return docs_dir
+
+    # Fallback: try to find it in common locations
+    for candidate in [
+        Path.cwd() / "docs",
+        Path(__file__).parent.parent / "docs",
+    ]:
+        if candidate.exists():
+            return candidate
+
+    return docs_dir  # Return expected path even if not found
+
+
 def get_package_deploy_dir() -> Path:
     """Get the deploy directory from the installed package."""
     # When installed via pip, the deploy folder is included as package data
@@ -217,14 +236,21 @@ def init_deployment(target_dir: Path, force: bool = False) -> bool:
         shutil.copy2(readme_src, target_dir / "README.md")
         print("   ✓ Copied README.md")
 
-    # Copy docs folder
-    docs_dir = target_dir / "docs"
-    docs_dir.mkdir(exist_ok=True)
-    docs_to_copy = ["INSTALL.md", "DIAGNOSTICS.md", "MONITORING.md", "CONFIGURATION.md"]
+    # Copy docs folder from main docs package (single source of truth)
+    package_docs_dir = get_package_docs_dir()
+    deploy_docs_dir = target_dir / "docs"
+    deploy_docs_dir.mkdir(exist_ok=True)
+    docs_to_copy = [
+        "INSTALL.md",
+        "DIAGNOSTICS.md",
+        "MONITORING.md",
+        "CONFIGURATION.md",
+        "AUTHENTICATION.md",
+    ]
     for doc_name in docs_to_copy:
-        doc_src = source_dir / "docs" / doc_name
+        doc_src = package_docs_dir / doc_name
         if doc_src.exists():
-            shutil.copy2(doc_src, docs_dir / doc_name)
+            shutil.copy2(doc_src, deploy_docs_dir / doc_name)
             print(f"   ✓ Copied docs/{doc_name}")
 
     # Create .env from .env.example if not exists
@@ -404,14 +430,21 @@ def upgrade_deployment(target_dir: Path, restart: bool = True) -> bool:
         shutil.copy2(readme_src, target_dir / "README.md")
         print("   ✓ Updated README.md")
 
-    # Copy docs folder
-    docs_dir = target_dir / "docs"
-    docs_dir.mkdir(exist_ok=True)
-    docs_to_copy = ["INSTALL.md", "DIAGNOSTICS.md", "MONITORING.md", "CONFIGURATION.md"]
+    # Copy docs folder from main docs package (single source of truth)
+    package_docs_dir = get_package_docs_dir()
+    deploy_docs_dir = target_dir / "docs"
+    deploy_docs_dir.mkdir(exist_ok=True)
+    docs_to_copy = [
+        "INSTALL.md",
+        "DIAGNOSTICS.md",
+        "MONITORING.md",
+        "CONFIGURATION.md",
+        "AUTHENTICATION.md",
+    ]
     for doc_name in docs_to_copy:
-        doc_src = source_dir / "docs" / doc_name
+        doc_src = package_docs_dir / doc_name
         if doc_src.exists():
-            shutil.copy2(doc_src, docs_dir / doc_name)
+            shutil.copy2(doc_src, deploy_docs_dir / doc_name)
             print(f"   ✓ Updated docs/{doc_name}")
 
     # Step 4: Merge .env with new .env.example

@@ -36,7 +36,6 @@ Why this approach works:
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -66,7 +65,7 @@ DEPLOY_DIR = PROJECT_ROOT / "deploy"
 
 def launch_edge_with_debugging(
     debug_port: int = 9222,
-    user_data_dir: str = None,
+    user_data_dir: Optional[str] = None,
     initial_url: Optional[str] = None,
 ) -> subprocess.Popen:
     """
@@ -184,7 +183,8 @@ def get_cookies_from_debug_browser(
                 ]
                 result["domain_cookies"] = domain_cookies
                 print(
-                    f"🔍 Found {len(domain_cookies)} cookies for domain '{target_domain}'"
+                    f"🔍 Found {len(domain_cookies)} cookies "
+                    f"for domain '{target_domain}'"
                 )
 
                 # Show domain cookies
@@ -192,9 +192,8 @@ def get_cookies_from_debug_browser(
                     masked_value = (
                         c["value"][:20] + "..." if len(c["value"]) > 20 else c["value"]
                     )
-                    print(
-                        f"   - {c['name']}: {masked_value} (httpOnly={c.get('httpOnly', False)})"
-                    )
+                    http_only = c.get("httpOnly", False)
+                    print(f"   - {c['name']}: {masked_value} (httpOnly={http_only})")
 
             # Find the specific Auth cookie
             found_cookie = next(
@@ -342,7 +341,8 @@ def merge_storage_states(existing: Dict, new: Dict, new_domain: str) -> Dict:
     Args:
         existing: Existing storage state
         new: New storage state with cookies to add
-        new_domain: The domain being authenticated (used to replace old cookies for this domain)
+        new_domain: The domain being authenticated
+            (used to replace old cookies for this domain)
 
     Returns:
         Merged storage state
@@ -373,7 +373,7 @@ def merge_storage_states(existing: Dict, new: Dict, new_domain: str) -> Dict:
     # Merge: existing (minus new domain) + new cookies
     merged_cookies = kept_cookies + filtered_new
 
-    print(f"\n📊 Cookie merge summary:")
+    print("\n📊 Cookie merge summary:")
     print(f"   Existing cookies (other domains): {len(kept_cookies)}")
     print(f"   New cookies for {new_domain}: {len(filtered_new)}")
     print(f"   Total after merge: {len(merged_cookies)}")
@@ -389,7 +389,9 @@ def merge_storage_states(existing: Dict, new: Dict, new_domain: str) -> Dict:
 
 
 def apply_to_env(
-    storage_state: Dict, env_file: Path = ENV_FILE, target_domain: str = None
+    storage_state: Dict,
+    env_file: Path = ENV_FILE,
+    target_domain: Optional[str] = None,
 ) -> bool:
     """
     Apply storage_state to .env file, merging with existing cookies.
@@ -557,7 +559,7 @@ def test_authentication(url: str) -> bool:
                 content_length = len(doc.get("markdown", ""))
                 source = doc.get("source", "unknown")
 
-                print(f"\n✅ Authentication working!")
+                print("\n✅ Authentication working!")
                 print(f"   Title: {title}")
                 print(f"   Content length: {content_length} chars")
                 print(f"   Source: {source}")
@@ -584,10 +586,12 @@ def authenticate(
     name: Optional[str] = None,
     target_cookie: str = "AppServiceAuthSession",
     debug_port: int = 9222,
-    user_data_dir: str = None,
+    user_data_dir: Optional[str] = None,
     auto_apply: bool = True,
     auto_restart: bool = True,
     auto_test: bool = True,
+    deploy_dir: Optional[Path] = None,
+    env_file: Optional[Path] = None,
 ) -> Dict:
     """
     Complete authentication workflow.
@@ -601,10 +605,18 @@ def authenticate(
         auto_apply: Automatically apply to .env
         auto_restart: Automatically restart crawler
         auto_test: Automatically test authentication
+        deploy_dir: Path to deployment directory (default: ./deploy)
+        env_file: Path to .env file (default: deploy/.env)
 
     Returns:
         Dict with authentication result
     """
+    # Use defaults if not provided
+    if deploy_dir is None:
+        deploy_dir = DEPLOY_DIR
+    if env_file is None:
+        env_file = ENV_FILE
+
     if not name:
         parsed = urlparse(url)
         name = parsed.netloc.replace(".", "_")
@@ -624,7 +636,7 @@ def authenticate(
     print("-" * 70)
 
     try:
-        edge_process = launch_edge_with_debugging(
+        launch_edge_with_debugging(  # noqa: F841 - process runs in background
             debug_port=debug_port,
             user_data_dir=user_data_dir,
             initial_url=url,
@@ -693,7 +705,7 @@ def authenticate(
         print("\n" + "-" * 70)
         print("STEP 4/5: Apply credentials to .env")
         print("-" * 70)
-        apply_to_env(storage_state, ENV_FILE, target_domain=target_domain)
+        apply_to_env(storage_state, env_file, target_domain=target_domain)
     else:
         print("\n" + "-" * 70)
         print("STEP 4/5: Skip applying to .env (--no-apply)")
@@ -704,7 +716,7 @@ def authenticate(
         print("\n" + "-" * 70)
         print("STEP 5/5: Restart crawler to load new credentials")
         print("-" * 70)
-        recreate_crawler(DEPLOY_DIR)
+        recreate_crawler(deploy_dir)
     else:
         print("\n" + "-" * 70)
         print("STEP 5/5: Skip restarting crawler (--no-restart)")
@@ -721,7 +733,7 @@ def authenticate(
     print("✅ AUTHENTICATION COMPLETE!")
     print("=" * 70)
     print(f"\n📁 Credentials saved to: {auth_file}")
-    print(f"📝 Applied to: {ENV_FILE}")
+    print(f"📝 Applied to: {env_file}")
     print("\n💡 You can now close the Edge window manually.")
     print("\n🔄 To re-authenticate later, run:")
     print(f"   python tools/msauth/authenticate.py {url}")
@@ -786,7 +798,7 @@ The tool will:
     parser.add_argument(
         "--user-data-dir",
         default=None,
-        help="User data directory for Edge profile (default: C:\\Temp\\EdgeDebugProfile)",
+        help="User data directory for Edge profile",
     )
     parser.add_argument(
         "--no-apply",
@@ -803,8 +815,35 @@ The tool will:
         action="store_true",
         help="Don't test authentication after setup",
     )
+    parser.add_argument(
+        "--dir",
+        "-d",
+        default=None,
+        help="Deployment directory containing .env",
+    )
 
     args = parser.parse_args()
+
+    # Determine deploy directory
+    deploy_dir = None
+    env_file = None
+    if args.dir:
+        deploy_dir = Path(args.dir)
+        env_file = deploy_dir / ".env"
+    else:
+        # Try common locations
+        for candidate in [
+            Path.cwd() / "deploy",
+            Path.cwd() / "llmcrawl-deploy",
+            PROJECT_ROOT / "deploy",
+        ]:
+            if (candidate / ".env").exists():
+                deploy_dir = candidate
+                env_file = candidate / ".env"
+                break
+        if deploy_dir is None:
+            deploy_dir = DEPLOY_DIR
+            env_file = ENV_FILE
 
     result = authenticate(
         url=args.url,
@@ -815,6 +854,8 @@ The tool will:
         auto_apply=not args.no_apply,
         auto_restart=not args.no_restart,
         auto_test=not args.no_test,
+        deploy_dir=deploy_dir,
+        env_file=env_file,
     )
 
     sys.exit(0 if result.get("success") else 1)

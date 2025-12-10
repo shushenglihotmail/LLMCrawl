@@ -22,8 +22,11 @@ For sites like **www.osgwiki.com** that use Azure App Service Easy Auth:
 cd C:\src\github\LLMCrawl
 .\venv\Scripts\Activate.ps1
 
-# Run the authentication tool
+# Run the authentication tool (from source)
 python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page
+
+# Or use the CLI command (from wheel installation)
+llmcrawl auth https://www.osgwiki.com/wiki/Main_Page
 ```
 
 **What happens:**
@@ -76,12 +79,35 @@ The authentication tool uses **Edge Remote Debugging** to capture cookies:
 
 ## Command Options
 
+### Using the CLI (Wheel Installation)
+
+```powershell
+# Basic usage
+llmcrawl auth <URL>
+
+# Options
+llmcrawl auth https://www.osgwiki.com/wiki/Main_Page `
+    --name my_wiki           # Custom profile name
+    --dir /path/to/deploy    # Specify deployment directory
+    --no-apply               # Don't apply to .env (just save cookies)
+    --no-restart             # Don't restart crawler container
+    --no-test                # Don't test authentication
+    --port 9223              # Use different debug port
+```
+
+The `--dir` option is useful when:
+- Your deployment folder is not named `llmcrawl-deploy` or `deploy`
+- You have multiple deployment environments
+- Running from a non-standard location
+
+### Using the Python Script (Development)
+
 ```powershell
 # Basic usage
 python tools/msauth/authenticate.py <URL>
 
 # Options
-python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page \
+python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page `
     --name my_wiki           # Custom profile name
     --no-apply               # Don't apply to .env (just save cookies)
     --no-restart             # Don't restart crawler container
@@ -93,21 +119,43 @@ python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page \
 
 ```powershell
 # Standard authentication (recommended)
-python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page
+llmcrawl auth https://www.osgwiki.com/wiki/Main_Page
+
+# Specify deployment directory (for wheel installations)
+llmcrawl auth https://www.osgwiki.com --dir D:\tools\llmcrawl-deploy
 
 # Save cookies only (don't modify .env or restart)
-python tools/msauth/authenticate.py https://www.osgwiki.com --no-apply --no-restart
+llmcrawl auth https://www.osgwiki.com --no-apply --no-restart
+
+# Using Python script directly (from source)
+python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page
 
 # Custom profile name
-python tools/msauth/authenticate.py https://internal-wiki.com --name internal_wiki
+llmcrawl auth https://internal-wiki.com --name internal_wiki
 
 # Different target cookie (for non-Azure sites)
-python tools/msauth/authenticate.py https://other-site.com --cookie SESSION_ID
+llmcrawl auth https://other-site.com --cookie SESSION_ID
 ```
 
 ---
 
 ## Troubleshooting
+
+### ".env file not found" or "Deploy directory not found"
+
+This error occurs when the tool can't find your deployment directory. Use the `--dir` flag:
+
+```powershell
+# Specify the exact path to your deployment folder
+llmcrawl auth https://www.osgwiki.com --dir D:\tools\llmcrawl-deploy
+
+# Or if you just want to save cookies without applying to .env
+llmcrawl auth https://www.osgwiki.com --no-apply --no-restart
+```
+
+The tool auto-detects these folder names:
+- `llmcrawl-deploy` (wheel installation default)
+- `deploy` (source development default)
 
 ### "Edge not found"
 Ensure Microsoft Edge is installed. The script looks for:
@@ -197,6 +245,13 @@ Invoke-RestMethod -Uri http://localhost:8001/crawl -Method Post -ContentType 'ap
 When cookies expire (typically 8-24 hours), simply re-run:
 
 ```powershell
+# Using the CLI command
+llmcrawl auth https://www.osgwiki.com/wiki/Main_Page
+
+# With custom deployment directory
+llmcrawl auth https://www.osgwiki.com/wiki/Main_Page --dir /path/to/llmcrawl-deploy
+
+# Or using the Python script directly (from source)
 python tools/msauth/authenticate.py https://www.osgwiki.com/wiki/Main_Page
 ```
 

@@ -99,6 +99,12 @@ Cookie Expiration:
         action="store_true",
         help="Don't test authentication after setup",
     )
+    parser.add_argument(
+        "--dir",
+        "-d",
+        default=None,
+        help="Deployment directory containing .env",
+    )
 
     args = parser.parse_args()
 
@@ -121,6 +127,23 @@ Cookie Expiration:
             print("Make sure the tools package is installed correctly.")
             sys.exit(1)
 
+    # Determine deploy directory
+    deploy_dir = None
+    env_file = None
+    if args.dir:
+        deploy_dir = Path(args.dir)
+        env_file = deploy_dir / ".env"
+    else:
+        # Try common locations
+        for candidate in [
+            Path.cwd() / "llmcrawl-deploy",
+            Path.cwd() / "deploy",
+        ]:
+            if (candidate / ".env").exists():
+                deploy_dir = candidate
+                env_file = candidate / ".env"
+                break
+
     result = authenticate(
         url=args.url,
         name=args.name,
@@ -129,6 +152,8 @@ Cookie Expiration:
         auto_apply=not args.no_apply,
         auto_restart=not args.no_restart,
         auto_test=not args.no_test,
+        deploy_dir=deploy_dir,
+        env_file=env_file,
     )
 
     sys.exit(0 if result.get("success") else 1)

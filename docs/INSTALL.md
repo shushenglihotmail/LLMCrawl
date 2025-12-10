@@ -361,6 +361,9 @@ llmcrawl auth https://www.osgwiki.com/wiki/Main_Page
 # See all options
 llmcrawl auth --help
 
+# Specify deployment directory (required for wheel installations in custom locations)
+llmcrawl auth https://www.osgwiki.com --dir /path/to/llmcrawl-deploy
+
 # Skip auto-apply to .env (just save cookies to .auth/ folder)
 llmcrawl auth https://www.osgwiki.com --no-apply
 
@@ -506,17 +509,48 @@ llmcrawl deploy --logs --no-follow
 ### Stop Services
 
 ```bash
+# Stop all services and remove containers
 llmcrawl deploy --down
+
+# Stop specific service(s) and remove containers
+llmcrawl deploy --down gateway
+llmcrawl deploy --down gateway crawler
+
+# Stop services but preserve containers (for quick restart)
+llmcrawl deploy --stop
+
+# Stop specific service(s) (preserve containers)
+llmcrawl deploy --stop gateway
+llmcrawl deploy --stop gateway crawler
 ```
 
 ### Restart Services
 
 ```bash
-# Restart all
+# Restart all services (no rebuild)
 llmcrawl deploy --restart
 
-# Restart specific service
+# Restart specific service(s)
 llmcrawl deploy --restart gateway
+llmcrawl deploy --restart gateway crawler indexer
+
+# Restart with image rebuild (picks up code changes)
+llmcrawl deploy --restart gateway --build
+llmcrawl deploy --restart gateway crawler --build
+
+# Restart monitoring services
+llmcrawl deploy --restart prometheus grafana --profile monitoring
+```
+
+### Local Development Mode
+
+When running from the source repository (not a wheel installation), use the `--dev` flag to use `docker-compose.dev.yml` which has the correct paths for local development:
+
+```bash
+# From the LLMCrawl repo root
+llmcrawl deploy --restart gateway --build --dev --dir ./deploy
+llmcrawl deploy --stop crawler --dev --dir ./deploy
+llmcrawl deploy --status --dev --dir ./deploy
 ```
 
 ### Pull Latest Images
