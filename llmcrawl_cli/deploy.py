@@ -9,8 +9,14 @@ Usage:
     llmcrawl deploy --upgrade           # Upgrade deployment after pip upgrade
     llmcrawl deploy --up                # Start all services
     llmcrawl deploy --down              # Stop all services
+    llmcrawl deploy --stop gateway      # Stop specific service(s)
+    llmcrawl deploy --restart gateway   # Restart specific service(s)
+    llmcrawl deploy --restart gateway --build  # Restart with rebuild
     llmcrawl deploy --logs              # View service logs
     llmcrawl deploy --status            # Check service status
+
+Services: gateway, crawler, indexer, mcp-server, azure-devops-mcp-server
+Monitoring: prometheus, grafana (use --profile monitoring)
 """
 
 import argparse
@@ -479,20 +485,22 @@ def ensure_docker_network(network_name: str = "webrag-network") -> bool:
         return False
 
 
-def run_compose(args: list, deploy_dir: Path) -> int:
+def run_compose(args: list, deploy_dir: Path, use_dev: bool = False) -> int:
     """Run docker compose with the given arguments."""
     if not deploy_dir.exists():
         print(f"❌ Error: Deployment directory not found: {deploy_dir}")
         print("   Run 'llmcrawl deploy --init' first.")
         return 1
 
-    compose_file = deploy_dir / "docker-compose.yml"
+    compose_filename = "docker-compose.dev.yml" if use_dev else "docker-compose.yml"
+    compose_file = deploy_dir / compose_filename
     if not compose_file.exists():
-        print(f"❌ Error: docker-compose.yml not found in {deploy_dir}")
+        print(f"❌ Error: {compose_filename} not found in {deploy_dir}")
         return 1
 
     compose_cmd = get_compose_command()
-    cmd = compose_cmd + ["-f", str(compose_file)] + args
+    # Use just the filename since we're running in deploy_dir
+    cmd = compose_cmd + ["-f", compose_filename] + args
 
     print(f"🐳 Running: {' '.join(cmd)}")
     print()
@@ -502,7 +510,12 @@ def run_compose(args: list, deploy_dir: Path) -> int:
     return result.returncode
 
 
-def cmd_up(deploy_dir: Path, detach: bool = True, profile: Optional[str] = None) -> int:
+def cmd_up(
+    deploy_dir: Path,
+    detach: bool = True,
+    profile: Optional[str] = None,
+    use_dev: bool = False,
+) -> int:
     """Start all services."""
     if not check_docker():
         print("❌ Error: Docker is not running or not installed.")
@@ -520,7 +533,7 @@ def cmd_up(deploy_dir: Path, detach: bool = True, profile: Optional[str] = None)
     if detach:
         args.append("-d")
 
-    result = run_compose(args, deploy_dir)
+    result = run_compose(args, deploy_dir, use_dev=use_dev)
 
     if result == 0 and detach:
         print()
@@ -546,14 +559,48 @@ def cmd_up(deploy_dir: Path, detach: bool = True, profile: Optional[str] = None)
     return result
 
 
-def cmd_down(deploy_dir: Path) -> int:
-    """Stop all services."""
-    print("🛑 Stopping LLMCrawl services...")
-    return run_compose(["down"], deploy_dir)
+def cmd_down(
+    deploy_dir: Path, services: Optional[list] = None, use_dev: bool = False
+) -> int:
+    """Stop all services or specific services."""
+    if services:
+        print(f"🛑 Stopping services: {', '.join(services)}...")
+        # Use 'stop' + 'rm' for specific services (down doesn't support service args)
+        result = run_compose(["stop"] + services, deploy_dir, use_dev=use_dev)
+        if result == 0:
+            result = run_compose(["rm", "-f"] + services, deploy_dir, use_dev=use_dev)
+        return result
+    else:
+        print("🛑 Stopping all LLMCrawl services...")
+        return run_compose(["down"], deploy_dir, use_dev=use_dev)
+
+
+def cmd_stop(
+    deploy_dir: Path,
+    services: Optional[list] = None,
+    profile: Optional[str] = None,
+    use_dev: bool = False,
+) -> int:
+    """Stop services without removing containers."""
+    args = []
+    if profile:
+        args.extend(["--profile", profile])
+    args.append("stop")
+
+    if services:
+        args.extend(services)
+        print(f"🛑 Stopping services: {', '.join(services)}...")
+    else:
+        print("🛑 Stopping all services (containers preserved)...")
+
+    return run_compose(args, deploy_dir, use_dev=use_dev)
 
 
 def cmd_logs(
-    deploy_dir: Path, follow: bool = True, service: Optional[str] = None
+    deploy_dir: Path,
+    follow: bool = True,
+    service: Optional[str] = None,
+    use_dev: bool = False,
 ) -> int:
     """View service logs."""
     args = ["logs"]
@@ -561,28 +608,63 @@ def cmd_logs(
         args.append("-f")
     if service:
         args.append(service)
-    return run_compose(args, deploy_dir)
+    return run_compose(args, deploy_dir, use_dev=use_dev)
 
 
-def cmd_status(deploy_dir: Path) -> int:
+def cmd_status(deploy_dir: Path, use_dev: bool = False) -> int:
     """Check service status."""
     print("📊 LLMCrawl Service Status")
     print("=" * 60)
-    return run_compose(["ps"], deploy_dir)
+    return run_compose(["ps"], deploy_dir, use_dev=use_dev)
 
 
-def cmd_restart(deploy_dir: Path, service: Optional[str] = None) -> int:
-    """Restart services."""
-    args = ["restart"]
-    if service:
-        args.append(service)
-    return run_compose(args, deploy_dir)
+def cmd_restart(
+    deploy_dir: Path,
+    services: Optional[list] = None,
+    build: bool = False,
+    profile: Optional[str] = None,
+    use_dev: bool = False,
+) -> int:
+    """Restart services with optional rebuild."""
+    if not check_docker():
+        print("❌ Error: Docker is not running or not installed.")
+        return 1
+
+    service_names = services if services else ["all services"]
+    print(f"🔄 Restarting: {', '.join(service_names)}...")
+
+    if build:
+        # Use 'up --build --force-recreate' for rebuild
+        args = []
+        if profile:
+            args.extend(["--profile", profile])
+        args.extend(["up", "-d", "--build", "--force-recreate"])
+        if services:
+            args.extend(services)
+        print("   Mode: Rebuild images and recreate containers")
+    else:
+        # Simple restart (no rebuild)
+        args = []
+        if profile:
+            args.extend(["--profile", profile])
+        args.append("restart")
+        if services:
+            args.extend(services)
+        print("   Mode: Restart containers (no rebuild)")
+
+    result = run_compose(args, deploy_dir, use_dev=use_dev)
+
+    if result == 0:
+        print()
+        print(f"✅ Successfully restarted: {', '.join(service_names)}")
+
+    return result
 
 
-def cmd_pull(deploy_dir: Path) -> int:
+def cmd_pull(deploy_dir: Path, use_dev: bool = False) -> int:
     """Pull latest images."""
     print("📥 Pulling latest images...")
-    return run_compose(["pull"], deploy_dir)
+    return run_compose(["pull"], deploy_dir, use_dev=use_dev)
 
 
 def main() -> None:
@@ -596,12 +678,26 @@ Examples:
   llmcrawl deploy --upgrade           Upgrade after pip install (preserves .env)
   llmcrawl deploy --up                Start all services
   llmcrawl deploy --up --profile monitoring  Start with monitoring stack
-  llmcrawl deploy --down              Stop all services
+  llmcrawl deploy --down              Stop all services and remove containers
+  llmcrawl deploy --down gateway      Stop and remove specific service
+  llmcrawl deploy --stop              Stop all services (preserve containers)
+  llmcrawl deploy --stop gateway      Stop specific service
+  llmcrawl deploy --restart           Restart all services
+  llmcrawl deploy --restart gateway   Restart specific service
+  llmcrawl deploy --restart gateway --build  Restart with image rebuild
+  llmcrawl deploy --restart --profile monitoring  Restart monitoring stack
   llmcrawl deploy --logs              View logs (Ctrl+C to exit)
   llmcrawl deploy --logs gateway      View logs for specific service
   llmcrawl deploy --status            Check service status
-  llmcrawl deploy --restart           Restart all services
-  llmcrawl deploy --restart gateway   Restart specific service
+
+Local Development (use --dev to use docker-compose.dev.yml):
+  llmcrawl deploy --restart gateway --build --dev --dir ./deploy
+  llmcrawl deploy --stop gateway --dev --dir ./deploy
+  llmcrawl deploy --status --dev --dir ./deploy
+
+Services: gateway, crawler, indexer, mcp-server, azure-devops-mcp-server,
+          redis, postgres, qdrant, playwright, firecrawl
+Monitoring: prometheus, grafana (use --profile monitoring)
 """,
     )
 
@@ -618,12 +714,25 @@ Examples:
         help="Upgrade deployment after pip upgrade (preserves .env settings)",
     )
     action_group.add_argument("--up", action="store_true", help="Start all services")
-    action_group.add_argument("--down", action="store_true", help="Stop all services")
+    action_group.add_argument(
+        "--down",
+        action="store_true",
+        help="Stop services and remove containers",
+    )
+    action_group.add_argument(
+        "--stop",
+        action="store_true",
+        help="Stop services (preserve containers for quick restart)",
+    )
     action_group.add_argument("--logs", action="store_true", help="View service logs")
     action_group.add_argument(
         "--status", action="store_true", help="Check service status"
     )
-    action_group.add_argument("--restart", action="store_true", help="Restart services")
+    action_group.add_argument(
+        "--restart",
+        action="store_true",
+        help="Restart services (use --build to rebuild images)",
+    )
     action_group.add_argument(
         "--pull", action="store_true", help="Pull latest Docker images"
     )
@@ -652,16 +761,26 @@ Examples:
         help="Don't restart services after upgrade (for --upgrade)",
     )
     parser.add_argument(
+        "--build",
+        action="store_true",
+        help="Rebuild images before restarting (for --restart)",
+    )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Use docker-compose.dev.yml for local development (uses ../ paths)",
+    )
+    parser.add_argument(
         "--profile",
         type=str,
         default=None,
-        help="Docker Compose profile to use (e.g., 'monitoring' for Prometheus/Grafana)",
+        help="Docker Compose profile (e.g., 'monitoring' for Prometheus/Grafana)",
     )
     parser.add_argument(
         "service",
-        nargs="?",
+        nargs="*",
         default=None,
-        help="Specific service name (for --logs, --restart)",
+        help="Service name(s) (for --logs, --restart, --stop, --down)",
     )
 
     args = parser.parse_args()
@@ -671,6 +790,10 @@ Examples:
         deploy_dir = Path(args.dir)
     else:
         deploy_dir = get_local_deploy_dir()
+
+    # Parse services (convert empty list to None)
+    services = args.service if args.service else None
+    use_dev = args.dev
 
     # Execute action
     exit_code = 0
@@ -682,19 +805,36 @@ Examples:
         success = upgrade_deployment(deploy_dir, restart=not args.no_restart)
         exit_code = 0 if success else 1
     elif args.up:
-        exit_code = cmd_up(deploy_dir, detach=not args.no_detach, profile=args.profile)
+        exit_code = cmd_up(
+            deploy_dir,
+            detach=not args.no_detach,
+            profile=args.profile,
+            use_dev=use_dev,
+        )
     elif args.down:
-        exit_code = cmd_down(deploy_dir)
+        exit_code = cmd_down(deploy_dir, services=services, use_dev=use_dev)
+    elif args.stop:
+        exit_code = cmd_stop(
+            deploy_dir, services=services, profile=args.profile, use_dev=use_dev
+        )
     elif args.logs:
+        # For logs, only use first service if multiple specified
+        service = services[0] if services else None
         exit_code = cmd_logs(
-            deploy_dir, follow=not args.no_follow, service=args.service
+            deploy_dir, follow=not args.no_follow, service=service, use_dev=use_dev
         )
     elif args.status:
-        exit_code = cmd_status(deploy_dir)
+        exit_code = cmd_status(deploy_dir, use_dev=use_dev)
     elif args.restart:
-        exit_code = cmd_restart(deploy_dir, service=args.service)
+        exit_code = cmd_restart(
+            deploy_dir,
+            services=services,
+            build=args.build,
+            profile=args.profile,
+            use_dev=use_dev,
+        )
     elif args.pull:
-        exit_code = cmd_pull(deploy_dir)
+        exit_code = cmd_pull(deploy_dir, use_dev=use_dev)
 
     sys.exit(exit_code)
 
