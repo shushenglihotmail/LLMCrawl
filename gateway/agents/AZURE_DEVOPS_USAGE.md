@@ -291,5 +291,5 @@ This will:
 ## See Also
 
 - [MCP Integration Guide](../../mcp_servers/local_access_mcp_server/INTEGRATION_GUIDE.md)
-- [Azure DevOps MCP Server README](../../mcp_servers/azure_devops_mcp_server/README.md)
+- [Azure DevOps MCP Server README](../../mcp_servers/azure_devops_mcp_server/docs/README.md)
 - [Template Agent Examples](./templates.py)

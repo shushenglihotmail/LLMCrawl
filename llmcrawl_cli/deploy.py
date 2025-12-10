@@ -23,8 +23,19 @@ from typing import Dict, Optional
 
 
 def get_package_root_dir() -> Path:
-    """Get the package root directory (where gateway/, crawler/, etc. are)."""
-    return Path(__file__).parent.parent
+    """Get the package root directory (where gateway/, crawler/, etc. are).
+
+    When installed from wheel, these are top-level packages in site-packages.
+    We find them by importing and getting their __file__ path.
+    """
+    try:
+        import gateway
+
+        # Return the parent of the gateway package (site-packages or project root)
+        return Path(gateway.__file__).parent.parent
+    except ImportError:
+        # Fallback to relative path from this file
+        return Path(__file__).parent.parent
 
 
 def get_package_deploy_dir() -> Path:
@@ -192,6 +203,23 @@ def init_deployment(target_dir: Path, force: bool = False) -> bool:
     if src_readme.exists():
         shutil.copy2(src_readme, data_files_dir / "README.md")
     print("   ✓ Created data/files/")
+
+    # Copy documentation files from deploy folder (included in wheel)
+    # Copy README.md to root of deployment
+    readme_src = source_dir / "README.md"
+    if readme_src.exists():
+        shutil.copy2(readme_src, target_dir / "README.md")
+        print("   ✓ Copied README.md")
+
+    # Copy docs folder
+    docs_dir = target_dir / "docs"
+    docs_dir.mkdir(exist_ok=True)
+    docs_to_copy = ["INSTALL.md", "DIAGNOSTICS.md", "MONITORING.md", "CONFIGURATION.md"]
+    for doc_name in docs_to_copy:
+        doc_src = source_dir / "docs" / doc_name
+        if doc_src.exists():
+            shutil.copy2(doc_src, docs_dir / doc_name)
+            print(f"   ✓ Copied docs/{doc_name}")
 
     # Create .env from .env.example if not exists
     env_example = target_dir / ".env.example"
@@ -363,6 +391,23 @@ def upgrade_deployment(target_dir: Path, restart: bool = True) -> bool:
             shutil.copytree(src, dst)
             print(f"   ✓ Updated {service_dir}/")
 
+    # Step 3b: Copy/Update documentation files from deploy folder (included in wheel)
+    # Copy README.md to root of deployment
+    readme_src = source_dir / "README.md"
+    if readme_src.exists():
+        shutil.copy2(readme_src, target_dir / "README.md")
+        print("   ✓ Updated README.md")
+
+    # Copy docs folder
+    docs_dir = target_dir / "docs"
+    docs_dir.mkdir(exist_ok=True)
+    docs_to_copy = ["INSTALL.md", "DIAGNOSTICS.md", "MONITORING.md", "CONFIGURATION.md"]
+    for doc_name in docs_to_copy:
+        doc_src = source_dir / "docs" / doc_name
+        if doc_src.exists():
+            shutil.copy2(doc_src, docs_dir / doc_name)
+            print(f"   ✓ Updated docs/{doc_name}")
+
     # Step 4: Merge .env with new .env.example
     new_example = target_dir / ".env.example"
     if old_env_vars and new_example.exists():
@@ -457,7 +502,7 @@ def run_compose(args: list, deploy_dir: Path) -> int:
     return result.returncode
 
 
-def cmd_up(deploy_dir: Path, detach: bool = True) -> int:
+def cmd_up(deploy_dir: Path, detach: bool = True, profile: Optional[str] = None) -> int:
     """Start all services."""
     if not check_docker():
         print("❌ Error: Docker is not running or not installed.")
@@ -468,7 +513,10 @@ def cmd_up(deploy_dir: Path, detach: bool = True) -> int:
     ensure_docker_network("webrag-network")
 
     print("🚀 Starting LLMCrawl services...")
-    args = ["up", "--build"]
+    args = []
+    if profile:
+        args.extend(["--profile", profile])
+    args.extend(["up", "--build"])
     if detach:
         args.append("-d")
 
@@ -485,7 +533,9 @@ def cmd_up(deploy_dir: Path, detach: bool = True) -> int:
         print("  • Gateway API:      http://localhost:8000")
         print("  • Gateway Docs:     http://localhost:8000/docs")
         print("  • Qdrant Dashboard: http://localhost:6333/dashboard")
-        print("  • Grafana:          http://localhost:3001")
+        if profile == "monitoring":
+            print("  • Prometheus:       http://localhost:9090")
+            print("  • Grafana:          http://localhost:3001 (admin/admin)")
         print()
         print("Commands:")
         print("  • View logs:   llmcrawl deploy --logs")
@@ -545,6 +595,7 @@ Examples:
   llmcrawl deploy --init              Initialize deployment folder
   llmcrawl deploy --upgrade           Upgrade after pip install (preserves .env)
   llmcrawl deploy --up                Start all services
+  llmcrawl deploy --up --profile monitoring  Start with monitoring stack
   llmcrawl deploy --down              Stop all services
   llmcrawl deploy --logs              View logs (Ctrl+C to exit)
   llmcrawl deploy --logs gateway      View logs for specific service
@@ -601,6 +652,12 @@ Examples:
         help="Don't restart services after upgrade (for --upgrade)",
     )
     parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Docker Compose profile to use (e.g., 'monitoring' for Prometheus/Grafana)",
+    )
+    parser.add_argument(
         "service",
         nargs="?",
         default=None,
@@ -625,7 +682,7 @@ Examples:
         success = upgrade_deployment(deploy_dir, restart=not args.no_restart)
         exit_code = 0 if success else 1
     elif args.up:
-        exit_code = cmd_up(deploy_dir, detach=not args.no_detach)
+        exit_code = cmd_up(deploy_dir, detach=not args.no_detach, profile=args.profile)
     elif args.down:
         exit_code = cmd_down(deploy_dir)
     elif args.logs:

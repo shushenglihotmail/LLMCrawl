@@ -10,6 +10,7 @@ import fnmatch
 import json
 import logging
 import os
+import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple, cast
 
@@ -28,6 +29,12 @@ from gateway.routers.tools import get_tool_handler
 from gateway.utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from gateway.utils.conversation_store import get_conversation_store
 from gateway.utils.logging import log_request, log_response
+from gateway.utils.metrics import (
+    record_agent_request,
+    record_agent_activity,
+    AgentActivityTimer,
+    classify_error,
+)
 from gateway.utils.tool_constants import DEFAULT_TOOL_LIMITS, TOOL_QUERY_COMPOSITION_DB
 
 logger = logging.getLogger(__name__)
@@ -1223,6 +1230,8 @@ async def execute(request: UnifiedWorkflowRequest):
     6. Return response with conversation tracking
     """
     request_id = str(uuid.uuid4())
+    request_start_time = time.time()
+    workflow_name = request.workflow.value if request.workflow else "unknown"
 
     log_request(
         logger,
@@ -1264,11 +1273,17 @@ async def execute(request: UnifiedWorkflowRequest):
             "web_search_results": 0,
         }
 
-        # Step 1: Expand paths
-        expanded_target_paths = await _expand_paths(agent, request.target_paths or [])
-        expanded_reference_files = await _expand_paths(
-            agent, request.reference_files or []
-        )
+        # Step 1: Expand paths (with metrics)
+        async with AgentActivityTimer("expand_paths") as expand_timer:
+            expanded_target_paths = await _expand_paths(
+                agent, request.target_paths or []
+            )
+            expanded_reference_files = await _expand_paths(
+                agent, request.reference_files or []
+            )
+            expand_timer.items = len(expanded_target_paths) + len(
+                expanded_reference_files
+            )
 
         if request.target_paths:
             logger.info(
@@ -1279,22 +1294,34 @@ async def execute(request: UnifiedWorkflowRequest):
                 f"Expanded {len(request.reference_files)} reference files to {len(expanded_reference_files)} files"
             )
 
-        # Step 2: Gather context from all sources
+        # Step 2: Gather context from all sources (with metrics)
         # For FILE_EXPLORER workflow, use special gathering that doesn't read folder contents
         if request.workflow == WorkflowType.FILE_EXPLORER:
-            target_content = await _gather_target_files_for_file_explorer(
-                agent, expanded_target_paths, context_gathered
-            )
+            async with AgentActivityTimer("prefetch_azdo") as prefetch_timer:
+                target_content = await _gather_target_files_for_file_explorer(
+                    agent, expanded_target_paths, context_gathered
+                )
+                prefetch_timer.items = context_gathered.get("target_files", 0)
         else:
-            target_content = await _gather_target_files(
-                agent, expanded_target_paths, context_gathered
+            async with AgentActivityTimer("prefetch_azdo") as prefetch_timer:
+                target_content = await _gather_target_files(
+                    agent, expanded_target_paths, context_gathered
+                )
+                prefetch_timer.items = context_gathered.get("target_files", 0)
+
+        async with AgentActivityTimer("prefetch_local") as local_timer:
+            reference_content = await _gather_reference_files(
+                agent, expanded_reference_files, context_gathered
             )
-        reference_content = await _gather_reference_files(
-            agent, expanded_reference_files, context_gathered
-        )
-        crawled_content = await _crawl_urls(
-            agent, request, request_id, context_gathered
-        )
+            local_timer.items = context_gathered.get("reference_files", 0)
+
+        async with AgentActivityTimer("crawl") as crawl_timer:
+            crawled_content = await _crawl_urls(
+                agent, request, request_id, context_gathered
+            )
+            crawl_timer.items = context_gathered.get(
+                "crawled_urls", 0
+            ) + context_gathered.get("web_search_results", 0)
 
         # Step 3: Build context and messages
         full_context = _build_context_string(
@@ -1320,10 +1347,12 @@ async def execute(request: UnifiedWorkflowRequest):
         # Pass seed_urls so LLM knows which URLs to prioritize when crawling
         tools = await _load_tools(agent, effective_expose_to_llm, request.seed_urls)
 
-        # Step 5: Execute LLM with tools
-        response_text, tokens_used = await _execute_llm_with_tools(
-            request, messages, tools, request_id, context_gathered, conversation_id
-        )
+        # Step 5: Execute LLM with tools (with metrics)
+        async with AgentActivityTimer("llm_loop") as llm_timer:
+            response_text, tokens_used = await _execute_llm_with_tools(
+                request, messages, tools, request_id, context_gathered, conversation_id
+            )
+            llm_timer.items = tokens_used
 
         # Step 6: Save conversation history
         conversation_store.add_message(conversation_id, "user", request.user_message)
@@ -1337,12 +1366,33 @@ async def execute(request: UnifiedWorkflowRequest):
             context_gathered=context_gathered,
         )
 
+        # Record successful agent request
+        request_duration = time.time() - request_start_time
+        record_agent_request(
+            workflow=workflow_name,
+            status="success",
+            duration=request_duration,
+            conversation_id=conversation_id,
+        )
+
         log_response(logger, request_id, 200, 0.0)
         return result
 
     except Exception as e:
         logger.error(f"Workflow failed: {e}", exc_info=True)
         log_response(logger, request_id, 500, 0.0, error=str(e))
+
+        # Record failed agent request
+        request_duration = time.time() - request_start_time
+        error_type = classify_error(e)
+        record_agent_request(
+            workflow=workflow_name,
+            status="error",
+            duration=request_duration,
+            error_type=error_type,
+            error_message=str(e),
+            conversation_id=conversation_id,
+        )
 
         error_msg = str(e)
         status_code = 500

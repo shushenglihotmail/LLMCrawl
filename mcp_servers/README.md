@@ -41,9 +41,9 @@ MCP server for integrating with Azure DevOps repositories, enabling file reading
 - Wildcard pattern matching
 
 **Quick Links:**
-- [Quick Start](azure_devops_mcp_server/QUICKSTART.md)
-- [Full Documentation](azure_devops_mcp_server/README.md)
-- [Integration Guide](azure_devops_mcp_server/INTEGRATION.md)
+- [Quick Start](azure_devops_mcp_server/docs/QUICKSTART.md)
+- [Full Documentation](azure_devops_mcp_server/docs/README.md)
+- [Integration Guide](azure_devops_mcp_server/docs/INTEGRATION.md)
 
 **Installation:**
 ```bash

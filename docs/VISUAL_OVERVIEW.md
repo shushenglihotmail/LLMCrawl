@@ -363,5 +363,5 @@ docker-compose exec gateway bash
 
 **For detailed information**, see:
 - [Architecture Guide](ARCHITECTURE.md) - Complete system design
-- [Installation Guide](../INSTALL.md) - Installation and deployment instructions
+- [Installation Guide](INSTALL.md) - Installation and deployment instructions
 - [Main README](../README.md) - Quick start guide

@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -17,6 +18,7 @@ from openai import AsyncAzureOpenAI, AsyncOpenAI
 
 from gateway.utils.prompt_compressor import compress_if_needed, estimate_messages_tokens
 from gateway.utils.tool_constants import TOOL_CRAWL_AND_REFRESH
+from gateway.utils.metrics import record_llm_request
 
 logger = logging.getLogger(__name__)
 
@@ -217,8 +219,40 @@ class LLMClient:
         if stream:
             return self._stream_completion(**kwargs)
         else:
-            response = await self.openai_client.chat.completions.create(**kwargs)
-            parsed = self._parse_response(response)
+            start_time = time.time()
+            request_size = len(json.dumps(messages))
+            status = "success"
+            error_type = None
+            prompt_tokens = 0
+            completion_tokens = 0
+            response_size = 0
+
+            try:
+                response = await self.openai_client.chat.completions.create(**kwargs)
+                parsed = self._parse_response(response)
+
+                # Extract token usage from response
+                if hasattr(response, "usage") and response.usage:
+                    prompt_tokens = response.usage.prompt_tokens or 0
+                    completion_tokens = response.usage.completion_tokens or 0
+                response_size = len(json.dumps(parsed))
+            except Exception as e:
+                status = "error"
+                error_type = type(e).__name__
+                raise
+            finally:
+                duration = time.time() - start_time
+                record_llm_request(
+                    model=model,
+                    provider=self.provider,
+                    status=status,
+                    duration=duration,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    request_size=request_size,
+                    response_size=response_size,
+                    error_type=error_type,
+                )
 
             # Check if tools were passed but LLM responded with JSON text instead of tool call
             if tools and not parsed.get("tool_calls"):
@@ -254,6 +288,14 @@ class LLMClient:
             raise Exception(
                 "Anthropic endpoint not configured. Check AZURE_ANTHROPIC_ENDPOINT configuration."
             )
+
+        start_time = time.time()
+        request_size = len(json.dumps(messages))
+        status = "success"
+        error_type = None
+        prompt_tokens = 0
+        completion_tokens = 0
+        response_size = 0
 
         # Convert OpenAI message format to Anthropic format
         anthropic_messages = []
@@ -378,6 +420,10 @@ class LLMClient:
             stop_reason = data.get("stop_reason")
             usage = data.get("usage", {})
 
+            # Extract token usage for metrics
+            prompt_tokens = usage.get("input_tokens", 0)
+            completion_tokens = usage.get("output_tokens", 0)
+
             # Log response details for debugging
             logger.info(
                 f"Anthropic response: stop_reason={stop_reason}, "
@@ -402,9 +448,13 @@ class LLMClient:
             if tool_calls:
                 result["tool_calls"] = tool_calls
 
+            response_size = len(json.dumps(result))
+
             return result
 
         except httpx.HTTPStatusError as e:
+            status = "error"
+            error_type = "HTTPStatusError"
             error_detail = e.response.text
             logger.error(
                 f"Anthropic HTTP error: {e.response.status_code} - {error_detail}"
@@ -413,13 +463,30 @@ class LLMClient:
                 f"Anthropic API error ({e.response.status_code}): {error_detail}"
             ) from e
         except httpx.TimeoutException as e:
+            status = "error"
+            error_type = "TimeoutException"
             logger.error(f"Anthropic API timeout after 180s - request may be too large")
             raise Exception(
                 f"Anthropic API timeout: Request took too long (>180s). Try reducing context size."
             ) from e
         except Exception as e:
+            status = "error"
+            error_type = type(e).__name__
             logger.error(f"Anthropic chat completion failed: {e}")
             raise Exception(f"Anthropic API error: {str(e)}") from e
+        finally:
+            duration = time.time() - start_time
+            record_llm_request(
+                model=model,
+                provider="anthropic",
+                status=status,
+                duration=duration,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                request_size=request_size,
+                response_size=response_size,
+                error_type=error_type,
+            )
 
     async def _stream_completion(
         self, **kwargs

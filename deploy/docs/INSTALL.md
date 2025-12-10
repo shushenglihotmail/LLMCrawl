@@ -530,7 +530,7 @@ For visual diagnostics with Prometheus and Grafana:
 
 ```bash
 # Start all services WITH monitoring stack
-llmcrawl deploy --up -- --profile monitoring
+llmcrawl deploy --up --profile monitoring
 
 # Or via docker-compose directly
 cd llmcrawl-deploy

@@ -10,24 +10,16 @@ recursive-include deploy/data *
 # Include static files for hichat
 recursive-include clients/hichat/static *
 
-# Include mcp_servers Dockerfiles and non-Python files
+# Include mcp_servers Dockerfiles and config files (exclude docs)
 include mcp_servers/azure_devops_mcp_server/Dockerfile
-include mcp_servers/azure_devops_mcp_server/*.md
 include mcp_servers/azure_devops_mcp_server/pyproject.toml
 
 # Include tools
 recursive-include tools *
 
-# Include documentation
+# Include documentation (deployed to llmcrawl-deploy)
 include README.md
-include INSTALL.md
+include docs/INSTALL.md
 include docs/DIAGNOSTICS.md
 include docs/MONITORING.md
 include docs/CONFIGURATION.md
-
-# Exclude unnecessary files
-global-exclude __pycache__
-global-exclude *.py[cod]
-global-exclude .git*
-global-exclude .env
-exclude deploy/.env

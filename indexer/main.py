@@ -16,6 +16,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
 
 from .adapters.llamaindex_store import get_llamaindex_store
+from .utils.metrics import set_service_up, record_service_error
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -64,18 +65,23 @@ async def lifespan(app: FastAPI):
     # Initialize the store
     vector_db = os.getenv("VECTOR_DB", "qdrant")
     global store
-    store = await get_llamaindex_store(vector_db)
-
-    logger.info(f"Indexer service started with {vector_db} backend")
-    yield
-
-    # Cleanup
     try:
-        await store.close()
-    except:
-        pass
-
-    logger.info("Indexer service shut down")
+        store = await get_llamaindex_store(vector_db)
+        set_service_up(True)
+        logger.info(f"Indexer service started with {vector_db} backend")
+        yield
+    except Exception as e:
+        record_service_error(e)
+        raise
+    finally:
+        # Mark service as down on shutdown
+        set_service_up(False)
+        # Cleanup
+        try:
+            await store.close()
+        except:
+            pass
+        logger.info("Indexer service shut down")
 
 
 # Create FastAPI app

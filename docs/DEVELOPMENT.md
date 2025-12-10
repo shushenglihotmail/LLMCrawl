@@ -349,7 +349,7 @@ If you encounter issues:
 
 ## Docker Deployment (Developer Reference)
 
-This section covers service-by-service deployment for developers. For user installation, see [INSTALL.md](../INSTALL.md).
+This section covers service-by-service deployment for developers. For user installation, see [INSTALL.md](INSTALL.md).
 
 ### Service-by-Service Deployment
 

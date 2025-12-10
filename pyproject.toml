@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llmcrawl"
-version = "1.0.0"
+version = "1.0.1"
 description = "Web RAG System with LLM-powered crawling and indexing"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -69,13 +69,11 @@ exclude = ["tests*", "docs*", "ref*", "logs*"]
   "requirements/*",
   "grafana-provisioning/*",
   "grafana-provisioning/**/*",
-  "gateway/*",
-  "crawler/*",
-  "indexer/*",
-  "mcp_servers/*",
-  "mcp_servers/**/*",
+  "README.md",
+  "data/files/*",
 ]
-"mcp_servers.azure_devops_mcp_server" = ["Dockerfile", "*.md", "*.toml"]
+"deploy.docs" = ["*.md"]
+"mcp_servers.azure_devops_mcp_server" = ["Dockerfile", "*.toml"]
 
 [tool.black]
 line-length = 88

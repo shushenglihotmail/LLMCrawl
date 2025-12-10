@@ -13,6 +13,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from .routers import agent, export, models
 from .utils.logging import get_logger, setup_logging
+from .utils.metrics import set_service_up, record_service_error
 
 # Setup logging
 setup_logging()
@@ -26,11 +27,16 @@ async def lifespan(app: FastAPI):
 
     # Startup
     try:
-        # Initialize any startup tasks here
+        # Mark service as up
+        set_service_up("gateway", True)
         logger.info("Gateway service started successfully")
         yield
+    except Exception as e:
+        record_service_error("gateway", e)
+        raise
     finally:
-        # Cleanup
+        # Mark service as down on shutdown
+        set_service_up("gateway", False)
         logger.info("Shutting down Gateway service")
 
 

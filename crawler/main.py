@@ -23,6 +23,7 @@ from .clients.firecrawl import FirecrawlClient
 from .extract.trafilatura_wrap import get_trafilatura_extractor
 from .render.playwright_runner import get_playwright_renderer
 from .utils.robots import get_robots_checker
+from .utils.metrics import set_service_up, record_service_error
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -72,20 +73,25 @@ async def lifespan(app: FastAPI):
 
     # Initialize clients
     global firecrawl_client
-    firecrawl_client = FirecrawlClient()
-
-    logger.info("Crawler service started successfully")
-    yield
-
-    # Cleanup
     try:
-        await firecrawl_client.close()
-        renderer = await get_playwright_renderer()
-        await renderer.close()
-    except:
-        pass
-
-    logger.info("Crawler service shut down")
+        firecrawl_client = FirecrawlClient()
+        set_service_up(True)
+        logger.info("Crawler service started successfully")
+        yield
+    except Exception as e:
+        record_service_error(e)
+        raise
+    finally:
+        # Mark service as down on shutdown
+        set_service_up(False)
+        # Cleanup
+        try:
+            await firecrawl_client.close()
+            renderer = await get_playwright_renderer()
+            await renderer.close()
+        except:
+            pass
+        logger.info("Crawler service shut down")
 
 
 # Create FastAPI app
@@ -308,8 +314,7 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
 
         # Calculate remaining seed URLs that weren't crawled by FireCrawl
         remaining_seed_urls = [
-            url for url in (request.seed_urls or [])
-            if url not in crawled_seed_urls
+            url for url in (request.seed_urls or []) if url not in crawled_seed_urls
         ]
 
         # Hybrid crawling approach for authenticated sites:
@@ -321,13 +326,11 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
         # - FireCrawl's /v1/crawl doesn't pass auth headers to link discovery
         # - Playwright with storage_state handles auth properly for all pages
         needs_depth_crawl = (
-            request.depth > 1
-            and documents  # Have seed documents to extract links from
+            request.depth > 1 and documents  # Have seed documents to extract links from
         )
 
-        needs_playwright_fallback = (
-            len(documents) < threshold
-            or bool(remaining_seed_urls)
+        needs_playwright_fallback = len(documents) < threshold or bool(
+            remaining_seed_urls
         )
 
         # Step 2a: Playwright depth crawling for authenticated sites
@@ -345,7 +348,7 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
                 # Extract links from markdown content
                 markdown = doc.get("markdown", "")
                 # Find markdown links [text](url)
-                md_links = re.findall(r'\[([^\]]+)\]\(([^)]+)\)', markdown)
+                md_links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", markdown)
                 for _, link in md_links:
                     if link.startswith("http") and link not in extracted_links:
                         extracted_links.append(link)
@@ -357,8 +360,10 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
 
             # Filter to same domain as seed URLs and normalize URLs
             seed_domains = set()
-            seed_base_urls = set()  # Track base URLs (without anchors) we've already seen
-            for url in (request.seed_urls or []):
+            seed_base_urls = (
+                set()
+            )  # Track base URLs (without anchors) we've already seen
+            for url in request.seed_urls or []:
                 parsed = urlparse(url)
                 seed_domains.add(parsed.netloc)
                 # Add base URL without fragment
@@ -378,7 +383,9 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
                 seen_base_urls.add(base_url)
                 same_domain_links.append(base_url)
 
-            logger.info(f"Found {len(extracted_links)} links, {len(same_domain_links)} unique same-domain")
+            logger.info(
+                f"Found {len(extracted_links)} links, {len(same_domain_links)} unique same-domain"
+            )
 
             # Process discovered links using FireCrawl's /v1/scrape (sync, supports headers)
             # NOTE: FireCrawl's /v1/batch/scrape is async and workers DON'T get auth headers
@@ -386,8 +393,12 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
             if same_domain_links and firecrawl_client:
                 try:
                     # Limit to remaining capacity
-                    urls_to_scrape = same_domain_links[:request.max_results - len(documents)]
-                    logger.info(f"FireCrawl scraping {len(urls_to_scrape)} discovered links")
+                    urls_to_scrape = same_domain_links[
+                        : request.max_results - len(documents)
+                    ]
+                    logger.info(
+                        f"FireCrawl scraping {len(urls_to_scrape)} discovered links"
+                    )
 
                     # crawl_urls uses /v1/scrape (sync) which properly passes Cookie header
                     link_docs = await firecrawl_client.crawl_urls(urls_to_scrape)
@@ -400,16 +411,22 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
                             documents.append(doc)
                             existing_urls.add(doc.get("url"))
 
-                    logger.info(f"FireCrawl added {len(link_docs)} documents from discovered links")
+                    logger.info(
+                        f"FireCrawl added {len(link_docs)} documents from discovered links"
+                    )
                 except Exception as e:
-                    logger.error(f"FireCrawl link scraping failed: {e}, falling back to Playwright")
+                    logger.error(
+                        f"FireCrawl link scraping failed: {e}, falling back to Playwright"
+                    )
                     # Fallback to Playwright if FireCrawl fails
                     try:
                         seen_urls = {doc.get("url") for doc in documents}
                         depth_docs = await crawl_with_depth(
                             renderer=renderer,
                             extractor=extractor,
-                            seed_urls=same_domain_links[:request.max_results - len(documents)],
+                            seed_urls=same_domain_links[
+                                : request.max_results - len(documents)
+                            ],
                             depth=request.depth - 1,
                             max_results=request.max_results - len(documents),
                             robots_checker=robots_checker,
@@ -420,7 +437,9 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
                             if doc.get("url") not in existing_urls:
                                 documents.append(doc)
                                 existing_urls.add(doc.get("url"))
-                        logger.info(f"Playwright fallback added {len(depth_docs)} documents")
+                        logger.info(
+                            f"Playwright fallback added {len(depth_docs)} documents"
+                        )
                     except Exception as e2:
                         logger.error(f"Playwright fallback also failed: {e2}")
 
@@ -531,7 +550,11 @@ async def crawl_endpoint(request: CrawlRequest, req: Request):
             # If document was successfully crawled with auth (FireCrawl or Playwright), trust it
             # Otherwise, check robots.txt
             source = doc.get("source", "")
-            if source in ("firecrawl", "firecrawl-batch", "playwright+trafilatura") or await robots_checker.can_crawl(url):
+            if source in (
+                "firecrawl",
+                "firecrawl-batch",
+                "playwright+trafilatura",
+            ) or await robots_checker.can_crawl(url):
                 filtered_docs.append(doc)
                 seen_urls.add(url)
 

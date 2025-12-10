@@ -6,6 +6,7 @@ Manages the crawl_and_refresh tool and orchestrates the RAG pipeline.
 import json
 import logging
 import os
+import time
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -14,6 +15,12 @@ import httpx
 from ..agents.windows_composition import get_composition_client
 from ..utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from ..utils.logging import log_tool_call, log_tool_result
+from ..utils.metrics import (
+    record_tool_call,
+    record_crawl_request,
+    get_domain_from_url,
+    classify_error,
+)
 from ..utils.tool_constants import (
     TOOL_AZURE_DEVOPS_GET_FILE,
     TOOL_AZURE_DEVOPS_SEARCH_CODE,
@@ -50,6 +57,7 @@ class ToolHandler:
         tool_call: Dict[str, Any],
         request_id: str,
         skip_embedding: bool = False,
+        initiator: str = "llm",  # 'llm' or 'agent' or 'user'
     ) -> Dict[str, Any]:
         """
         Handle a tool function call and return the result.
@@ -58,6 +66,7 @@ class ToolHandler:
             tool_call: Tool call from LLM response
             request_id: Request tracking ID
             skip_embedding: Skip embedding/indexing, return raw content
+            initiator: Who initiated the tool call (llm, agent, user)
 
         Returns:
             Tool result for LLM context
@@ -66,42 +75,54 @@ class ToolHandler:
         arguments = json.loads(tool_call["function"]["arguments"])
 
         log_tool_call(logger, request_id, tool_name, arguments)
-        start_time = datetime.now()
+        start_time = time.time()
+        status = "success"
+        error_type = None
 
         try:
             if tool_name == TOOL_CRAWL_AND_REFRESH:
                 result = await self._handle_crawl_and_refresh(
-                    arguments, request_id, skip_embedding
+                    arguments, request_id, skip_embedding, initiator
                 )
-                success = True
             elif tool_name in self.mcp_tools:
-                result = await self._handle_mcp_tool(tool_name, arguments, request_id)
-                success = True
+                result = await self._handle_mcp_tool(
+                    tool_name, arguments, request_id, initiator
+                )
             elif tool_name in [
                 TOOL_AZURE_DEVOPS_SEARCH_CODE,
                 TOOL_AZURE_DEVOPS_GET_FILE,
             ]:
                 result = await self._handle_azure_devops_tool(
-                    tool_name, arguments, request_id
+                    tool_name, arguments, request_id, initiator
                 )
-                success = True
             elif tool_name == TOOL_QUERY_COMPOSITION_DB:
                 result = await self._handle_composition_tool(arguments, request_id)
-                success = True
             else:
                 result = {"error": f"Unknown tool: {tool_name}"}
-                success = False
+                status = "error"
+                error_type = "unknown_tool"
 
         except Exception as e:
             logger.error(f"Tool call failed: {e}")
             result = {"error": str(e)}
-            success = False
+            status = "error"
+            error_type = classify_error(e)
+
+        # Record metrics with parameters for debugging
+        duration = time.time() - start_time
+        record_tool_call(
+            tool_name=tool_name,
+            status=status,
+            duration=duration,
+            error_type=error_type,
+            parameters=arguments,
+        )
 
         # Log result
-        duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+        duration_ms = duration * 1000
         result_size = len(json.dumps(result))
         log_tool_result(
-            logger, request_id, tool_name, success, duration_ms, result_size
+            logger, request_id, tool_name, status == "success", duration_ms, result_size
         )
 
         return {
@@ -111,7 +132,11 @@ class ToolHandler:
         }
 
     async def _handle_crawl_and_refresh(
-        self, arguments: Dict[str, Any], request_id: str, skip_embedding: bool = False
+        self,
+        arguments: Dict[str, Any],
+        request_id: str,
+        skip_embedding: bool = False,
+        initiator: str = "llm",
     ) -> Dict[str, Any]:
         """
         Handle the crawl_and_refresh tool call.
@@ -125,6 +150,7 @@ class ToolHandler:
             arguments: Tool arguments (query, seed_urls, etc.)
             request_id: Request tracking ID
             skip_embedding: Skip embedding/indexing, return raw content
+            initiator: Who initiated the crawl (llm, agent, user)
 
         Returns:
             Formatted tool result with sources
@@ -137,17 +163,57 @@ class ToolHandler:
 
         logger.info(f"Starting crawl_and_refresh for query: {query}")
 
-        # Step 1: Crawl web content
-        crawl_result = await self._call_crawler(
-            query=query,
-            seed_urls=seed_urls,
-            freshness_days=freshness_days,
-            depth=depth,
-            allow_web_search=allow_web_search,
-            request_id=request_id,
-        )
+        # Determine source (firecrawl or playwright based on configuration)
+        source = "firecrawl" if allow_web_search else "playwright"
+        crawl_result = None
 
-        if not crawl_result.get("docs"):
+        # Track crawling metrics per URL
+        for url in seed_urls:
+            domain = get_domain_from_url(url)
+            crawl_start = time.time()
+            crawl_status = "success"
+            try:
+                # Step 1: Crawl web content
+                crawl_result = await self._call_crawler(
+                    query=query,
+                    seed_urls=seed_urls,
+                    freshness_days=freshness_days,
+                    depth=depth,
+                    allow_web_search=allow_web_search,
+                    request_id=request_id,
+                )
+            except Exception as e:
+                crawl_status = "error"
+                record_crawl_request(
+                    status=crawl_status,
+                    domain=domain,
+                    source=source,
+                    duration=time.time() - crawl_start,
+                )
+                raise
+            finally:
+                if crawl_status == "success":
+                    crawl_duration = time.time() - crawl_start
+                    record_crawl_request(
+                        status=crawl_status,
+                        domain=domain,
+                        source=source,
+                        duration=crawl_duration,
+                    )
+            break  # Only measure once for all URLs in the batch
+
+        # If no URLs provided, still call crawler (may use web search)
+        if not seed_urls:
+            crawl_result = await self._call_crawler(
+                query=query,
+                seed_urls=seed_urls,
+                freshness_days=freshness_days,
+                depth=depth,
+                allow_web_search=allow_web_search,
+                request_id=request_id,
+            )
+
+        if not crawl_result or not crawl_result.get("docs"):
             return {
                 "error": "No documents found during crawling",
                 "query": query,
@@ -361,7 +427,11 @@ class ToolHandler:
                 return {"error": f"Retrieval failed: {e}"}
 
     async def _handle_mcp_tool(
-        self, tool_name: str, arguments: Dict[str, Any], request_id: str
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        request_id: str,
+        initiator: str = "llm",
     ) -> Dict[str, Any]:
         """
         Handle MCP server tool calls for local file operations.
@@ -370,6 +440,7 @@ class ToolHandler:
             tool_name: Name of the MCP tool
             arguments: Tool arguments
             request_id: Request tracking ID
+            initiator: Who initiated the call (llm, agent, user)
 
         Returns:
             Tool result
@@ -397,7 +468,11 @@ class ToolHandler:
                 return {"error": f"MCP server error: {e.response.status_code}"}
 
     async def _handle_azure_devops_tool(
-        self, tool_name: str, arguments: Dict[str, Any], request_id: str
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        request_id: str,
+        initiator: str = "llm",
     ) -> Dict[str, Any]:
         """
         Handle Azure DevOps MCP server tool calls.
