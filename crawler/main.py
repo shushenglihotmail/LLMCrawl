@@ -22,8 +22,8 @@ from pydantic import BaseModel, Field
 from .clients.firecrawl import FirecrawlClient
 from .extract.trafilatura_wrap import get_trafilatura_extractor
 from .render.playwright_runner import get_playwright_renderer
+from .utils.metrics import record_service_error, set_service_up
 from .utils.robots import get_robots_checker
-from .utils.metrics import set_service_up, record_service_error
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)

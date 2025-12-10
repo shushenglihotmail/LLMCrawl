@@ -3,7 +3,7 @@ Prometheus metrics for the Indexer service.
 Tracks indexing operations, retrieval, and service health.
 """
 
-from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 
 # Service health
 SERVICE_UP = Gauge(

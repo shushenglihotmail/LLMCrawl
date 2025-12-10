@@ -16,10 +16,10 @@ from ..agents.windows_composition import get_composition_client
 from ..utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from ..utils.logging import log_tool_call, log_tool_result
 from ..utils.metrics import (
-    record_tool_call,
-    record_crawl_request,
-    get_domain_from_url,
     classify_error,
+    get_domain_from_url,
+    record_crawl_request,
+    record_tool_call,
 )
 from ..utils.tool_constants import (
     TOOL_AZURE_DEVOPS_GET_FILE,

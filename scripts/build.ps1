@@ -43,7 +43,7 @@
 param(
     [ValidateSet("Normal", "Clean", "Install", "Release", "Check")]
     [string]$Mode = "Normal",
-    
+
     [switch]$NoBuild,
     [switch]$VerboseOutput
 )
@@ -78,14 +78,14 @@ function Get-Version {
 # Clean build artifacts
 function Clear-BuildArtifacts {
     Write-Step "Cleaning build artifacts..."
-    
+
     $foldersToRemove = @(
         "build",
         "dist",
         "*.egg-info",
         ".eggs"
     )
-    
+
     foreach ($folder in $foldersToRemove) {
         $paths = Get-ChildItem -Path $ProjectRoot -Filter $folder -Directory -ErrorAction SilentlyContinue
         foreach ($path in $paths) {
@@ -93,41 +93,41 @@ function Clear-BuildArtifacts {
             Remove-Item -Path $path.FullName -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
-    
+
     # Also check for egg-info in subdirectories
     $eggInfos = Get-ChildItem -Path $ProjectRoot -Filter "*.egg-info" -Directory -Recurse -ErrorAction SilentlyContinue
     foreach ($egg in $eggInfos) {
         Write-Info "Removing: $($egg.FullName)"
         Remove-Item -Path $egg.FullName -Recurse -Force -ErrorAction SilentlyContinue
     }
-    
+
     # Clean __pycache__ directories
     $pycaches = Get-ChildItem -Path $ProjectRoot -Filter "__pycache__" -Directory -Recurse -ErrorAction SilentlyContinue
     foreach ($cache in $pycaches) {
         Remove-Item -Path $cache.FullName -Recurse -Force -ErrorAction SilentlyContinue
     }
-    
+
     Write-Success "Build artifacts cleaned"
 }
 
 # Build wheel
 function Build-Wheel {
     Write-Step "Building wheel..."
-    
+
     $buildArgs = @("-m", "build", "--wheel")
-    
+
     $result = & python @buildArgs 2>&1
-    
+
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Build failed!"
         Write-Host $result -ForegroundColor Red
         exit 1
     }
-    
+
     if ($VerboseOutput) {
         Write-Host $result
     }
-    
+
     # Find the built wheel
     $wheel = Get-ChildItem -Path "dist" -Filter "*.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($wheel) {
@@ -136,17 +136,17 @@ function Build-Wheel {
         Write-Info "Path: $($wheel.FullName)"
         return $wheel.FullName
     }
-    
+
     return $null
 }
 
 # Validate package
 function Test-Package {
     Write-Step "Validating package..."
-    
+
     # Check if twine is available
     $twineAvailable = $null -ne (Get-Command twine -ErrorAction SilentlyContinue)
-    
+
     if ($twineAvailable) {
         $wheels = Get-ChildItem -Path "dist" -Filter "*.whl" -ErrorAction SilentlyContinue
         if ($wheels) {
@@ -157,14 +157,14 @@ function Test-Package {
         Write-Info "Twine not available, skipping package validation"
         Write-Info "Install with: pip install twine"
     }
-    
+
     # Check wheel contents
     $wheel = Get-ChildItem -Path "dist" -Filter "*.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($wheel) {
         Write-Info "Wheel contents:"
         $tempDir = Join-Path $env:TEMP "wheel_check_$(Get-Random)"
         New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-        
+
         try {
             Expand-Archive -Path $wheel.FullName -DestinationPath $tempDir -Force
             $items = Get-ChildItem -Path $tempDir -Recurse -File | Group-Object { Split-Path (Split-Path $_.FullName -Parent) -Leaf }
@@ -175,16 +175,16 @@ function Test-Package {
             Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
-    
+
     Write-Success "Package validation complete"
 }
 
 # Install wheel locally
 function Install-Wheel {
     param([string]$WheelPath)
-    
+
     Write-Step "Installing wheel..."
-    
+
     if (-not $WheelPath -or -not (Test-Path $WheelPath)) {
         $wheel = Get-ChildItem -Path "dist" -Filter "*.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
         if ($wheel) {
@@ -194,15 +194,15 @@ function Install-Wheel {
             exit 1
         }
     }
-    
+
     Write-Info "Installing: $WheelPath"
-    & pip install --force-reinstall $WheelPath 2>&1 | ForEach-Object { 
+    & pip install --force-reinstall $WheelPath 2>&1 | ForEach-Object {
         if ($VerboseOutput) { Write-Info $_ }
     }
-    
+
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Installation complete"
-        
+
         # Verify installation
         Write-Info "Verifying installation..."
         $version = & llmcrawl --version 2>&1
@@ -216,10 +216,10 @@ function Install-Wheel {
 # Check version consistency
 function Test-Version {
     Write-Step "Checking version..."
-    
+
     $version = Get-Version
     Write-Info "Version in pyproject.toml: $version"
-    
+
     # Check if version looks like a release version
     if ($version -match '^\d+\.\d+\.\d+$') {
         Write-Success "Version format OK: $version"
@@ -228,7 +228,7 @@ function Test-Version {
     } else {
         Write-Info "Non-standard version format: $version"
     }
-    
+
     return $version
 }
 
@@ -244,7 +244,7 @@ switch ($Mode) {
         }
         Write-Success "Build complete!"
     }
-    
+
     "Clean" {
         Clear-BuildArtifacts
         if (-not $NoBuild) {
@@ -252,14 +252,14 @@ switch ($Mode) {
         }
         Write-Success "Clean build complete!"
     }
-    
+
     "Install" {
         Clear-BuildArtifacts
         $wheelPath = Build-Wheel
         Install-Wheel -WheelPath $wheelPath
         Write-Success "Build and install complete!"
     }
-    
+
     "Release" {
         Write-Step "Release build..."
         $version = Test-Version
@@ -274,7 +274,7 @@ switch ($Mode) {
         Write-Info "  1. Test: pip install $wheelPath"
         Write-Info "  2. Upload: twine upload dist/*"
     }
-    
+
     "Check" {
         Test-Version
         if (Test-Path "dist") {

@@ -13,7 +13,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from .routers import agent, export, models
 from .utils.logging import get_logger, setup_logging
-from .utils.metrics import set_service_up, record_service_error
+from .utils.metrics import record_service_error, set_service_up
 
 # Setup logging
 setup_logging()

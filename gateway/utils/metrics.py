@@ -8,12 +8,12 @@ Provides comprehensive metrics for:
 - Service health (up/down, errors, memory)
 """
 
-import time
 import functools
-from typing import Optional, Callable, Any
+import time
+from typing import Any, Callable, Optional
 from urllib.parse import urlparse
 
-from prometheus_client import Counter, Histogram, Gauge, Info, REGISTRY
+from prometheus_client import REGISTRY, Counter, Gauge, Histogram, Info
 
 # =============================================================================
 # CRAWL METRICS

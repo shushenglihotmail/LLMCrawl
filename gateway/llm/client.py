@@ -16,9 +16,9 @@ import httpx
 import openai  # noqa: F401
 from openai import AsyncAzureOpenAI, AsyncOpenAI
 
+from gateway.utils.metrics import record_llm_request
 from gateway.utils.prompt_compressor import compress_if_needed, estimate_messages_tokens
 from gateway.utils.tool_constants import TOOL_CRAWL_AND_REFRESH
-from gateway.utils.metrics import record_llm_request
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@ Prometheus metrics for the Crawler service.
 Tracks crawl operations, page processing, and service health.
 """
 
-from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 
 # Service health
 SERVICE_UP = Gauge(

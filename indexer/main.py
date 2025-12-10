@@ -16,7 +16,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
 
 from .adapters.llamaindex_store import get_llamaindex_store
-from .utils.metrics import set_service_up, record_service_error
+from .utils.metrics import record_service_error, set_service_up
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
