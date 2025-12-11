@@ -6,12 +6,14 @@ This guide walks you through installing and running LLMCrawl on a fresh machine.
 
 1. [Prerequisites](#prerequisites)
 2. [Installation](#installation)
-3. [Upgrading](#upgrading)
+3. [Initialize Deployment](#initialize-deployment)
 4. [Configuration](#configuration)
-5. [Starting Services](#starting-services)
-6. [Using HiChat Client](#using-hichat-client)
-7. [Management Commands](#management-commands)
-8. [Troubleshooting](#troubleshooting)
+5. [Start Services](#start-services)
+6. [Verify Installation](#verify-installation)
+7. [Optional Components](#optional-components)
+8. [Management Commands](#management-commands)
+9. [Upgrading](#upgrading)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -37,7 +39,7 @@ Before installing LLMCrawl, ensure you have the following:
 ### Verify Prerequisites
 
 ```bash
-# Check Docker
+# Check Docker is running
 docker --version
 # Expected: Docker version 24.0.0 or higher
 
@@ -50,42 +52,46 @@ python --version
 # Expected: Python 3.10.0 or higher
 ```
 
+> **Important**: Make sure Docker Desktop is **running** before proceeding.
+
 ---
 
 ## Installation
 
-### Step 1: Create a Virtual Environment (Recommended)
-
-Create a dedicated virtual environment to keep LLMCrawl and its dependencies isolated:
+### Step 1: Create a Working Directory
 
 ```bash
 # Create a folder for LLMCrawl
 mkdir llmcrawl
 cd llmcrawl
+```
 
+### Step 2: Create and Activate Virtual Environment
+
+```bash
 # Create virtual environment
 python -m venv venv
 
 # Activate the virtual environment
 # Windows (PowerShell):
 .\venv\Scripts\Activate.ps1
+
 # Windows (Command Prompt):
 .\venv\Scripts\activate.bat
+
 # Linux/Mac:
 source venv/bin/activate
 ```
 
 You should see `(venv)` in your terminal prompt when activated.
 
-### Step 2: Install LLMCrawl
+### Step 3: Install LLMCrawl
 
 #### Option A: Install from Wheel File (Recommended)
 
-If you received a `.whl` file:
-
 ```bash
-# Install the wheel
-pip install llmcrawl-1.0.0-py3-none-any.whl
+# Install the wheel (adjust version number as needed)
+pip install llmcrawl-1.0.1-py3-none-any.whl
 
 # Verify installation
 llmcrawl --help
@@ -93,10 +99,9 @@ llmcrawl --help
 
 #### Option B: Install from Source
 
-If you have access to the source code:
-
 ```bash
-# Clone or extract the source
+# Clone or extract the source code
+git clone https://github.com/your-org/LLMCrawl.git
 cd LLMCrawl
 
 # Install in development mode
@@ -108,334 +113,144 @@ llmcrawl --help
 
 ---
 
-## Upgrading
+## Initialize Deployment
 
-When a new version is available, follow these steps:
-
-### Step 1: Install the New Version
+This step creates a deployment folder with all necessary configuration files.
 
 ```bash
-# From wheel file
-pip install --upgrade llmcrawl-1.1.0-py3-none-any.whl
-
-# Or from source
-cd LLMCrawl
-git pull
-pip install -e .
-```
-
-### Step 2: Upgrade Deployment
-
-```bash
-# Run from the folder containing llmcrawl-deploy/
-# (The command automatically finds ./llmcrawl-deploy)
-llmcrawl deploy --upgrade
-```
-
-This command will:
-1. **Backup** your current `.env` and config files to `backups/`
-2. **Update** all deployment files (docker-compose.yml, Dockerfiles, etc.)
-3. **Merge** your existing `.env` settings into the new configuration
-4. **Rebuild and restart** all services
-
-### Upgrade Options
-
-```bash
-# Upgrade without restarting services (manual restart later)
-llmcrawl deploy --upgrade --no-restart
-
-# Then manually restart when ready
-llmcrawl deploy --up
-```
-
-### After Upgrade
-
-- Check `backups/` folder if you need to restore any settings
-- Review `.env` for any new configuration options
-- Restart any standalone tools (WCD bridge, HiChat CLI) if running
-
-### Updating Monitoring Services
-
-If you have the monitoring stack running (`--profile monitoring`), you need to update it separately after upgrading the wheel:
-
-```bash
-# 1. Navigate to your deployment folder
-cd llmcrawl-deploy
-
-# 2. Stop monitoring services
-docker compose --profile monitoring down
-
-# 3. Upgrade the deployment (this updates docker-compose.yml and Grafana dashboards)
-llmcrawl deploy --upgrade
-
-# 4. Pull any new images
-docker compose --profile monitoring pull
-
-# 5. Start monitoring services with updated configuration
-docker compose --profile monitoring up -d
-```
-
-**What gets updated:**
-- `docker-compose.yml` - Prometheus/Grafana service definitions
-- `prometheus.yml` - Scrape targets and intervals
-- `grafana-provisioning/dashboards/` - Dashboard JSON files with new panels/metrics
-
-**Note:** Your Grafana custom dashboards and alerts are preserved. Only the provisioned `llmcrawl-overview.json` dashboard is updated.
-
-If you made changes to `prometheus.yml`, back it up before upgrading:
-```bash
-cp prometheus.yml prometheus.yml.backup
-llmcrawl deploy --upgrade
-# Then manually merge your changes if needed
-```
-
----
-
-## Configuration
-
-### Step 1: Initialize Deployment
-
-```bash
-# Create the deployment folder
+# Initialize the deployment folder
 llmcrawl deploy --init
 ```
 
-This creates a `llmcrawl-deploy/` folder with:
+This creates a `llmcrawl-deploy/` folder in your current directory:
+
 ```
 llmcrawl-deploy/
-├── docker-compose.yml      # Service orchestration
+├── docker-compose.yml      # Docker service orchestration
 ├── .env                    # Your configuration (edit this!)
 ├── .env.example            # Reference configuration
 ├── Dockerfile.*            # Service build files
 ├── prometheus.yml          # Monitoring config
 ├── grafana-provisioning/   # Grafana dashboards
+├── gateway/                # Gateway service code
+├── crawler/                # Crawler service code
+├── indexer/                # Indexer service code
+├── mcp_servers/            # MCP server code
 ├── data/files/             # Default MCP file mount point
-└── logs/                   # Service logs
+├── logs/                   # Service logs
+└── docs/                   # Documentation
 ```
 
-**Note:** The `tools/` (authentication, WCD bridge) are accessed via CLI commands:
-- `llmcrawl auth` - Internal site authentication
-- `llmcrawl wcd-bridge` - Windows Composition Database bridge
+> **Note**: Run `llmcrawl deploy --init` only once. To update an existing deployment after upgrading the wheel, use `llmcrawl deploy --upgrade` instead.
 
-### Step 2: Configure Your Settings
+---
+
+## Configuration
+
+### Step 1: Navigate to Deployment Folder
 
 ```bash
 cd llmcrawl-deploy
-
-# Edit .env with your settings
-notepad .env        # Windows
-# or
-nano .env           # Linux/Mac
 ```
 
-### Required Settings
+### Step 2: Edit Configuration
 
-At minimum, configure your LLM API keys:
+Open `.env` in your preferred editor:
 
 ```bash
-# =============================================================================
-# LLM CONFIGURATION (Required - at least one)
-# =============================================================================
+# Windows
+notepad .env
 
-# Option A: OpenAI Direct
+# Linux/Mac
+nano .env
+```
+
+### Step 3: Configure LLM Provider (Required)
+
+You need **at least one** LLM provider configured:
+
+#### Option A: OpenAI Direct
+
+```bash
 OPENAI_API_KEY=sk-your-openai-key-here
+LLM_PROVIDER=openai
+```
 
-# Option B: Azure OpenAI
+#### Option B: Azure OpenAI
+
+```bash
 AZURE_OPENAI_API_KEY=your-azure-key-here
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_API_VERSION=2024-02-15-preview
+LLM_PROVIDER=azure
+```
 
-# Option C: Azure with Anthropic (Claude)
+#### Option C: Anthropic Claude (via Azure AI)
+
+```bash
 AZURE_ANTHROPIC_ENDPOINT=https://your-resource.services.ai.azure.com/anthropic/
+AZURE_OPENAI_API_KEY=your-azure-key-here
+LLM_PROVIDER=azure
+```
+
+### Step 4: Configure Available Models
+
+Edit the `LLM_MODELS` setting to define which models are available:
+
+```bash
+# Example: Single model
+LLM_MODELS=[{"name":"gpt-4","display_name":"GPT-4","deployment_name":"gpt-4","provider_type":"openai"}]
+
+# Example: Multiple models
+LLM_MODELS=[{"name":"gpt-4","display_name":"GPT-4","deployment_name":"gpt-4","provider_type":"openai"},{"name":"claude-sonnet","display_name":"Claude Sonnet","deployment_name":"claude-sonnet","provider_type":"anthropic"}]
 ```
 
 ### Optional Settings
 
 ```bash
-# LLM Provider Selection
-LLM_PROVIDER=azure          # Options: openai, azure
-
-# Available Models (customize as needed)
-LLM_MODELS=[{"name":"gpt-4","display_name":"GPT-4","deployment_name":"gpt-4","provider_type":"openai"}]
-
 # Service Ports (change if defaults conflict)
 GATEWAY_PORT=8000
 HICHAT_PORT=8080
 
-# Logging
+# Logging level
 LOG_LEVEL=INFO              # Options: DEBUG, INFO, WARNING, ERROR
+
+# Local file access (path for MCP server to read)
+MCP_HOST_FOLDER=C:/src      # Windows: Use forward slashes
 ```
 
 ---
 
-## Tool Configuration (Optional)
-
-LLMCrawl includes several tools that can be enabled based on your needs:
-
-### Local File Access (MCP Server)
-
-The Local Access MCP server allows the agent to read and search files on your local machine.
-
-**Configuration:**
-
-Edit `.env` and set the folder you want to expose:
-
-```bash
-# Path to your source code or documents folder
-# Windows: Use forward slashes or escaped backslashes
-MCP_HOST_FOLDER=C:/src
-# or
-MCP_HOST_FOLDER=C:\\src
-
-# Linux/Mac:
-MCP_HOST_FOLDER=/home/user/src
-```
-
-The agent will be able to read, list, and search files within this folder.
-
----
-
-### Azure DevOps Integration
-
-The Azure DevOps MCP server allows the agent to search and read code from Azure DevOps repositories.
-
-**Setup:**
-
-1. **Create a Personal Access Token (PAT)**
-   - Go to: `https://dev.azure.com/[your-org]/_usersSettings/tokens`
-   - Click "New Token"
-   - Required scopes:
-     - **Code (Read)** - for reading repository files
-     - **Code (Search)** - for searching code (optional)
-   - Copy the generated token
-
-2. **Configure in `.env`:**
-
-```bash
-AZURE_DEVOPS_PAT=your-pat-token-here
-
-# Optional: Set default org/project/repo
-AZURE_DEVOPS_ORG=microsoft
-AZURE_DEVOPS_PROJECT=OS
-AZURE_DEVOPS_REPO=os.2020
-AZURE_DEVOPS_BRANCH=main
-```
-
----
-
-### Internal Site Crawling (Authentication)
-
-To crawl internal sites that require authentication (e.g., www.osgwiki.com), you need to provide authentication cookies.
-
-**Setup:**
-
-1. **Install required dependencies** (one-time setup):
-
-```bash
-# Make sure your virtual environment is activated
-# (the same venv where you installed llmcrawl)
-
-# Install playwright and other auth tool dependencies
-pip install playwright httpx requests
-playwright install chromium
-```
-
-2. **Run the authentication command:**
-
-```bash
-# Authenticate to an internal site
-llmcrawl auth https://www.osgwiki.com/wiki/Main_Page
-```
-
-3. **What the tool does:**
-   - Opens Microsoft Edge with a temporary profile
-   - Waits for you to log in to the internal site
-   - Extracts authentication cookies after successful login
-   - Automatically updates `.env` with the cookies
-   - Restarts the crawler container to apply changes
-   - Tests that authentication works
-
-4. **Options:**
-
-```bash
-# See all options
-llmcrawl auth --help
-
-# Specify deployment directory (required for wheel installations in custom locations)
-llmcrawl auth https://www.osgwiki.com --dir /path/to/llmcrawl-deploy
-
-# Skip auto-apply to .env (just save cookies to .auth/ folder)
-llmcrawl auth https://www.osgwiki.com --no-apply
-
-# Skip container restart
-llmcrawl auth https://www.osgwiki.com --no-restart
-
-# Skip authentication test
-llmcrawl auth https://www.osgwiki.com --no-test
-
-# Custom profile name
-llmcrawl auth https://internal-site.com --name my_site
-```
-
-5. **Cookie Expiration:**
-   - Authentication cookies expire after some time (typically hours to days)
-   - If crawling starts failing with authentication errors, re-run the command:
-     ```bash
-     llmcrawl auth https://www.osgwiki.com/wiki/Main_Page
-     ```
-   - The tool will refresh the cookies and restart the crawler automatically
-
----
-
-### Windows Composition Database (WCD) Tool
-
-The WCD tool allows querying the Windows Composition Database for component information. This requires a bridge service running on your host machine (because WCD uses Windows-specific commands).
-
-**Prerequisites:**
-- Windows host machine
-- Access to Windows build shares (e.g., `\\winbuilds\release\...`)
-
-**Setup:**
-
-1. **Start the WCD Bridge service** on your host:
-
-```bash
-# Using build share path (recommended)
-llmcrawl wcd-bridge --build "\\winbuilds\release\rs_sparc_ctr_exp\29498.1001.251201-1700"
-
-# For a different architecture:
-llmcrawl wcd-bridge --build "\\winbuilds\release\..." --arch arm64fre
-
-# See all options
-llmcrawl wcd-bridge --help
-```
-
-2. **Configure in `.env`:**
-
-```bash
-# The bridge runs on port 8005 by default
-# Use host.docker.internal to reach the host from Docker containers
-WIN_COMP_BRIDGE_URL=http://host.docker.internal:8005
-```
-
-3. **Keep the bridge running:**
-   - The bridge service must remain running while using WCD queries
-   - It runs in a separate terminal window
-   - Restart it if you need to switch to a different build
-
----
-
-## Starting Services
+## Start Services
 
 ### Start All Services
 
+From the **parent folder** of `llmcrawl-deploy/` (or from anywhere if you specify `--dir`):
+
 ```bash
-# Run from the folder containing llmcrawl-deploy/
-# (The command automatically finds ./llmcrawl-deploy)
+# Go back to parent folder
+cd ..
+
+# Start services
 llmcrawl deploy --up
 ```
 
-Expected output:
+Or specify the deployment directory explicitly:
+
+```bash
+llmcrawl deploy --up --dir ./llmcrawl-deploy
+```
+
+### First-Time Startup
+
+The first startup takes **5-10 minutes** as Docker:
+1. Downloads base images (PostgreSQL, Qdrant, Redis, Python, etc.)
+2. Builds the LLMCrawl service images
+
+Subsequent starts are much faster (under 30 seconds).
+
+### Expected Output
+
 ```
 🚀 Starting LLMCrawl services...
 🐳 Running: docker compose -f docker-compose.yml up --build -d
@@ -447,117 +262,356 @@ Access points:
   • Gateway API:      http://localhost:8000
   • Gateway Docs:     http://localhost:8000/docs
   • Qdrant Dashboard: http://localhost:6333/dashboard
-  • Grafana:          http://localhost:3001
 ```
-
-### First-Time Startup
-
-The first startup takes longer as Docker:
-1. Downloads base images (PostgreSQL, Qdrant, Redis, etc.)
-2. Builds the LLMCrawl service images
-
-Subsequent starts are much faster.
 
 ---
 
-## Using HiChat Client
+## Verify Installation
 
-### Web Interface
+### Quick Health Check
 
-1. Open your browser to: **http://localhost:8080**
-2. Select a model from the dropdown
-3. Start chatting!
-
-### Features
-
-- **Multi-model support**: Switch between GPT-4, Claude, and other models
-- **Stop button**: Cancel long-running requests
-- **Chat history**: Maintains context within a conversation
-- **Clear chat**: Start fresh with the Clear button
-
-### Direct CLI Access
-
-You can also run HiChat standalone (connects to running gateway):
+After starting services, run the health check to verify all services are responding:
 
 ```bash
-hichat --gateway http://localhost:8000
+llmcrawl deploy --health
 ```
 
----
+**Expected output:**
 
-## Management Commands
+```
+============================================================
+          LLMCrawl Service Health Check
+============================================================
 
-### View Service Status
+🔍 Gateway (port 8000)
+----------------------------------------
+   Status: ✅ HEALTHY
+   Service: llmcrawl-gateway
+
+🔍 Crawler (port 8001)
+----------------------------------------
+   Status: ✅ HEALTHY
+   Service: llmcrawl-crawler
+   Components:
+     - playwright: ✅ healthy
+     - firecrawl: ✅ healthy
+
+🔍 Indexer (port 8002)
+----------------------------------------
+   Status: ✅ HEALTHY
+   Vector Store: ✅ healthy
+
+🔍 MCP Server (port 8003)
+----------------------------------------
+   Status: ✅ HEALTHY
+
+🔍 Qdrant (port 6333)
+----------------------------------------
+   Status: ✅ HEALTHY
+
+============================================================
+   Summary: ✅ 6/7 services healthy
+============================================================
+```
+
+> **Note**: Some services like Azure DevOps MCP (port 8004) or Playwright (port 3000) may show as unreachable if not configured - this is normal.
+
+### 1. Check Service Status
 
 ```bash
 llmcrawl deploy --status
 ```
 
-### View Logs
+All services should show as "running".
+
+### 2. Open HiChat Web Interface
+
+Open your browser to: **http://localhost:8080**
+
+1. Select a model from the dropdown
+2. Type a message like "Hello, what can you help me with?"
+3. You should receive a response from the LLM
+
+### 3. Check API Documentation
+
+Open: **http://localhost:8000/docs**
+
+This shows the interactive API documentation for the Gateway service.
+
+### 4. View Logs (if issues)
 
 ```bash
-# All services
+# View all service logs
 llmcrawl deploy --logs
 
-# Specific service
+# View specific service logs
+llmcrawl deploy --logs gateway
+```
+
+---
+
+## Optional Components
+
+These components can be enabled based on your needs.
+
+### Monitoring (Prometheus + Grafana)
+
+For visual dashboards and metrics:
+
+```bash
+# Start services with monitoring
+llmcrawl deploy --up --profile monitoring
+```
+
+Access points:
+- **Grafana**: http://localhost:3001 (admin/admin)
+- **Prometheus**: http://localhost:9090
+
+See [MONITORING.md](MONITORING.md) for dashboard setup.
+
+---
+
+### Local File Access (MCP Server)
+
+Allow the agent to read files on your local machine.
+
+**Configuration** in `.env`:
+
+```bash
+# Path to expose (use forward slashes on Windows)
+MCP_HOST_FOLDER=C:/src
+```
+
+The agent can then read, list, and search files within this folder.
+
+---
+
+### Azure DevOps Integration
+
+Allow the agent to search and read code from Azure DevOps repositories.
+
+**Setup:**
+
+1. Create a Personal Access Token (PAT) at:
+   `https://dev.azure.com/[your-org]/_usersSettings/tokens`
+
+2. Required scopes: **Code (Read)**, optionally **Code (Search)**
+
+3. Configure in `.env`:
+
+```bash
+AZURE_DEVOPS_PAT=your-pat-token-here
+AZURE_DEVOPS_ORG=your-org
+AZURE_DEVOPS_PROJECT=your-project
+```
+
+---
+
+### Internal Site Authentication
+
+To crawl internal sites requiring authentication (e.g., wikis behind SSO):
+
+**One-time setup:**
+
+```bash
+# Install auth tool dependencies
+pip install playwright httpx requests
+playwright install chromium
+```
+
+**Authenticate to a site:**
+
+```bash
+# Option 1: Run from the deployment folder
+cd llmcrawl-deploy
+llmcrawl auth https://www.osgwiki.com/wiki/Main_Page
+
+# Option 2: Specify deployment directory with --dir
+llmcrawl auth https://www.osgwiki.com/wiki/Main_Page --dir ./llmcrawl-deploy
+```
+
+This opens Edge, lets you log in, captures cookies, and updates `.env` automatically.
+
+**Additional options:**
+
+```bash
+# Skip auto-apply (just save cookies to .auth/ folder)
+llmcrawl auth https://internal-site.com --dir ./llmcrawl-deploy --no-apply
+
+# Skip container restart after applying
+llmcrawl auth https://internal-site.com --dir ./llmcrawl-deploy --no-restart
+```
+
+See [AUTHENTICATION.md](AUTHENTICATION.md) for detailed instructions.
+
+---
+
+### Windows Composition Database (WCD) Tool
+
+Query Windows build component information. Requires Windows host.
+
+**Start the bridge:**
+
+```bash
+llmcrawl wcd-bridge --build "\\winbuilds\release\rs_sparc_ctr_exp\29498.1001.251201-1700"
+```
+
+**Configure in `.env`:**
+
+```bash
+WIN_COMP_BRIDGE_URL=http://host.docker.internal:8005
+```
+
+Keep the bridge running in a separate terminal while using WCD queries.
+
+---
+
+## Management Commands
+
+### Service Control
+
+| Task | Command |
+|------|---------|
+| Start all services | `llmcrawl deploy --up` |
+| Stop all services | `llmcrawl deploy --down` |
+| Stop specific service | `llmcrawl deploy --stop gateway` |
+| Restart all services | `llmcrawl deploy --restart` |
+| Restart specific service | `llmcrawl deploy --restart gateway` |
+| Restart with rebuild | `llmcrawl deploy --restart gateway --build` |
+| View status | `llmcrawl deploy --status` |
+| View logs | `llmcrawl deploy --logs` |
+| View specific logs | `llmcrawl deploy --logs gateway` |
+
+### Development Mode
+
+When running from source repository:
+
+```bash
+# Use --dev flag for development compose file
+llmcrawl deploy --up --dev --dir ./deploy
+llmcrawl deploy --restart gateway --build --dev --dir ./deploy
+```
+
+---
+
+## Upgrading
+
+When a new version of LLMCrawl is released:
+
+### Step 1: Install New Version
+
+```bash
+# Activate your virtual environment first
+.\venv\Scripts\Activate.ps1  # Windows
+source venv/bin/activate      # Linux/Mac
+
+# Install new wheel
+pip install --upgrade llmcrawl-1.1.0-py3-none-any.whl
+```
+
+### Step 2: Upgrade Deployment
+
+```bash
+# From the folder containing llmcrawl-deploy/
+llmcrawl deploy --upgrade
+```
+
+This will:
+1. **Backup** your `.env` and config files to `backups/`
+2. **Update** all deployment files (docker-compose.yml, Dockerfiles, service code)
+3. **Merge** your existing `.env` settings into the new configuration
+4. **Rebuild and restart** all services
+
+### Upgrade Options
+
+```bash
+# Upgrade without restarting (manual restart later)
+llmcrawl deploy --upgrade --no-restart
+
+# Then restart when ready
+llmcrawl deploy --up
+```
+
+### After Upgrade
+
+- Check `backups/` folder if you need to restore settings
+- Review `.env` for new configuration options
+- Restart standalone tools (WCD bridge, HiChat CLI) if running
+
+---
+
+## Troubleshooting
+
+### Docker Not Running
+
+```
+❌ Error: Docker is not running or not installed.
+```
+
+**Solution**: Start Docker Desktop application.
+
+### Port Already in Use
+
+```
+Error: Bind for 0.0.0.0:8000 failed: port is already allocated
+```
+
+**Solution**: Edit `.env` and change the conflicting port:
+
+```bash
+GATEWAY_PORT=8001
+```
+
+### API Key Errors
+
+```
+Error: Invalid API key provided
+```
+
+**Solution**:
+1. Verify the API key in `.env` is correct
+2. Ensure no extra spaces or quotes around the key
+3. Check the key hasn't expired
+
+### Services Not Starting
+
+```bash
+# Check service logs for errors
 llmcrawl deploy --logs gateway
 
-# Without following (just show recent)
-llmcrawl deploy --logs --no-follow
+# Check all container status
+docker ps -a
 ```
 
-### Stop Services
+### Reset Everything
 
 ```bash
-# Stop all services and remove containers
+# Stop and remove all containers/volumes
 llmcrawl deploy --down
+docker system prune -a --volumes
 
-# Stop specific service(s) and remove containers
-llmcrawl deploy --down gateway
-llmcrawl deploy --down gateway crawler
-
-# Stop services but preserve containers (for quick restart)
-llmcrawl deploy --stop
-
-# Stop specific service(s) (preserve containers)
-llmcrawl deploy --stop gateway
-llmcrawl deploy --stop gateway crawler
+# Reinitialize (--force overwrites existing)
+llmcrawl deploy --init --force
+# Edit .env again
+llmcrawl deploy --up
 ```
 
-### Restart Services
+---
 
-```bash
-# Restart all services (no rebuild)
-llmcrawl deploy --restart
+## Quick Reference
 
-# Restart specific service(s)
-llmcrawl deploy --restart gateway
-llmcrawl deploy --restart gateway crawler indexer
-
-# Restart with image rebuild (picks up code changes)
-llmcrawl deploy --restart gateway --build
-llmcrawl deploy --restart gateway crawler --build
-
-# Restart monitoring services
-llmcrawl deploy --restart prometheus grafana --profile monitoring
-```
-
-### Local Development Mode
-
-When running from the source repository (not a wheel installation), use the `--dev` flag to use `docker-compose.dev.yml` which has the correct paths for local development:
-
-```bash
-# From the LLMCrawl repo root
-llmcrawl deploy --restart gateway --build --dev --dir ./deploy
-llmcrawl deploy --stop crawler --dev --dir ./deploy
-llmcrawl deploy --status --dev --dir ./deploy
-```
-
-### Pull Latest Images
-
-```bash
-llmcrawl deploy --pull
-```
+| Task | Command |
+|------|---------|
+| Initialize deployment | `llmcrawl deploy --init` |
+| Start services | `llmcrawl deploy --up` |
+| Stop services | `llmcrawl deploy --down` |
+| View status | `llmcrawl deploy --status` |
+| View logs | `llmcrawl deploy --logs` |
+| Upgrade deployment | `llmcrawl deploy --upgrade` |
+| Authenticate to site | `llmcrawl auth <url>` |
+| Start WCD bridge | `llmcrawl wcd-bridge --build <path>` |
+| Open HiChat | http://localhost:8080 |
+| API Documentation | http://localhost:8000/docs |
 
 ---
 
@@ -593,113 +647,10 @@ llmcrawl deploy --pull
 
 ---
 
-## Enabling Monitoring (Optional)
-
-For visual diagnostics with Prometheus and Grafana:
-
-```bash
-# Start all services WITH monitoring stack
-llmcrawl deploy --up --profile monitoring
-
-# Or via docker-compose directly
-cd llmcrawl-deploy
-docker compose --profile monitoring up -d
-```
-
-### Monitoring Endpoints
-
-| Service    | URL                        | Purpose              |
-|------------|----------------------------|----------------------|
-| Prometheus | http://localhost:9090      | Metrics & queries    |
-| Grafana    | http://localhost:3001      | Visual dashboards    |
-
-### Grafana Login
-- **Username:** admin
-- **Password:** admin (change on first login)
-
-See [docs/MONITORING.md](docs/MONITORING.md) for dashboard setup and [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) for troubleshooting with Prometheus queries.
-
----
-
-## Troubleshooting
-
-### Docker Not Running
-
-```
-❌ Error: Docker is not running or not installed.
-```
-
-**Solution**: Start Docker Desktop application.
-
-### Port Already in Use
-
-```
-Error: Bind for 0.0.0.0:8000 failed: port is already allocated
-```
-
-**Solution**: Edit `.env` and change the conflicting port:
-```bash
-GATEWAY_PORT=8001
-```
-
-### API Key Errors
-
-```
-Error: Invalid API key provided
-```
-
-**Solution**: Check your `.env` file:
-1. Verify the API key is correct
-2. Ensure no extra spaces or quotes
-3. Check the key hasn't expired
-
-### Services Not Starting
-
-```bash
-# Check service logs
-llmcrawl deploy --logs gateway
-
-# Check all container status
-docker ps -a
-```
-
-### Reset Everything
-
-```bash
-# Stop and remove all containers/volumes
-llmcrawl deploy --down
-docker system prune -a --volumes
-
-# Reinitialize
-llmcrawl deploy --init --force
-llmcrawl deploy --up
-```
-
----
-
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| Initialize deployment | `llmcrawl deploy --init` |
-| **Upgrade deployment** | `llmcrawl deploy --upgrade` |
-| Start services | `llmcrawl deploy --up` |
-| Stop services | `llmcrawl deploy --down` |
-| View status | `llmcrawl deploy --status` |
-| View logs | `llmcrawl deploy --logs` |
-| Restart services | `llmcrawl deploy --restart` |
-| Authenticate to internal site | `llmcrawl auth <url>` |
-| Start WCD bridge | `llmcrawl wcd-bridge --build <path>` |
-| Open HiChat | http://localhost:8080 |
-| API Documentation | http://localhost:8000/docs |
-
----
-
 ## Getting Help
 
-- **Documentation**: See `docs/` folder for detailed guides
-- **Troubleshooting**: See `docs/DIAGNOSTICS.md` for debugging and common errors
-- **Issues**: Check logs with `llmcrawl deploy --logs`
-- **Architecture**: See `docs/ARCHITECTURE.md`
-- **Configuration**: See `docs/CONFIGURATION.md`
-- **Monitoring**: See `docs/MONITORING.md` for Grafana dashboards and metrics
+- **Troubleshooting**: See [DIAGNOSTICS.md](DIAGNOSTICS.md)
+- **Architecture**: See [ARCHITECTURE.md](ARCHITECTURE.md)
+- **Configuration**: See [CONFIGURATION.md](CONFIGURATION.md)
+- **Monitoring**: See [MONITORING.md](MONITORING.md)
+- **Authentication**: See [AUTHENTICATION.md](AUTHENTICATION.md)

@@ -700,6 +700,107 @@ def cmd_pull(deploy_dir: Path, use_dev: bool = False) -> int:
     return run_compose(["pull"], deploy_dir, use_dev=use_dev)
 
 
+def cmd_health() -> int:
+    """Check health of all LLMCrawl services via their /health endpoints."""
+    import json
+    import urllib.request
+    import urllib.error
+
+    print()
+    print("=" * 60)
+    print("          LLMCrawl Service Health Check")
+    print("=" * 60)
+
+    services = [
+        ("Gateway", "http://localhost:8000/health", 8000),
+        ("Crawler", "http://localhost:8001/health", 8001),
+        ("Indexer", "http://localhost:8002/health", 8002),
+        ("MCP Server", "http://localhost:8003/health", 8003),
+        ("Azure DevOps MCP", "http://localhost:8004/health", 8004),
+        ("Qdrant", "http://localhost:6333/healthz", 6333),
+        ("Playwright", "http://localhost:3000/json/version", 3000),
+    ]
+
+    healthy = 0
+    total = len(services)
+
+    for name, url, port in services:
+        print()
+        print(f"🔍 {name} (port {port})")
+        print("-" * 40)
+
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = resp.read().decode("utf-8")
+                try:
+                    result = json.loads(data)
+                    status = result.get("status", "unknown")
+
+                    if status == "healthy":
+                        print(f"   Status: ✅ HEALTHY")
+                        healthy += 1
+                    else:
+                        print(f"   Status: ⚠️  {status}")
+                        healthy += 1  # Still reachable
+
+                    # Show service name if available
+                    if result.get("service"):
+                        print(f"   Service: {result['service']}")
+
+                    # Show components if available (crawler has nested components)
+                    if result.get("components"):
+                        print("   Components:")
+                        for comp_name, comp_info in result["components"].items():
+                            comp_status = comp_info.get("status", "unknown")
+                            icon = "✅" if comp_status == "healthy" else "⚠️"
+                            print(f"     - {comp_name}: {icon} {comp_status}")
+
+                    # Show vector store info (indexer)
+                    if result.get("vector_store"):
+                        vs = result["vector_store"]
+                        vs_status = vs.get("status", "unknown")
+                        icon = "✅" if vs_status == "healthy" else "⚠️"
+                        print(f"   Vector Store: {icon} {vs_status}")
+                        if vs.get("collections"):
+                            print(f"     Collections: {vs['collections']}")
+
+                    # Show embedding model (indexer)
+                    if result.get("embedding_model"):
+                        em = result["embedding_model"]
+                        em_healthy = em.get("healthy", False)
+                        icon = "✅" if em_healthy else "❌"
+                        print(f"   Embedding: {icon} {em.get('model', 'unknown')}")
+
+                except json.JSONDecodeError:
+                    # Non-JSON response (like Playwright's /json/version)
+                    print(f"   Status: ✅ HEALTHY (reachable)")
+                    healthy += 1
+
+        except urllib.error.URLError as e:
+            print(f"   Status: ❌ UNREACHABLE")
+            print(f"   Error: {e.reason}")
+        except TimeoutError:
+            print(f"   Status: ❌ TIMEOUT")
+        except Exception as e:
+            print(f"   Status: ❌ ERROR")
+            print(f"   Error: {e}")
+
+    # Summary
+    print()
+    print("=" * 60)
+    if healthy == total:
+        print(f"   Summary: ✅ {healthy}/{total} services healthy")
+    elif healthy > 0:
+        print(f"   Summary: ⚠️  {healthy}/{total} services healthy")
+    else:
+        print(f"   Summary: ❌ {healthy}/{total} services healthy")
+    print("=" * 60)
+    print()
+
+    return 0 if healthy == total else 1
+
+
 def main() -> None:
     """Main entry point for the deploy CLI."""
     parser = argparse.ArgumentParser(
@@ -722,6 +823,7 @@ Examples:
   llmcrawl deploy --logs              View logs (Ctrl+C to exit)
   llmcrawl deploy --logs gateway      View logs for specific service
   llmcrawl deploy --status            Check service status
+  llmcrawl deploy --health            Check health of all services
 
 Local Development (use --dev to use docker-compose.dev.yml):
   llmcrawl deploy --restart gateway --build --dev --dir ./deploy
@@ -768,6 +870,11 @@ Monitoring: prometheus, grafana (use --profile monitoring)
     )
     action_group.add_argument(
         "--pull", action="store_true", help="Pull latest Docker images"
+    )
+    action_group.add_argument(
+        "--health",
+        action="store_true",
+        help="Check health of all services via HTTP endpoints",
     )
 
     # Optional arguments
@@ -868,6 +975,8 @@ Monitoring: prometheus, grafana (use --profile monitoring)
         )
     elif args.pull:
         exit_code = cmd_pull(deploy_dir, use_dev=use_dev)
+    elif args.health:
+        exit_code = cmd_health()
 
     sys.exit(exit_code)
 
