@@ -1,0 +1,24 @@
+{
+    // Example VS Code mcp.json entry for WCD Bridge MCP Server
+    // Location: %APPDATA%\Code\User\mcp.json (Windows)
+    //           ~/Library/Application Support/Code/User/mcp.json (macOS)
+    //           ~/.config/Code/User/mcp.json (Linux)
+    "inputs": [],
+    "servers": {
+        "llmcrawl-wcd-bridge": {
+            "command": "C:/Path/To/python.exe",
+            "args": [
+                "-m",
+                "wcd_bridge_mcp_server"
+            ],
+            "env": {
+                // Required for the embedded bridge host (self-contained default)
+                "WIN_COMP_SHARE_CMD": "\\\\server\\share\\InteractViaPowerShell.cmd"
+                // Advanced: if you run the bridge separately and launch MCP with --no-bridge,
+                // you can point at it like this:
+                // "WCD_BRIDGE_URL": "http://localhost:8005"
+            },
+            "type": "stdio"
+        }
+    }
+}

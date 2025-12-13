@@ -55,9 +55,39 @@ cd mcp_servers/azure_devops_mcp_server
 pip install -e .
 ```
 
+### 3. WCD Bridge MCP Server (`wcd_bridge_mcp_server/`)
+
+MCP stdio server for the **Windows Composition Bridge**.
+
+By default it starts an embedded bridge HTTP service and then runs the MCP server (single-command deployment). Use `--no-bridge` if you prefer to run the bridge separately.
+
+**Features:**
+- `wcd_query` forwards to the bridge `POST /query` endpoint (default `http://localhost:8005`)
+- `wcd_health` forwards to `GET /health`
+
+**Installation:**
+```bash
+pip install -e mcp_servers/wcd_bridge_mcp_server/
+```
+
+### 4. Crawler MCP Server (`crawler_mcp_server/`)
+
+MCP stdio server that forwards calls to the existing **Crawler** service (default `http://localhost:8001`).
+
+**Features:**
+- `crawler_crawl` forwards to `POST /crawl`
+- `crawler_render` forwards to `POST /render`
+- `crawler_extract` forwards to `POST /extract`
+- `crawler_health` forwards to `GET /health`
+
+**Installation:**
+```bash
+pip install -e mcp_servers/crawler_mcp_server/
+```
+
 ## Architecture
 
-Both MCP servers can be deployed:
+These MCP servers can be deployed:
 
 1. **Standalone** - As independent services (Docker or local)
 2. **VS Code Integration** - As MCP servers in VS Code's Copilot
@@ -65,7 +95,7 @@ Both MCP servers can be deployed:
 
 ## Docker Deployment
 
-Both servers are included in the main docker-compose configuration:
+Some servers are included in the main docker-compose configuration:
 
 ```bash
 # Start all services including MCP servers
@@ -100,6 +130,8 @@ Each MCP server can be configured independently in VS Code:
 
 See individual server documentation for detailed setup instructions.
 
+For a consolidated guide (build/install + VS Code), see `docs/MCP_SERVERS.md`.
+
 ## Contributing
 
 When adding new MCP servers:
@@ -112,4 +144,4 @@ When adding new MCP servers:
 
 ## License
 
-Both MCP servers follow the main project license.
+These MCP servers follow the main project license.
