@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import sys
+from typing import Optional
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,7 +17,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description="Azure DevOps MCP Server - Dual Mode (stdio/HTTP)"
@@ -101,27 +102,26 @@ async def run_stdio_mode(
     organization: str,
     project: str,
     repository: str,
-    pat: str = None,
+    pat: Optional[str] = None,
     branch: str = "main",
     max_results: int = 50,
-):
+) -> None:
     """Run server in stdio mode for VS Code."""
     from .server import AzureDevOpsMCPServer
 
-    logger.info(f"Starting Azure DevOps MCP Server in stdio mode")
-    logger.info(f"Organization: {organization}")
-    logger.info(f"Project: {project}")
-    logger.info(f"Repository: {repository}")
-    logger.info(f"Branch: {branch}")
-    logger.info(f"Max Results: {max_results}")
+    logger.info("Starting Azure DevOps MCP Server in stdio mode")
+    logger.info("Organization: %s", organization)
+    logger.info("Project: %s", project)
+    logger.info("Repository: %s", repository)
+    logger.info("Branch: %s", branch)
+    logger.info("Max Results: %s", max_results)
 
     server = AzureDevOpsMCPServer(
         organization, project, repository, pat, branch, max_results
     )
 
-    # Initialize with interactive auth by default in stdio mode
-    use_interactive = pat is None
-    if not await server.initialize(use_interactive_auth=use_interactive):
+    # Initialize server (PAT auth only)
+    if not await server.initialize():
         logger.error("Failed to initialize server")
         sys.exit(1)
 
@@ -129,20 +129,20 @@ async def run_stdio_mode(
     await server.run_stdio()
 
 
-def run_http_mode(host: str, port: int):
+def run_http_mode(host: str, port: int) -> None:
     """Run server in HTTP mode for LLMCrawl."""
     import uvicorn
 
     from .http_server import create_http_app
 
-    logger.info(f"Starting Azure DevOps MCP Server in HTTP mode")
-    logger.info(f"Listening on {host}:{port}")
+    logger.info("Starting Azure DevOps MCP Server in HTTP mode")
+    logger.info("Listening on %s:%s", host, port)
 
     app = create_http_app()
     uvicorn.run(app, host=host, port=port)
 
 
-def main():
+def main() -> None:
     """Main entry point."""
     args = parse_args()
 

@@ -69,7 +69,11 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Using build share path (recommended)
+  # Using WCDaaS local (recommended - no network share needed)
+  llmcrawl wcd-bridge --wcdaas-local --branch rs_sparc_ctr_exp \\
+    --build-name 29503.1000.251209-1700
+
+  # Using build share path
   llmcrawl wcd-bridge --build "\\\\winbuilds\\release\\branch\\build"
 
   # With specific architecture
@@ -80,8 +84,8 @@ Examples:
 
 Prerequisites:
   - Windows host machine
-  - Access to Windows build shares
-  - Network connectivity to \\\\winbuilds
+  - For --wcdaas-local: Run WCDaaS URL in browser first to download tools
+  - For --build/--cmd: Access to Windows build shares
 
 The bridge service:
   - Runs on port 8005
@@ -105,12 +109,29 @@ Configure in .env:
         "-c",
         help="Full path to InteractViaPowerShell.cmd",
     )
+    group.add_argument(
+        "--wcdaas-local",
+        action="store_true",
+        help=(
+            "Use existing WCDaaS local download from %%LOCALAPPDATA%%\\Temp\\wcdaas. "
+            "Requires --branch and --build-name."
+        ),
+    )
 
     parser.add_argument(
         "--arch",
         "-a",
         default="amd64fre",
         help="Architecture folder name (default: amd64fre)",
+    )
+    parser.add_argument(
+        "--branch",
+        default="rs_sparc_ctr_exp",
+        help="WCD branch name (default: rs_sparc_ctr_exp). For --wcdaas-local.",
+    )
+    parser.add_argument(
+        "--build-name",
+        help="WCD build name (e.g., 29503.1000.251209-1700). For --wcdaas-local.",
     )
     parser.add_argument(
         "--port",
@@ -122,20 +143,82 @@ Configure in .env:
 
     args = parser.parse_args()
 
-    # Determine the CMD path
-    if args.build:
+    # Determine the initialization method
+    if args.wcdaas_local:
+        # Validate required parameters
+        if not args.build_name:
+            parser.error(
+                "--build-name is required when using --wcdaas-local\n"
+                "Example: --build-name 29503.1000.251209-1700"
+            )
+
+        # Find WCDaaS local folder
+        wcdaas_base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Temp", "wcdaas")
+        if not os.path.isdir(wcdaas_base):
+            wcdaas_url = (
+                "https://wcdaas-pme.azurewebsites.net/default.aspx"
+                f"?action=wcd&branch={args.branch}"
+                f"&buildName={args.build_name}&arch=amd64"
+            )
+            parser.error(
+                f"WCDaaS temp folder not found: {wcdaas_base}\n"
+                "Run the WCDaaS URL in a browser first to download the tools:\n"
+                f"  {wcdaas_url}"
+            )
+
+        # Find most recent valid folder
+        try:
+            folders = [
+                f
+                for f in os.listdir(wcdaas_base)
+                if os.path.isdir(os.path.join(wcdaas_base, f))
+                and os.path.isfile(
+                    os.path.join(wcdaas_base, f, "InteractViaPowershell.ps1")
+                )
+            ]
+            if not folders:
+                parser.error(
+                    f"No valid WCDaaS folders found in {wcdaas_base}\n"
+                    "Valid folders must contain InteractViaPowershell.ps1"
+                )
+            folders.sort(
+                key=lambda f: os.path.getmtime(os.path.join(wcdaas_base, f)),
+                reverse=True,
+            )
+            wcdaas_folder = os.path.join(wcdaas_base, folders[0])
+            print(f"Using WCDaaS folder: {folders[0]} (found {len(folders)} valid)")
+        except Exception as e:
+            parser.error(f"Failed to find WCDaaS folders: {e}")
+
+        # Construct PowerShell command
+        ps1_path = os.path.join(wcdaas_folder, "InteractViaPowershell.ps1")
+        arch_short = args.arch.replace("fre", "").replace("chk", "")
+        ps_command = (
+            f"& '{ps1_path}' "
+            f"-branch {args.branch} "
+            f"-buildName {args.build_name} "
+            f"-arch {arch_short}"
+        )
+        os.environ["WIN_COMP_PS_COMMAND"] = ps_command
+
+        print("Configuration (WCDaaS Local):")
+        print(f"  Branch:       {args.branch}")
+        print(f"  Build Name:   {args.build_name}")
+        print(f"  Architecture: {arch_short}")
+        print(f"  Folder:       {wcdaas_folder}")
+
+    elif args.build:
         cmd_path = construct_wcd_cmd_path(args.build, args.arch)
+        os.environ["WIN_COMP_SHARE_CMD"] = cmd_path
         print("Configuration:")
         print(f"  Build Path:     {args.build}")
         print(f"  Architecture:   {args.arch}")
         print(f"  Full CMD Path:  {cmd_path}")
     else:
         cmd_path = args.cmd
+        os.environ["WIN_COMP_SHARE_CMD"] = cmd_path
         print("Configuration:")
         print(f"  CMD Path: {cmd_path}")
-
-    # Set environment variable
-    os.environ["WIN_COMP_SHARE_CMD"] = cmd_path
 
     print(f"  Port:           {args.port}")
     print()

@@ -1,0 +1,23 @@
+{
+    // Example VS Code mcp.json entry for Crawler MCP Server
+    // Location: %APPDATA%\Code\User\mcp.json (Windows)
+    //           ~/Library/Application Support/Code/User/mcp.json (macOS)
+    //           ~/.config/Code/User/mcp.json (Linux)
+    "inputs": [],
+    "servers": {
+        "llmcrawl-crawler": {
+            "command": "C:/Path/To/python.exe",
+            "args": [
+                "-m",
+                "crawler_mcp_server",
+                "--base-url",
+                "http://localhost:8001"
+            ],
+            "env": {
+                // Optional alternative to --base-url
+                // "CRAWLER_MCP_BASE_URL": "http://localhost:8001"
+            },
+            "type": "stdio"
+        }
+    }
+}

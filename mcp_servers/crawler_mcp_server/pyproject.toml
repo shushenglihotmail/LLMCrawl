@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crawler-mcp-server"
+version = "0.1.0"
+description = "MCP server wrapper for the LLMCrawl Crawler HTTP service"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [{ name = "LLMCrawl" }]
+keywords = ["mcp", "crawler", "rag", "llmcrawl", "firecrawl", "playwright"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = ["httpx>=0.25.0"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+]
+
+[project.scripts]
+crawler-mcp-server = "crawler_mcp_server.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["crawler_mcp_server*"]
+
+[tool.setuptools.package-data]
+"crawler_mcp_server" = ["*.jsonc", "*.md"]
+
+[tool.black]
+line-length = 88
+target-version = ['py39', 'py310', 'py311']
+
+[tool.isort]
+profile = "black"
+line_length = 88
