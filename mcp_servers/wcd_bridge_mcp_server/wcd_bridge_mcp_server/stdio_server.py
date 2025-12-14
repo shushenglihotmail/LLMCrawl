@@ -1,6 +1,7 @@
 """Stdio MCP server for the WCD Bridge wrapper.
 
 Implements MCP JSON-RPC over stdin/stdout (VS Code Copilot compatible).
+Uses simple newline-delimited JSON (same as local_access_mcp_server).
 """
 
 from __future__ import annotations
@@ -43,17 +44,19 @@ class WcdBridgeMCPServer:
                     "Editions, Packages, Assemblies, BuildFiles, "
                     "RegistryValues, Apis, ProductGroups. "
                     "You can use methods like GetInclusionGraph() to trace "
-                    "dependencies. The output is a text-based tree view, "
-                    "not JSON. "
-                    "Example output for GetInclusionGraph:\\n"
+                    "dependencies. "
+                    "OUTPUT FORMAT: The result includes PowerShell console output. "
+                    "Lines starting with '>> ' are command echoes (ignore them). "
+                    "The actual data follows the command echo. "
+                    "Output is text-based (tables, trees, or lists), not JSON. "
+                    "Example raw output:\\n"
+                    ">> $d.Editions['ServerDatacenter'] | Out-String\\n"
+                    "Name                    Type\\n"
+                    "----                    ----\\n"
+                    "ServerDatacenter        Edition\\n"
+                    "For GetInclusionGraph(), output is a tree:\\n"
                     "(EDITION):ServerDatacenterNano\\n"
-                    "  (PACKAGE):Microsoft-Windows-ServerDatacenterNanoEdition\\n"
-                    "    (PACKAGE):Microsoft-Windows-EditionPack-"
-                    "ServerDatacenterNano\\n"
-                    "      (FEATUREPACKAGE):Microsoft-Win2\\n"
-                    "        (PACKAGE):Runlevel-Win1\\n"
-                    "          (COMPONENT):Microsoft-Windows-Csrss\\n"
-                    "            (NTTREE):csrss.exe"
+                    "  (PACKAGE):Microsoft-Windows-ServerDatacenterNanoEdition"
                 ),
                 "inputSchema": {
                     "type": "object",
@@ -122,23 +125,47 @@ class WcdBridgeMCPServer:
             logger.error(f"Tool execution error: {e}", exc_info=True)
             return {"error": str(e)}
 
+    def _send_message(self, message: Dict[str, Any]) -> None:
+        """Send JSON-RPC message to stdout (newline-delimited)."""
+        try:
+            output = json.dumps(message)
+            print(output, flush=True)
+            logger.debug(f"Sent message: {output[:200]}...")
+        except Exception as e:
+            logger.error(f"Failed to send message: {e}", exc_info=True)
+
     async def run_stdio(self) -> None:
+        """Run MCP server with stdio transport (newline-delimited JSON)."""
+        logger.info("Starting MCP stdio server...")
+
         if not await self.initialize():
             sys.exit(1)
 
+        logger.info("Server initialized, waiting for messages...")
+
+        # Main message loop - simple newline-delimited JSON
         while True:
-            line = sys.stdin.readline()
-            if not line:
-                break
-
             try:
-                message = json.loads(line.strip())
-            except json.JSONDecodeError:
-                continue
+                line = sys.stdin.readline()
+                if not line:
+                    break
 
-            response = await self._handle_jsonrpc_message(message)
-            if response is not None:
-                self._send_message(response)
+                message = json.loads(line.strip())
+                logger.debug(f"Received message: {message.get('method')}")
+
+                response = await self._handle_jsonrpc_message(message)
+                if response is not None:
+                    self._send_message(response)
+
+            except KeyboardInterrupt:
+                logger.info("Received interrupt signal")
+                break
+            except json.JSONDecodeError as e:
+                logger.error(f"Invalid JSON received: {e}")
+            except Exception as e:
+                logger.error(f"Message handling error: {e}", exc_info=True)
+
+        logger.info("Stdio transport stopped")
 
     async def _handle_jsonrpc_message(
         self, message: Dict[str, Any]
@@ -187,9 +214,6 @@ class WcdBridgeMCPServer:
             "id": msg_id,
             "error": {"code": -32601, "message": f"Method not found: {method}"},
         }
-
-    def _send_message(self, message: Dict[str, Any]) -> None:
-        print(json.dumps(message), flush=True)
 
 
 async def run_stdio_server(base_url: str, timeout_s: float = 60.0) -> None:

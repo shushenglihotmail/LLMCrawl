@@ -14,9 +14,14 @@ import uvicorn
 
 
 def main() -> None:
+    # IMPORTANT: Direct ALL logging to stderr to avoid corrupting MCP
+    # protocol on stdout. MCP uses Content-Length framed JSON on stdout.
+    import sys
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        stream=sys.stderr,  # Ensure logs go to stderr, not stdout
     )
 
     parser = argparse.ArgumentParser(
@@ -231,11 +236,15 @@ def main() -> None:
             # Always point MCP to the embedded bridge unless user disables it.
             base_url = f"http://{args.bridge_host}:{args.bridge_port}"
 
+            # IMPORTANT: Redirect uvicorn logs to stderr to avoid corrupting
+            # the MCP protocol on stdout. MCP uses Content-Length framing on
+            # stdout, so any stray output breaks the protocol.
             config = uvicorn.Config(
                 create_app(),
                 host=args.bridge_host,
                 port=args.bridge_port,
-                log_level="info",
+                log_level="warning",  # Reduce log noise
+                access_log=False,  # Disable access logs that go to stdout
             )
             server = uvicorn.Server(config)
 

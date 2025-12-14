@@ -177,9 +177,22 @@ class PowerShellSession:
 
             start_marker = "START_OF_RESPONSE"
             end_marker = "END_OF_RESPONSE"
+
+            # Only append Out-String if the query doesn't already have it
+            # to avoid double-piping issues
+            script_with_output = script_block.strip()
+            if "Out-String" not in script_with_output:
+                script_with_output = f"{script_with_output} | Out-String -Width 4096"
+
+            # Convert multi-line scripts to single line to avoid stdin parsing issues
+            # PowerShell interprets each newline as a separate command from stdin
+            script_single_line = script_with_output.replace("\r\n", " ").replace(
+                "\n", " "
+            )
+
             full_command = (
                 f'Write-Output "{start_marker}"\n'
-                f"{script_block} | Out-String -Width 4096\n"
+                f"{script_single_line}\n"
                 f'Write-Output "{end_marker}"\n'
             )
 
@@ -198,16 +211,29 @@ class PowerShellSession:
                 started = False
                 start_time = time.time()
 
+                logger.debug(
+                    "Waiting for output, command: %s", script_with_output[:100]
+                )
+
                 while time.time() - start_time < timeout:
                     try:
                         line = self.output_queue.get(timeout=1)
                         clean_line = line.strip()
+
+                        logger.debug(
+                            "Got line: %r (started=%s)",
+                            clean_line[:80] if len(clean_line) > 80 else clean_line,
+                            started,
+                        )
 
                         if start_marker in clean_line:
                             started = True
                             continue
 
                         if end_marker in clean_line:
+                            logger.debug(
+                                "Found end marker, collected %d lines", len(output)
+                            )
                             break
 
                         if started:

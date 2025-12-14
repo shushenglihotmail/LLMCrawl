@@ -450,11 +450,32 @@ See [AUTHENTICATION.md](AUTHENTICATION.md) for detailed instructions.
 
 Query Windows build component information. Requires Windows host.
 
-**Start the bridge:**
+**Option A: Network Share Mode**
+
+Use this if you have access to Windows build network shares:
 
 ```bash
 llmcrawl wcd-bridge --build "\\winbuilds\release\rs_sparc_ctr_exp\29498.1001.251201-1700"
 ```
+
+**Option B: WCDaaS Local Mode (Recommended)**
+
+Use this if network shares are unavailable or slow. First, download the WCD tools by opening this URL in your browser:
+
+```
+https://wcdaas-pme.azurewebsites.net/default.aspx?action=wcd&branch=rs_sparc_ctr_exp&buildName=29503.1000.251209-1700&arch=amd64
+```
+
+Then start the bridge with local mode:
+
+```bash
+llmcrawl wcd-bridge --wcdaas-local --branch rs_sparc_ctr_exp --build-name 29503.1000.251209-1700
+```
+
+Options:
+- `--branch` - WCD branch name (default: rs_sparc_ctr_exp)
+- `--build-name` - Build name (e.g., 29503.1000.251209-1700)
+- `--arch` - Architecture (default: amd64fre, also: arm64fre)
 
 **Configure in `.env`:**
 
