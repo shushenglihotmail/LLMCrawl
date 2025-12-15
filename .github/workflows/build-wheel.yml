@@ -1,8 +1,9 @@
-name: Build and Release Wheel
+name: Build and Release Wheels
 
 on:
   release:
     types: [created]
+  workflow_dispatch: # Allow manual trigger
 
 permissions:
   contents: write
@@ -25,16 +26,30 @@ jobs:
           python -m pip install --upgrade pip
           pip install build wheel setuptools
 
-      - name: Build wheel
+      - name: Build main LLMCrawl wheel
         run: python -m build --wheel
 
-      - name: Upload wheel as artifact
+      - name: Build MCP server wheels
+        run: |
+          # Find all MCP servers with pyproject.toml and build them
+          for dir in mcp_servers/*/; do
+            if [ -f "${dir}pyproject.toml" ]; then
+              echo "Building wheel for ${dir}..."
+              python -m build --wheel --outdir dist/ "${dir}"
+            fi
+          done
+
+      - name: List all built wheels
+        run: ls -la dist/
+
+      - name: Upload all wheels as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: llmcrawl-wheel
+          name: llmcrawl-wheels
           path: dist/*.whl
 
-      - name: Upload wheel to release
+      - name: Upload wheels to release
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v1
         with:
           files: dist/*.whl

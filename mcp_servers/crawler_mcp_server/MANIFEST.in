@@ -1,0 +1,3 @@
+include README.md
+include vscode-mcp-example.jsonc
+recursive-include crawler_mcp_server *.py *.yml *.yaml *.txt Dockerfile.*

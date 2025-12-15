@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import httpx
 
@@ -28,14 +28,12 @@ class CrawlerClient:
     async def crawl(
         self,
         query: str,
-        seed_urls: Optional[List[str]] = None,
         freshness_days: int = 7,
         depth: int = 1,
         max_results: int = 10,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "query": query,
-            "seed_urls": seed_urls or [],
             "freshness_days": freshness_days,
             "depth": depth,
             "max_results": max_results,

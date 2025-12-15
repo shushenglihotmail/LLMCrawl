@@ -37,13 +37,28 @@ Wrapper servers are intentionally thin so the underlying services can keep their
 ### Crawler MCP Server (wrapper)
 
 - Folder: `mcp_servers/crawler_mcp_server/`
-- Purpose: expose the crawler service (`crawler/main.py`, typically Docker on the host) as MCP tools.
+- Purpose: Simple MCP wrapper that connects an existing LLMCrawl crawler service to VS Code agents.
 - Default crawler URL: `http://localhost:8001`
 - Tools:
-  - `crawler_health`
-  - `crawler_crawl`
-  - `crawler_render`
-  - `crawler_extract`
+  - `crawler_health` – check crawler service status
+  - `crawler_crawl` – crawl web pages by query (params: `query`, `freshness_days`, `depth`, `max_results`)
+  - `crawler_render` – render a page using Playwright
+  - `crawler_extract` – extract clean text from HTML using Trafilatura
+
+**Prerequisites:**
+- LLMCrawl must be deployed and running (`llmcrawl deploy`, `llmcrawl start`)
+- Authentication handled via LLMCrawl CLI (`llmcrawl authenticate <url>`)
+
+**What the package includes:**
+- MCP stdio server for VS Code integration
+- HTTP client to connect to existing crawler service
+- Minimal CLI: `crawler-mcp-server [--base-url URL] [--timeout SEC]`
+- Single dependency: `httpx`
+
+**What it does NOT include (use LLMCrawl CLI instead):**
+- No container management (use `llmcrawl start/stop/restart`)
+- No authentication (use `llmcrawl authenticate`)
+- No bundled Docker files (deployment via LLMCrawl)
 
 ## Building each MCP server as a separate wheel
 
@@ -298,21 +313,61 @@ Notes:
 
 ### Crawler MCP Server (VS Code)
 
-Prerequisite: the crawler service must already be running.
+The Crawler MCP Server is a self-contained wheel package that includes both the MCP server and container management tools.
 
-Typical start (dev env):
+#### Building and Installing
+
+```bash
+cd mcp_servers/crawler_mcp_server
+python -m build --wheel
+pip install dist/crawler_mcp_server-*.whl
+```
+
+#### Starting the Crawler Service
+
+The wheel includes a CLI to manage the crawler Docker stack:
+
+```bash
+# Start all crawler services (postgres, redis, playwright, firecrawl, crawler)
+crawler-mcp-server start
+
+# Check service status
+crawler-mcp-server status
+
+# View logs
+crawler-mcp-server logs
+
+# Stop services
+crawler-mcp-server stop
+
+# Restart services
+crawler-mcp-server restart
+```
+
+The `start` command uses the bundled `docker-compose.crawler.yml` which starts:
+- **postgres** (5432) – database for Firecrawl
+- **redis** (6379) – caching/rate limiting
+- **playwright** (3000) – browser rendering via Browserless
+- **firecrawl** (3002) – web crawling engine
+- **crawler** (8001) – LLMCrawl crawler service (the MCP server connects here)
+
+#### Alternative: Using dev environment
+
+If you're working in the LLMCrawl repo, you can also start the crawler via:
 
 ```bash
 make dev-up
 ```
 
-Or start only crawler via compose:
+Or start only crawler-related services:
 
 ```bash
-docker compose -f deploy/docker-compose.dev.yml up -d crawler
+docker compose -f deploy/docker-compose.dev.yml up -d crawler firecrawl playwright redis postgres
 ```
 
-Then add an MCP server config (example):
+#### VS Code MCP Configuration
+
+Once the crawler service is running, add this to your VS Code `mcp.json`:
 
 ```jsonc
 {
@@ -320,15 +375,42 @@ Then add an MCP server config (example):
   "servers": {
     "llmcrawl-crawler": {
       "command": "C:/Path/To/python.exe",
-      "args": ["-m", "crawler_mcp_server", "--base-url", "http://localhost:8001"],
+      "args": ["-m", "crawler_mcp_server", "mcp"],
       "type": "stdio"
     }
   }
 }
 ```
 
+To use a different crawler URL (e.g., remote host):
+
+```jsonc
+{
+  "inputs": [],
+  "servers": {
+    "llmcrawl-crawler": {
+      "command": "C:/Path/To/python.exe",
+      "args": ["-m", "crawler_mcp_server", "mcp", "--base-url", "http://remote-host:8001"],
+      "type": "stdio"
+    }
+  }
+}
+```
+
+#### Authentication for Internal Sites
+
+To crawl internal sites that require authentication:
+
+```bash
+# Launch browser for SSO authentication and capture cookies
+crawler-mcp-server auth https://internal-site.example.com
+```
+
+This opens a browser window where you can log in. After authentication, cookies are saved and used for subsequent crawl requests.
+
 ## Notes / troubleshooting
 
-- `crawler_mcp_server` does not start the crawler service. If you see connection errors, start the crawler first.
+- `crawler_mcp_server` requires the crawler service to be running. Use `crawler-mcp-server start` to start it, or check status with `crawler-mcp-server status`.
 - `wcd_bridge_mcp_server` starts an embedded bridge by default; use `--no-bridge` only if you run the bridge separately.
 - If your service is not on localhost (remote host, WSL2, different port), set `--base-url` accordingly.
+- For crawler container issues, check logs with `crawler-mcp-server logs` or `docker compose logs`.

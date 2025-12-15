@@ -39,11 +39,6 @@ class CrawlerMCPServer:
                             "type": "string",
                             "description": "Search query or topic",
                         },
-                        "seed_urls": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional seed URLs",
-                        },
                         "freshness_days": {
                             "type": "integer",
                             "description": "How recent content should be",
@@ -109,7 +104,6 @@ class CrawlerMCPServer:
             if tool_name == "crawler_crawl":
                 return await self.client.crawl(
                     query=arguments["query"],
-                    seed_urls=arguments.get("seed_urls"),
                     freshness_days=int(arguments.get("freshness_days", 7)),
                     depth=int(arguments.get("depth", 1)),
                     max_results=int(arguments.get("max_results", 10)),

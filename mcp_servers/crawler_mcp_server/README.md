@@ -1,54 +1,109 @@
 # Crawler MCP Server
 
-This is a thin Model Context Protocol (MCP) server that exposes the existing LLMCrawl **Crawler** service as MCP tools.
+A simple MCP (Model Context Protocol) server that connects LLMCrawl crawler to VS Code AI agents.
 
-It does **not** replace or change the crawler. It only forwards MCP tool calls to the crawler's existing HTTP API (typically running in Docker).
+## What It Does
 
-## What it connects to
+Exposes LLMCrawl crawler functionality as MCP tools for VS Code AI agents (GitHub Copilot, etc.).
 
-- Existing service: `crawler/main.py` (FastAPI)
-- Default base URL: `http://localhost:8001`
-- Endpoints used:
-  - `GET /health`
-  - `POST /crawl`
-  - `POST /render`
-  - `POST /extract`
+## Prerequisites
 
-## Tools exposed
+- **LLMCrawl crawler service running** at http://localhost:8001
+  - Use the main LLMCrawl deployment (see main README)
+  - Or run from source: `cd crawler && uvicorn main:app --port 8001`
 
-- `crawler_health`: returns `/health`
-- `crawler_crawl`: forwards to `/crawl`
-- `crawler_render`: forwards to `/render`
-- `crawler_extract`: forwards to `/extract`
-
-## Install (editable)
-
-From repo root:
+## Installation
 
 ```bash
-pip install -e mcp_servers/crawler_mcp_server
+# From wheel
+pip install dist/crawler_mcp_server-*.whl
+
+# From PyPI (when published)
+pip install crawler-mcp-server
 ```
 
-For deploying to another machine, prefer installing from a built wheel (see below).
-
-## Build a wheel
+## Usage
 
 ```bash
-cd mcp_servers/crawler_mcp_server
-python -m pip install --upgrade build
+# Run MCP server (connects to http://localhost:8001)
+crawler-mcp-server
+
+# Connect to custom URL
+crawler-mcp-server --base-url http://my-crawler:8001
+```
+
+## VS Code Integration
+
+Add to your VS Code `settings.json` or `.vscode/mcp.json`:
+
+```json
+{
+    "mcp": {
+        "servers": {
+            "crawler": {
+                "command": "crawler-mcp-server"
+            }
+        }
+    }
+}
+```
+
+Or with custom URL:
+
+```json
+{
+    "mcp": {
+        "servers": {
+            "crawler": {
+                "command": "crawler-mcp-server",
+                "args": ["--base-url", "http://localhost:8001"]
+            }
+        }
+    }
+}
+```
+
+## MCP Tools
+
+The server exposes these tools to VS Code AI agents:
+
+| Tool | Description |
+|------|-------------|
+| `crawler_health` | Check crawler service health |
+| `crawler_crawl` | Crawl web pages with topic/query |
+| `crawler_render` | Render JavaScript-heavy pages |
+| `crawler_extract` | Extract content from HTML |
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CRAWLER_MCP_BASE_URL` | Crawler service URL | `http://localhost:8001` |
+| `CRAWLER_MCP_TIMEOUT_S` | Request timeout | `120` |
+
+## Development
+
+```bash
+# Install in editable mode
+pip install -e .
+
+# Build wheel
 python -m build --wheel
 ```
 
-## Run (stdio MCP for VS Code)
+## Authentication
 
-```bash
-python -m crawler_mcp_server --base-url http://localhost:8001
+Authentication to internal sites is handled by the main LLMCrawl deployment.
+Use the LLMCrawl CLI tools to configure authentication before running the crawler service.
+
+## Architecture
+
 ```
-
-Environment variables:
-
-- `CRAWLER_MCP_BASE_URL`: default base URL (overrides the default)
-
-## VS Code integration
-
-See `vscode-mcp-example.jsonc`.
+VS Code + GitHub Copilot
+    ↓ (MCP protocol)
+crawler-mcp-server (this package)
+    ↓ (HTTP)
+LLMCrawl Crawler Service
+    ↓
+Firecrawl + Playwright + etc.
+```
