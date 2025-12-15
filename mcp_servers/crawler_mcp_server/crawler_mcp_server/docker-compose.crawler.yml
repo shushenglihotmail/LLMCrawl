@@ -1,0 +1,148 @@
+# Docker Compose for Crawler MCP Server
+# Full stack: LLMCrawl crawler service + backend dependencies
+#
+# Architecture:
+#   MCP Server -> Crawler (8001) -> Firecrawl (3002) -> Playwright (3000)
+#                                                    -> Redis (6379)
+#                                                    -> Postgres (5432)
+#
+# Usage:
+#   crawler-mcp-server start   # Uses this compose file
+#   crawler-mcp-server stop
+#
+# Or manually:
+#   docker compose -f docker-compose.crawler.yml up -d
+
+services:
+  # PostgreSQL - required by Firecrawl
+  postgres:
+    image: postgres:16-alpine
+    container_name: crawler-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=firecrawl
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - crawler_postgres_data:/var/lib/postgresql/data
+    networks:
+      - crawler-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis - required by Firecrawl for caching/rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: crawler-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - crawler_redis_data:/data
+    networks:
+      - crawler-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Playwright/Browserless - for JS-heavy page rendering
+  playwright:
+    image: ghcr.io/browserless/chromium
+    container_name: crawler-playwright
+    ports:
+      - "3000:3000"
+    environment:
+      - CONCURRENT=5
+      - TIMEOUT=300000
+    networks:
+      - crawler-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/json/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Firecrawl - web crawling engine used by LLMCrawl crawler
+  firecrawl:
+    image: ghcr.io/firecrawl/firecrawl:latest
+    container_name: crawler-firecrawl
+    ports:
+      - "3002:3002"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - REDIS_RATE_LIMIT_URL=redis://redis:6379
+      - DATABASE_URL=postgres://postgres:password@postgres:5432/firecrawl
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=firecrawl
+      - USE_DB_AUTHENTICATION=false
+      - NODE_ENV=production
+      - NUM_WORKERS_PER_QUEUE=1
+      - PORT=3002
+      - HOST=0.0.0.0
+      - PLAYWRIGHT_MICROSERVICE_URL=http://playwright:3000
+    networks:
+      - crawler-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      playwright:
+        condition: service_healthy
+    command: ["node", "dist/src/index.js"]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const s = require('net').createConnection(3002, 'localhost', () => { s.end(); process.exit(0); }); s.on('error', () => process.exit(1)); setTimeout(() => process.exit(1), 5000);\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # LLMCrawl Crawler Service - the main API that MCP server connects to
+  # This orchestrates Firecrawl, Playwright, and Trafilatura
+  # Uses local Dockerfile bundled with the wheel package
+  crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile.crawler
+    container_name: crawler-service
+    ports:
+      - "8001:8001"
+    environment:
+      - CRAWLER_HOST=0.0.0.0
+      - CRAWLER_PORT=8001
+      - FIRECRAWL_URL=http://firecrawl:3002
+      - PLAYWRIGHT_URL=http://playwright:3000
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+    env_file:
+      - .env
+    networks:
+      - crawler-network
+    depends_on:
+      firecrawl:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  crawler-network:
+    driver: bridge
+
+volumes:
+  crawler_postgres_data:
+  crawler_redis_data:

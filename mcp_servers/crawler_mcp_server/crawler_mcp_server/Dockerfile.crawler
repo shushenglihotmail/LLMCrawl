@@ -1,0 +1,36 @@
+# Dockerfile for LLMCrawl Crawler Service
+# This is a standalone Dockerfile bundled with the crawler-mcp-server wheel package
+# It installs the crawler service from PyPI or wheel and runs the FastAPI app
+#
+# Build: docker build -f Dockerfile.crawler -t crawler-service .
+# Run:   docker run -p 8001:8001 crawler-service
+
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash crawler
+WORKDIR /app
+
+# Install Python dependencies
+# The crawler-mcp-server wheel includes the crawler service as a dependency
+COPY requirements.crawler.txt ./
+RUN pip install --no-cache-dir -r requirements.crawler.txt
+
+# Switch to non-root user
+USER crawler
+
+# Expose the crawler service port
+EXPOSE 8001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:8001/health || exit 1
+
+# Run the crawler FastAPI service
+# The crawler module is installed as part of the llmcrawl package
+CMD ["uvicorn", "crawler.main:app", "--host", "0.0.0.0", "--port", "8001"]

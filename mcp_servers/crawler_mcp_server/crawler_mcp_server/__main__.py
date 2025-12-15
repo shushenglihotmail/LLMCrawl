@@ -1,40 +1,25 @@
-"""CLI entry point for the Crawler MCP Server."""
+"""CLI entry point for the Crawler MCP Server.
+
+This module provides the main entry point for the crawler-mcp-server command.
+It supports multiple subcommands:
+  - start/stop/restart: Manage Docker containers
+  - status: Check service health
+  - logs: View container logs
+  - auth: Authenticate to internal sites
+  - mcp: Run MCP server for VS Code integration
+  - serve: Run crawler service natively (without Docker)
+
+For backward compatibility, running without a subcommand starts the MCP server.
+"""
 
 from __future__ import annotations
 
-import argparse
-import asyncio
-import logging
-import os
-
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    """Main entry point - delegates to the CLI module."""
+    from .cli import main as cli_main
 
-    parser = argparse.ArgumentParser(
-        description="Crawler MCP Server (stdio) - forwards to LLMCrawl crawler HTTP API"
-    )
-    parser.add_argument(
-        "--base-url",
-        type=str,
-        default=os.getenv("CRAWLER_MCP_BASE_URL", "http://localhost:8001"),
-        help="Base URL of the crawler service (default: http://localhost:8001)",
-    )
-    parser.add_argument(
-        "--timeout-s",
-        type=float,
-        default=float(os.getenv("CRAWLER_MCP_TIMEOUT_S", "120")),
-        help="HTTP timeout in seconds (default: 120)",
-    )
-
-    args = parser.parse_args()
-
-    from .stdio_server import run_stdio_server
-
-    asyncio.run(run_stdio_server(base_url=args.base_url, timeout_s=args.timeout_s))
+    cli_main()
 
 
 if __name__ == "__main__":
