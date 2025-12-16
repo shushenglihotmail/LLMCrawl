@@ -15,7 +15,7 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from gateway.agents import AgentConfig, convert_mcp_tool_to_openai
@@ -26,6 +26,7 @@ from gateway.agents.unified_workflow import (
 )
 from gateway.llm.client import LLMClient
 from gateway.routers.tools import get_tool_handler
+from gateway.utils.auth import get_bearer_token
 from gateway.utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from gateway.utils.conversation_store import get_conversation_store
 from gateway.utils.logging import log_request, log_response
@@ -1053,10 +1054,20 @@ async def _execute_llm_with_tools(
     request_id: str,
     context_gathered: Dict[str, int],
     conversation_id: str,
+    bearer_token: Optional[str] = None,
 ) -> Tuple[str, Optional[int]]:
     """Execute LLM with tool calling loop.
 
     Checks for cancellation between tool calls and LLM rounds.
+
+    Args:
+        request: Workflow request
+        messages: Chat messages
+        tools: Available tools
+        request_id: Request ID for logging
+        context_gathered: Context gathering stats
+        conversation_id: Conversation ID for cancellation
+        bearer_token: Optional bearer token for LLM authentication
     """
     # Check for cancellation at start
     if _is_request_cancelled(conversation_id):
@@ -1081,6 +1092,7 @@ async def _execute_llm_with_tools(
         messages=messages,
         tools=tools if tools else None,
         tool_choice="auto" if tools else "none",
+        bearer_token=bearer_token,
     )
     response = cast(Dict[str, Any], response)
 
@@ -1176,6 +1188,7 @@ async def _execute_llm_with_tools(
             model=request.model or "gpt-4",
             tools=tools,
             tool_choice="auto",
+            bearer_token=bearer_token,
         )
 
         if not response.get("tool_calls"):
@@ -1217,7 +1230,10 @@ def get_agent_config() -> AgentConfig:
 
 
 @router.post("/chat", response_model=UnifiedWorkflowResponse)
-async def execute(request: UnifiedWorkflowRequest):
+async def execute(
+    request: UnifiedWorkflowRequest,
+    bearer_token: Optional[str] = Depends(get_bearer_token),
+):
     """
     Execute agent workflow - single endpoint for all use cases.
 
@@ -1228,6 +1244,10 @@ async def execute(request: UnifiedWorkflowRequest):
     4. Build messages and tools for LLM
     5. Execute LLM with tool calling loop
     6. Return response with conversation tracking
+
+    Args:
+        request: Workflow request with user message and context
+        bearer_token: Optional Entra ID bearer token for Azure Foundry authentication
     """
     request_id = str(uuid.uuid4())
     request_start_time = time.time()
@@ -1350,7 +1370,13 @@ async def execute(request: UnifiedWorkflowRequest):
         # Step 5: Execute LLM with tools (with metrics)
         async with AgentActivityTimer("llm_loop") as llm_timer:
             response_text, tokens_used = await _execute_llm_with_tools(
-                request, messages, tools, request_id, context_gathered, conversation_id
+                request,
+                messages,
+                tools,
+                request_id,
+                context_gathered,
+                conversation_id,
+                bearer_token,
             )
             llm_timer.items = tokens_used
 

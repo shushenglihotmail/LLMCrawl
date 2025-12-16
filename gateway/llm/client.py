@@ -35,11 +35,16 @@ class LLMClient:
         self.provider = os.getenv("LLM_PROVIDER", "openai").lower()
 
         # Initialize OpenAI client
+        # Note: API keys are optional when using Entra ID bearer token authentication
         if self.provider == "azure":
+            api_key = os.getenv("AZURE_OPENAI_API_KEY", "dummy-key-for-entra-id")
             self.openai_client = AsyncAzureOpenAI(
                 azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+                api_key=api_key,
                 api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01"),
+            )
+            logger.info(
+                f"Azure OpenAI client initialized (Entra ID auth: {api_key == 'dummy-key-for-entra-id'})"
             )
         else:
             self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -48,7 +53,8 @@ class LLMClient:
         self.anthropic_endpoint = (
             os.getenv("AZURE_ANTHROPIC_ENDPOINT") if self.provider == "azure" else None
         )
-        self.anthropic_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        # API key is optional for Anthropic when using Entra ID
+        self.anthropic_api_key = os.getenv("AZURE_OPENAI_API_KEY", "")
         if self.anthropic_endpoint:
             logger.info(f"Anthropic endpoint configured: {self.anthropic_endpoint}")
 
@@ -114,6 +120,7 @@ class LLMClient:
         temperature: float = 0.1,
         max_tokens: Optional[int] = None,
         stream: bool = False,
+        bearer_token: Optional[str] = None,
     ) -> Dict[str, Any] | AsyncGenerator[Dict[str, Any], None]:
         """
         Create a chat completion with optional tool calling.
@@ -126,6 +133,7 @@ class LLMClient:
             temperature: Sampling temperature
             max_tokens: Maximum response tokens (if None, uses model-specific default)
             stream: Whether to stream the response
+            bearer_token: Optional Entra ID bearer token for Azure Foundry authentication
 
         Returns:
             Chat completion response or stream generator
@@ -164,6 +172,7 @@ class LLMClient:
                     temperature,
                     effective_max_tokens,
                     stream,
+                    bearer_token,
                 )
             else:
                 return await self._openai_chat_completion(
@@ -174,6 +183,7 @@ class LLMClient:
                     temperature,
                     effective_max_tokens,
                     stream,
+                    bearer_token,
                 )
 
         except Exception as e:
@@ -201,8 +211,13 @@ class LLMClient:
         temperature: float,
         max_tokens: int,
         stream: bool,
+        bearer_token: Optional[str] = None,
     ) -> Dict[str, Any] | AsyncGenerator[Dict[str, Any], None]:
-        """Handle OpenAI/Azure OpenAI chat completion."""
+        """Handle OpenAI/Azure OpenAI chat completion.
+
+        Args:
+            bearer_token: Optional Entra ID bearer token for Azure Foundry authentication
+        """
         kwargs = {
             "model": model,
             "messages": messages,
@@ -210,6 +225,11 @@ class LLMClient:
             "max_tokens": max_tokens,
             "stream": stream,
         }
+
+        # Add bearer token if provided (for Azure Foundry Entra ID auth)
+        if bearer_token:
+            kwargs["extra_headers"] = {"Authorization": f"Bearer {bearer_token}"}
+            logger.info("Using Entra ID bearer token for LLM authentication")
 
         # Add tools if provided
         if tools:
@@ -282,8 +302,13 @@ class LLMClient:
         temperature: float,
         max_tokens: int,
         stream: bool,
+        bearer_token: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Handle Anthropic chat completion via direct HTTP with tool support."""
+        """Handle Anthropic chat completion via direct HTTP with tool support.
+
+        Args:
+            bearer_token: Optional Entra ID bearer token for Azure Foundry authentication
+        """
         if not self.anthropic_endpoint:
             raise Exception(
                 "Anthropic endpoint not configured. Check AZURE_ANTHROPIC_ENDPOINT configuration."
@@ -380,10 +405,18 @@ class LLMClient:
                 payload["tool_choice"] = {"type": "none"}
 
         headers = {
-            "x-api-key": self.anthropic_api_key,
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01",
         }
+
+        # Add bearer token if provided (for Azure Foundry Entra ID auth)
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
+            logger.info("Using Entra ID bearer token for Anthropic LLM authentication")
+        elif self.anthropic_api_key:
+            # Fallback to API key if no bearer token (for backward compatibility)
+            headers["x-api-key"] = self.anthropic_api_key
+            logger.info("Using API key for Anthropic authentication (deprecated)")
 
         try:
             # Use longer timeout for large context windows (Claude can be slow with 20k+ tokens)

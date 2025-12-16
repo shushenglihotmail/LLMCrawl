@@ -8,6 +8,8 @@ python-multipart>=0.0.6
 asyncio-throttle>=1.0.2
 prometheus-fastapi-instrumentator>=6.1.0
 tiktoken>=0.5.0  # For accurate token counting and prompt compression
+PyJWT>=2.8.0  # For Entra ID JWT token validation
+cryptography>=41.0.0  # Required by PyJWT for RS256 signature verification
 
 # LLMLingua-2 for intelligent prompt compression (optional but recommended)
 # These are large dependencies (~2GB total), install separately if needed:

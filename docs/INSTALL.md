@@ -354,6 +354,94 @@ llmcrawl deploy --logs gateway
 
 These components can be enabled based on your needs.
 
+### HiChat Web Client (Standalone)
+
+The HiChat web client is included in the Docker services and accessible at http://localhost:8080. However, you can also run it standalone for development or when using Entra ID authentication with Azure Foundry.
+
+#### Using HiChat CLI (Production)
+
+After installing the wheel package, HiChat CLI is available:
+
+```bash
+# Run with default settings (loads from llmcrawl-deploy/.env)
+hichat
+
+# Specify custom deploy directory
+hichat --deploy-dir /path/to/llmcrawl-deploy
+
+# Custom port and gateway
+hichat --port 3000 --gateway http://my-gateway:8000
+
+# Don't auto-open browser
+hichat --no-browser
+```
+
+**Environment Configuration:**
+
+HiChat automatically searches for `.env` in these locations (in order):
+1. Path specified via `--deploy-dir`
+2. Current directory (`./env`)
+3. `./llmcrawl-deploy/.env`
+4. User home directory (`~/.llmcrawl/.env`)
+
+**Setup for Production:**
+
+```bash
+# Option 1: Use llmcrawl-deploy folder (recommended)
+mkdir llmcrawl-deploy
+cp /path/to/deploy/.env llmcrawl-deploy/
+hichat
+
+# Option 2: Use home directory
+mkdir -p ~/.llmcrawl
+cp /path/to/deploy/.env ~/.llmcrawl/
+hichat
+
+# Option 3: Specify deploy directory
+hichat --deploy-dir ./llmcrawl-deploy
+```
+
+#### Running from Source (Development)
+
+For development, use the helper script:
+
+```bash
+# From repository root
+.\scripts\start_hichat.ps1
+
+# Or manually
+cd clients/hichat
+python main.py --deploy-dir ../../deploy
+```
+
+#### Entra ID Authentication
+
+If using Azure Foundry with Entra ID authentication, configure in `.env`:
+
+```bash
+# Azure Entra ID settings (use Azure CLI client ID for broad permissions)
+ENTRA_CLIENT_ID=04b07795-8ddb-461a-bbee-02f9e1bf7b46
+ENTRA_TENANT_ID=your-tenant-id
+AZURE_FOUNDRY_SCOPE=https://cognitiveservices.azure.com/user_impersonation
+
+# Azure Foundry endpoints
+AZURE_OPENAI_ENDPOINT=https://your-foundry.cognitiveservices.azure.com/
+AZURE_ANTHROPIC_ENDPOINT=https://your-foundry-anthropic.cognitiveservices.azure.com/
+
+# Leave API keys empty to use bearer tokens
+AZURE_OPENAI_API_KEY=
+```
+
+On first request, HiChat will:
+1. Open a browser for Microsoft sign-in
+2. Cache the token at `~/.llmcrawl/token_cache.bin`
+3. Automatically refresh tokens on subsequent runs
+4. Pass bearer token to gateway → Azure Foundry
+
+See [AUTHENTICATION.md](AUTHENTICATION.md) for more details on Entra ID setup.
+
+---
+
 ### Monitoring (Prometheus + Grafana)
 
 For visual dashboards and metrics:
@@ -631,7 +719,8 @@ llmcrawl deploy --up
 | Upgrade deployment | `llmcrawl deploy --upgrade` |
 | Authenticate to site | `llmcrawl auth <url>` |
 | Start WCD bridge | `llmcrawl wcd-bridge --build <path>` |
-| Open HiChat | http://localhost:8080 |
+| Start HiChat CLI | `hichat` or `hichat --deploy-dir ./llmcrawl-deploy` |
+| Open HiChat (Docker) | http://localhost:8080 |
 | API Documentation | http://localhost:8000/docs |
 
 ---

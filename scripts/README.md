@@ -83,12 +83,30 @@ This directory contains automated setup and utility scripts for the LLMCrawl dev
 
 | Scenario | Command |
 |----------|---------|
+| Start HiChat client | `.\scripts\start_hichat.ps1` |
 | Code change in gateway | `.\scripts\restart-services.ps1 -Service gateway -Build` |
 | Changed .env file | `.\scripts\restart-services.ps1` |
 | Changed requirements.txt | `.\scripts\restart-services.ps1 -Full` |
 | View service health | `.\scripts\service-status.ps1` |
 | Stop everything | `.\scripts\stop-services.ps1 -Remove` |
 | Start fresh | `.\scripts\start-services.ps1 -Build` |
+
+## Client Scripts
+
+### `start_hichat.ps1`
+**Purpose:** Start HiChat web client for development
+
+**Usage:**
+```powershell
+# Start HiChat with automatic deploy directory detection
+.\scripts\start_hichat.ps1
+```
+
+This script:
+- Automatically locates the deploy directory
+- Changes to the HiChat client directory
+- Starts HiChat with proper configuration
+- Loads environment from `deploy/.env`
 
 ## Setup Scripts
 
