@@ -139,10 +139,10 @@ class ToolHandler:
         initiator: str = "llm",
     ) -> Dict[str, Any]:
         """
-        Handle the crawl_and_refresh tool call.
+        Handle the crawl_and_refresh tool call with proper separation of concerns.
 
-        Pipeline:
-        1. Crawl web content with Firecrawl/Playwright
+        Gateway orchestration:
+        1. If seed_urls provided: prefetch those URLs via crawler
         2. If skip_embedding=False: Index documents and retrieve with vector search
         3. If skip_embedding=True: Return raw crawled content directly
 
@@ -156,30 +156,36 @@ class ToolHandler:
             Formatted tool result with sources
         """
         query = arguments["query"]
-        seed_urls = arguments.get("seed_urls", [])
         freshness_days = arguments.get("freshness_days", 7)
         depth = arguments.get("depth", 1)
-        allow_web_search = arguments.get("allow_web_search", True)
+        max_results = arguments.get("max_results", 10)
 
-        logger.info(f"Starting crawl_and_refresh for query: {query}")
+        logger.info(f"Starting crawl_and_refresh for URL: {query}")
 
-        # Determine source (firecrawl or playwright based on configuration)
-        source = "firecrawl" if allow_web_search else "playwright"
+        # LLM should provide a URL in the query parameter
+        if not query or not query.startswith(("http://", "https://")):
+            return {
+                "error": "Invalid URL. Please provide a valid http:// or https:// URL.",
+                "query": query,
+                "count": 0,
+            }
+
+        urls_to_crawl = [query]
+        logger.info(f"Crawling URL: {query}")
+
+        # Crawl the URL (crawler just does: crawl → render → extract)
         crawl_result = None
+        source = "firecrawl"
 
-        # Track crawling metrics per URL
-        for url in seed_urls:
+        for url in urls_to_crawl[:3]:  # Track metrics for first few URLs
             domain = get_domain_from_url(url)
             crawl_start = time.time()
             crawl_status = "success"
             try:
-                # Step 1: Crawl web content
                 crawl_result = await self._call_crawler(
-                    query=query,
-                    seed_urls=seed_urls,
-                    freshness_days=freshness_days,
+                    urls=urls_to_crawl,
                     depth=depth,
-                    allow_web_search=allow_web_search,
+                    max_results=max_results,
                     request_id=request_id,
                 )
             except Exception as e:
@@ -200,18 +206,7 @@ class ToolHandler:
                         source=source,
                         duration=crawl_duration,
                     )
-            break  # Only measure once for all URLs in the batch
-
-        # If no URLs provided, still call crawler (may use web search)
-        if not seed_urls:
-            crawl_result = await self._call_crawler(
-                query=query,
-                seed_urls=seed_urls,
-                freshness_days=freshness_days,
-                depth=depth,
-                allow_web_search=allow_web_search,
-                request_id=request_id,
-            )
+            break  # Only measure once
 
         if not crawl_result or not crawl_result.get("docs"):
             return {
@@ -223,7 +218,7 @@ class ToolHandler:
         docs = crawl_result["docs"]
         logger.info(f"Crawled {len(docs)} documents")
 
-        # If skip_embedding is True, return raw content directly
+        # Step 3: Handle embedding (if enabled)
         if skip_embedding:
             logger.info(
                 "skip_embedding=True, returning raw crawled content " "without indexing"
@@ -353,24 +348,20 @@ class ToolHandler:
 
     async def _call_crawler(
         self,
-        query: str,
-        seed_urls: List[str],
-        freshness_days: int,
+        urls: List[str],
         depth: int,
-        allow_web_search: bool,
+        max_results: int,
         request_id: str,
     ) -> Dict[str, Any]:
-        """Call the crawler service to fetch web content."""
+        """Call the simplified crawler service to crawl URLs."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
                 response = await client.post(
                     f"{self.crawler_url}/crawl",
                     json={
-                        "query": query,
-                        "seed_urls": seed_urls,
-                        "freshness_days": freshness_days,
+                        "urls": urls,
                         "depth": depth,
-                        "allow_web_search": allow_web_search,
+                        "max_results": max_results,
                     },
                     headers={"X-Request-ID": request_id},
                 )

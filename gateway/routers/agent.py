@@ -497,9 +497,7 @@ async def _crawl_urls(
             response = await client.post(
                 f"{agent.crawler_url}/crawl",
                 json={
-                    "query": request.user_message[:200],
-                    "seed_urls": request.seed_urls,
-                    "freshness_days": 90,
+                    "urls": request.seed_urls,  # Crawler expects list of URLs
                     "depth": request.crawl_depth,
                     "max_results": 10,
                 },

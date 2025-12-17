@@ -29,56 +29,35 @@ class CrawlerMCPServer:
             {
                 "name": "crawler_crawl",
                 "description": (
-                    "Crawl the web and return extracted documents. "
-                    "This forwards to the crawler /crawl endpoint."
+                    "Crawl web pages and return complete extracted content. "
+                    "This method handles rendering with Playwright, extracting with Trafilatura, "
+                    "and returns the full content (markdown, HTML, text) directly. "
+                    "Specify the URL in the query parameter to crawl that specific page."
                 ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "Search query or topic",
+                            "description": "URL to crawl or search query. For MCP usage, provide the URL here.",
                         },
                         "freshness_days": {
                             "type": "integer",
-                            "description": "How recent content should be",
+                            "description": "How recent content should be (default: 7 days)",
                             "default": 7,
                         },
                         "depth": {
                             "type": "integer",
-                            "description": "Crawl depth",
+                            "description": "Crawl depth: 1=single page, >1=follow links (default: 1)",
                             "default": 1,
                         },
                         "max_results": {
                             "type": "integer",
-                            "description": "Maximum number of results",
+                            "description": "Maximum number of documents to return (default: 10)",
                             "default": 10,
                         },
                     },
                     "required": ["query"],
-                },
-            },
-            {
-                "name": "crawler_render",
-                "description": "Render a page using Playwright.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "url": {"type": "string", "description": "URL to render"}
-                    },
-                    "required": ["url"],
-                },
-            },
-            {
-                "name": "crawler_extract",
-                "description": "Extract clean text from HTML using Trafilatura.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "url": {"type": "string", "description": "Source URL"},
-                        "html": {"type": "string", "description": "HTML content"},
-                    },
-                    "required": ["url", "html"],
                 },
             },
         ]
@@ -108,12 +87,6 @@ class CrawlerMCPServer:
                     depth=int(arguments.get("depth", 1)),
                     max_results=int(arguments.get("max_results", 10)),
                 )
-
-            if tool_name == "crawler_render":
-                return await self.client.render(arguments["url"])
-
-            if tool_name == "crawler_extract":
-                return await self.client.extract(arguments["url"], arguments["html"])
 
             return {"error": f"Unknown tool: {tool_name}"}
 

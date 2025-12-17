@@ -21,7 +21,7 @@ def main() -> None:
         sys.exit(0)
 
     if sys.argv[1] in ["-v", "--version"]:
-        print("llmcrawl version 1.0.0")
+        print("llmcrawl version 1.0.4")
         sys.exit(0)
 
     command = sys.argv[1]

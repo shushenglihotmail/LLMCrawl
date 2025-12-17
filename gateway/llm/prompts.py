@@ -24,10 +24,7 @@ class CrawlAndRefreshInput(BaseModel):
     Use .to_openai_tool() or other conversion methods for LLM-specific formats.
     """
 
-    query: str = Field(description="User topic or question")
-    seed_urls: Optional[List[str]] = Field(
-        default=None, description="Optional seed URLs or domains to prefer"
-    )
+    query: str = Field(description="URL or topic to crawl")
     freshness_days: int = Field(
         default=7, ge=1, description="How recent the content should be (in days)"
     )

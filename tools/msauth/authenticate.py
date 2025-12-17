@@ -538,12 +538,12 @@ def test_authentication(url: str) -> bool:
         return False
 
     try:
-        # Call the crawler API
+        # Call the crawler API with new format
         response = requests.post(
             "http://localhost:8001/crawl",
             json={
-                "query": "test",
-                "seed_urls": [url],
+                "urls": [url],
+                "depth": 1,
                 "max_results": 1,
             },
             timeout=60,

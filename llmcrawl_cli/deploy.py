@@ -641,7 +641,11 @@ def cmd_logs(
         args.append("-f")
     if service:
         args.append(service)
-    return run_compose(args, deploy_dir, use_dev=use_dev)
+    try:
+        return run_compose(args, deploy_dir, use_dev=use_dev)
+    except KeyboardInterrupt:
+        print("\n👋 Stopped following logs")
+        return 0
 
 
 def cmd_status(deploy_dir: Path, use_dev: bool = False) -> int:
@@ -718,7 +722,7 @@ def cmd_health() -> int:
         ("MCP Server", "http://localhost:8003/health", 8003),
         ("Azure DevOps MCP", "http://localhost:8004/health", 8004),
         ("Qdrant", "http://localhost:6333/healthz", 6333),
-        ("Playwright", "http://localhost:3003/json/version", 3003),
+        ("Playwright", "http://localhost:3003/health", 3003),
     ]
 
     healthy = 0

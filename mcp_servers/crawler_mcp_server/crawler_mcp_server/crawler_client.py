@@ -32,37 +32,37 @@ class CrawlerClient:
         depth: int = 1,
         max_results: int = 10,
     ) -> Dict[str, Any]:
+        """
+        Crawl a URL and return extracted content.
+
+        Simple crawling - just pass the URL to the crawler service.
+        The crawler will render and extract content.
+
+        Args:
+            query: URL to crawl (should be a full URL)
+            freshness_days: Not used (kept for compatibility)
+            depth: Crawl depth (1=single page, >1=follow links)
+            max_results: Maximum number of documents to return
+
+        Returns:
+            Dict with 'docs' list containing full content, markdown, HTML, etc.
+        """
+        # Simple: just pass the URL(s) to crawler
+        urls = [query] if query.startswith(("http://", "https://")) else []
+
+        if not urls:
+            return {"docs": [], "total_found": 0, "processed": 0}
+
         payload: Dict[str, Any] = {
-            "query": query,
-            "freshness_days": freshness_days,
+            "urls": urls,
             "depth": depth,
             "max_results": max_results,
         }
+
         async with httpx.AsyncClient(
             timeout=self._timeout_s, headers=self._headers
         ) as c:
             resp = await c.post(f"{self.base_url}/crawl", json=payload)
-            resp.raise_for_status()
-            result: Dict[str, Any] = resp.json()
-            return result
-
-    async def render(self, url: str) -> Dict[str, Any]:
-        async with httpx.AsyncClient(
-            timeout=self._timeout_s, headers=self._headers
-        ) as c:
-            resp = await c.post(f"{self.base_url}/render", json={"url": url})
-            resp.raise_for_status()
-            result: Dict[str, Any] = resp.json()
-            return result
-
-    async def extract(self, url: str, html: str) -> Dict[str, Any]:
-        async with httpx.AsyncClient(
-            timeout=self._timeout_s, headers=self._headers
-        ) as c:
-            resp = await c.post(
-                f"{self.base_url}/extract",
-                json={"url": url, "html": html},
-            )
             resp.raise_for_status()
             result: Dict[str, Any] = resp.json()
             return result
