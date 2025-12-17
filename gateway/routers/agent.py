@@ -27,7 +27,6 @@ from gateway.agents.unified_workflow import (
 from gateway.llm.client import LLMClient
 from gateway.routers.tools import get_tool_handler
 from gateway.utils.auth import get_bearer_token
-from gateway.utils.token_context import get_token
 from gateway.utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from gateway.utils.conversation_store import get_conversation_store
 from gateway.utils.logging import log_request, log_response
@@ -37,6 +36,7 @@ from gateway.utils.metrics import (
     record_agent_activity,
     record_agent_request,
 )
+from gateway.utils.token_context import get_token
 from gateway.utils.tool_constants import DEFAULT_TOOL_LIMITS, TOOL_QUERY_COMPOSITION_DB
 
 logger = logging.getLogger(__name__)

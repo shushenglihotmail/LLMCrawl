@@ -8,13 +8,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from .utils.token_context import set_token
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from .routers import agent, export, models
 from .utils.logging import get_logger, setup_logging
 from .utils.metrics import record_service_error, set_service_up
+from .utils.token_context import set_token
 
 # Setup logging
 setup_logging()

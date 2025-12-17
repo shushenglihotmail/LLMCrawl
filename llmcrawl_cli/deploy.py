@@ -703,8 +703,8 @@ def cmd_pull(deploy_dir: Path, use_dev: bool = False) -> int:
 def cmd_health() -> int:
     """Check health of all LLMCrawl services via their /health endpoints."""
     import json
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     print()
     print("=" * 60)
