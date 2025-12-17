@@ -70,11 +70,45 @@ class LlamaIndexStore:
         embed_model = os.getenv("EMBED_MODEL", "text-embedding-3-large")
 
         if llm_provider == "azure":
+            azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+            api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
+
+            # Use Entra ID authentication with context-aware token provider
+            from ..utils.token_context import get_token
+
+            def context_token_provider() -> str:
+                """Get token from request context or fallback to DefaultAzureCredential."""
+                # First try to get token from request context (passed from Gateway)
+                token = get_token()
+                if token:
+                    return token
+
+                # Fallback to DefaultAzureCredential (for background tasks/health checks)
+                try:
+                    from azure.identity import (
+                        DefaultAzureCredential,
+                        get_bearer_token_provider,
+                    )
+
+                    provider = get_bearer_token_provider(
+                        DefaultAzureCredential(),
+                        "https://cognitiveservices.azure.com/.default",
+                    )
+                    return provider()
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to get token from DefaultAzureCredential: {e}"
+                    )
+                    # Return a dummy token to prevent crash if called during init/health check
+                    # The actual API call will fail if this is used, but that's expected if no token is available
+                    return "dummy_token_waiting_for_request"
+
             return AzureOpenAIEmbedding(
                 model=embed_model,
-                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-                api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01"),
+                azure_endpoint=azure_endpoint,
+                azure_ad_token_provider=context_token_provider,
+                api_version=api_version,
+                api_key="no-key",  # Required by validation even if using token provider
             )
         else:
             return OpenAIEmbedding(
@@ -336,18 +370,27 @@ class LlamaIndexStore:
             vector_health = await self.vector_store.health_check()
 
             # Test embedding generation
-            try:
-                test_embedding = await self._generate_embeddings(["test"])
-                embedding_healthy = (
-                    len(test_embedding) > 0 and len(test_embedding[0]) > 0
-                )
-            except:
-                embedding_healthy = False
+            # Only test if we have a static API key.
+            # If using Entra ID (dynamic auth), we skip this check to allow startup without a token.
+            if os.getenv("AZURE_OPENAI_API_KEY"):
+                try:
+                    test_embedding = await self._generate_embeddings(["test"])
+                    embedding_healthy = (
+                        len(test_embedding) > 0 and len(test_embedding[0]) > 0
+                    )
+                except Exception as e:
+                    logger.warning(f"Health check embedding generation failed: {e}")
+                    embedding_healthy = False
+            else:
+                # Assume healthy for Entra ID mode (waiting for request token)
+                embedding_healthy = True
 
             return {
-                "status": "healthy"
-                if vector_health.get("status") == "healthy" and embedding_healthy
-                else "degraded",
+                "status": (
+                    "healthy"
+                    if vector_health.get("status") == "healthy" and embedding_healthy
+                    else "degraded"
+                ),
                 "service": "llamaindex_store",
                 "vector_store": vector_health,
                 "embedding_model": {

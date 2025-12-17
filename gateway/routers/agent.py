@@ -27,6 +27,7 @@ from gateway.agents.unified_workflow import (
 from gateway.llm.client import LLMClient
 from gateway.routers.tools import get_tool_handler
 from gateway.utils.auth import get_bearer_token
+from gateway.utils.token_context import get_token
 from gateway.utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from gateway.utils.conversation_store import get_conversation_store
 from gateway.utils.logging import log_request, log_response
@@ -512,10 +513,19 @@ async def _crawl_urls(
                 # Index documents if embedding enabled
                 if request.enable_embedding and docs:
                     logger.info(f"Indexing {len(docs)} crawled documents")
+
+                    # Prepare headers with token
+                    index_headers = {"X-Request-ID": request_id}
+                    token = get_token()
+                    if token:
+                        index_headers["Authorization"] = f"Bearer {token}"
+                    else:
+                        logger.warning("No Bearer token available for Indexer request")
+
                     await client.post(
                         f"{agent.indexer_url}/index",
                         json={"docs": docs},
-                        headers={"X-Request-ID": request_id},
+                        headers=index_headers,
                     )
 
                 # Add crawled content

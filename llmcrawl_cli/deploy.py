@@ -718,7 +718,7 @@ def cmd_health() -> int:
         ("MCP Server", "http://localhost:8003/health", 8003),
         ("Azure DevOps MCP", "http://localhost:8004/health", 8004),
         ("Qdrant", "http://localhost:6333/healthz", 6333),
-        ("Playwright", "http://localhost:3000/json/version", 3000),
+        ("Playwright", "http://localhost:3003/json/version", 3003),
     ]
 
     healthy = 0

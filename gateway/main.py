@@ -6,8 +6,9 @@ Handles chat interactions, tool calling, and coordinates with crawler/indexer se
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from .utils.token_context import set_token
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -47,6 +48,19 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Middleware to extract Bearer token and set it in context."""
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        set_token(token)
+
+    response = await call_next(request)
+    return response
+
 
 # Add middleware
 app.add_middleware(

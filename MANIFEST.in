@@ -2,6 +2,7 @@
 include deploy/.env.example
 include deploy/docker-compose.yml
 include deploy/prometheus.yml
+include deploy/nuq.sql
 include deploy/Dockerfile.*
 recursive-include deploy/requirements *
 recursive-include deploy/grafana-provisioning *

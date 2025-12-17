@@ -71,6 +71,8 @@ Examples:
   llmcrawl deploy --init                    Initialize deployment folder
   llmcrawl deploy --up                      Start all services
   llmcrawl deploy --down                    Stop all services
+  llmcrawl deploy --status                  Check service status
+  llmcrawl deploy --health                  Check service health endpoints
   llmcrawl auth https://www.osgwiki.com     Authenticate to internal site
   llmcrawl wcd-bridge --build "\\\\winbuilds\\release\\..."
 """

@@ -73,6 +73,7 @@ exclude = ["tests*", "ref*", "logs*"]
   ".env.example",
   "Dockerfile.*",
   "prometheus.yml",
+  "nuq.sql",
   "requirements/*",
   "grafana-provisioning/*",
   "grafana-provisioning/**/*",

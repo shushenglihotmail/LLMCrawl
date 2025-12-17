@@ -119,7 +119,7 @@ $total++; if (Write-ServiceHealth "Indexer" "http://localhost:8002/health" 8002)
 $total++; if (Write-SimpleHealth "MCP Server" "http://localhost:8003/health" 8003) { $healthy++ }
 $total++; if (Write-SimpleHealth "Azure DevOps MCP" "http://localhost:8004/health" 8004) { $healthy++ }
 $total++; if (Write-SimpleHealth "Qdrant" "http://localhost:6333/healthz" 6333) { $healthy++ }
-$total++; if (Write-SimpleHealth "Playwright" "http://localhost:3000/json/version" 3000) { $healthy++ }
+$total++; if (Write-SimpleHealth "Playwright" "http://localhost:3003/health" 3003) { $healthy++ }
 
 # Summary
 Write-Host ""

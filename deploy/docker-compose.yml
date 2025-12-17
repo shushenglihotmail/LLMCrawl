@@ -26,11 +26,12 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_DB=rag_db
+      - POSTGRES_DB=firecrawl
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./nuq.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - webrag-network
     healthcheck:
@@ -57,17 +58,17 @@ services:
 
   # Playwright/Browserless Service - fallback for JS-heavy pages
   playwright:
-    image: ghcr.io/browserless/chromium
+    image: ghcr.io/firecrawl/playwright-service:latest
     container_name: web-rag-playwright
     ports:
-      - "3000:3000"
+      - "3003:3003"
     environment:
       - CONCURRENT=5
       - TIMEOUT=300000
     networks:
       - webrag-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/json/version"]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3003/health', (res) => { if (res.statusCode === 200) process.exit(0); else process.exit(1); }).on('error', (err) => process.exit(1));\""]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -83,6 +84,12 @@ services:
       - REDIS_URL=redis://redis:6379
       - REDIS_RATE_LIMIT_URL=redis://redis:6379
       - DATABASE_URL=postgres://postgres:password@postgres:5432/firecrawl
+      - NUQ_DATABASE_URL=postgres://postgres:password@postgres:5432/firecrawl
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=postgres
+      - PGPASSWORD=password
+      - PGDATABASE=firecrawl
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=postgres
@@ -93,7 +100,8 @@ services:
       - NUM_WORKERS_PER_QUEUE=1
       - PORT=3002
       - HOST=0.0.0.0
-      - PLAYWRIGHT_MICROSERVICE_URL=http://playwright:3000
+      - PLAYWRIGHT_MICROSERVICE_URL=http://playwright:3003/scrape
+      - SCRAPE_TIMEOUT=120000
     networks:
       - webrag-network
     depends_on:

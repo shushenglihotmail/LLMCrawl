@@ -41,7 +41,8 @@ Add to your VS Code `settings.json` or `.vscode/mcp.json`:
     "mcp": {
         "servers": {
             "crawler": {
-                "command": "crawler-mcp-server"
+                "command": "python",
+                "args": ["-m", "crawler_mcp_server"]
             }
         }
     }
@@ -55,8 +56,23 @@ Or with custom URL:
     "mcp": {
         "servers": {
             "crawler": {
-                "command": "crawler-mcp-server",
-                "args": ["--base-url", "http://localhost:8001"]
+                "command": "python",
+                "args": ["-m", "crawler_mcp_server", "--base-url", "http://localhost:8001"]
+            }
+        }
+    }
+}
+```
+
+**Note:** Using `python -m crawler_mcp_server` ensures VS Code can find the command regardless of PATH settings. If you have multiple Python environments, use the full path to python.exe:
+
+```json
+{
+    "mcp": {
+        "servers": {
+            "crawler": {
+                "command": "C:/path/to/venv/Scripts/python.exe",
+                "args": ["-m", "crawler_mcp_server"]
             }
         }
     }

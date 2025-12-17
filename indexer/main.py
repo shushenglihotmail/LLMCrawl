@@ -84,6 +84,8 @@ async def lifespan(app: FastAPI):
         logger.info("Indexer service shut down")
 
 
+from .utils.token_context import set_token
+
 # Create FastAPI app
 app = FastAPI(
     title="Web RAG Indexer",
@@ -91,6 +93,21 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Extract Bearer token from Authorization header and set in context."""
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        set_token(token)
+    else:
+        logger.warning("No Bearer token found in Authorization header")
+
+    response = await call_next(request)
+    return response
+
 
 # Add middleware
 app.add_middleware(

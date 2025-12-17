@@ -388,12 +388,19 @@ class ToolHandler:
         self, docs: List[Dict[str, Any]], request_id: str
     ) -> Dict[str, Any]:
         """Call the indexer service to index documents."""
+        headers = {"X-Request-ID": request_id}
+        token = get_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        else:
+            logger.warning("No Bearer token available for Indexer request")
+
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
                 response = await client.post(
                     f"{self.indexer_url}/index",
                     json={"docs": docs},
-                    headers={"X-Request-ID": request_id},
+                    headers=headers,
                 )
                 response.raise_for_status()
                 return response.json()
@@ -406,6 +413,11 @@ class ToolHandler:
         self, query: str, k: int, recency_boost_days: int, request_id: str
     ) -> Dict[str, Any]:
         """Call the indexer service to retrieve relevant documents."""
+        headers = {"X-Request-ID": request_id}
+        token = get_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
                 response = await client.post(
@@ -417,7 +429,7 @@ class ToolHandler:
                         # Accept all results, recency boost handles ranking
                         "score_threshold": 0.0,
                     },
-                    headers={"X-Request-ID": request_id},
+                    headers=headers,
                 )
                 response.raise_for_status()
                 return response.json()
@@ -593,3 +605,6 @@ def get_tool_handler() -> ToolHandler:
     if _tool_handler is None:
         _tool_handler = ToolHandler()
     return _tool_handler
+
+
+from ..utils.token_context import get_token

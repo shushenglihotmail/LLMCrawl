@@ -114,7 +114,19 @@ async def execute_agent(request: Request) -> JSONResponse:
             f"Proxying request to gateway: {json.dumps(body, indent=2)[:500]}..."
         )
 
-        # Check if we need to acquire a token
+        # Refresh token if auth is enabled
+        if config.get("auth_enabled"):
+            auth_client = config.get("auth_client")
+            if auth_client:
+                # Try silent acquisition to refresh token
+                result = auth_client.acquire_token_silent()
+                if result:
+                    config["access_token"] = result["access_token"]
+                else:
+                    # If silent refresh fails, clear the stale token
+                    config["access_token"] = None
+
+        # Check if we need to acquire a token (initial login or re-login after expiry)
         if not config.get("access_token") and config.get("auth_enabled"):
             auth_client = config.get("auth_client")
             if auth_client:
