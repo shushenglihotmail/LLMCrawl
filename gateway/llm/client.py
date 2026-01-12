@@ -62,6 +62,67 @@ class LLMClient:
         self.client = self.openai_client
         logger.info(f"Initialized LLM client: {self.provider}")
 
+    def _uses_max_completion_tokens(self, model: str) -> bool:
+        """
+        Determine if a model uses the new max_completion_tokens parameter.
+
+        GPT-5.x, newer GPT-4 variants (2024-11-20+), and o-series models
+        use max_completion_tokens instead of max_tokens.
+
+        Args:
+            model: Model name or deployment name
+
+        Returns:
+            True if model requires max_completion_tokens parameter
+        """
+        model_lower = model.lower()
+
+        # GPT-5.x models
+        if "gpt-5" in model_lower:
+            return True
+
+        # o-series models (o1, o3, etc.)
+        if model_lower.startswith("o1") or model_lower.startswith("o3"):
+            return True
+
+        # Newer GPT-4 models with date >= 2024-11-20
+        if "gpt-4" in model_lower:
+            # Extract date pattern (YYYY-MM-DD)
+            date_match = re.search(r"(\d{4})-(\d{2})-(\d{2})", model)
+            if date_match:
+                year, month, day = map(int, date_match.groups())
+                # Compare as integer YYYYMMDD
+                date_int = year * 10000 + month * 100 + day
+                # 2024-11-20 or later
+                if date_int >= 20241120:
+                    return True
+
+        return False
+
+    def _supports_custom_temperature(self, model: str) -> bool:
+        """
+        Determine if a model supports custom temperature values.
+
+        GPT-5.x and o-series models only support temperature=1 (default).
+
+        Args:
+            model: Model name or deployment name
+
+        Returns:
+            False if model only supports default temperature, True otherwise
+        """
+        model_lower = model.lower()
+
+        # GPT-5.x models only support temperature=1
+        if "gpt-5" in model_lower:
+            return False
+
+        # o-series models only support temperature=1
+        if model_lower.startswith("o1") or model_lower.startswith("o3"):
+            return False
+
+        return True
+
     def get_model_config(self, model_name: str) -> tuple[str, str, int]:
         """
         Get Azure deployment name, provider type, and max output tokens for a given model name.
@@ -218,13 +279,34 @@ class LLMClient:
         Args:
             bearer_token: Optional Entra ID bearer token for Azure Foundry authentication
         """
+        # Determine if model uses new max_completion_tokens parameter
+        # GPT-5.x, newer GPT-4 variants (2024-11-20+), and o-series models use max_completion_tokens
+        uses_max_completion_tokens = self._uses_max_completion_tokens(model)
+
+        # Determine if model supports custom temperature
+        supports_custom_temp = self._supports_custom_temperature(model)
+
         kwargs = {
             "model": model,
             "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
             "stream": stream,
         }
+
+        # Only add temperature if the model supports custom values
+        if supports_custom_temp:
+            kwargs["temperature"] = temperature
+        else:
+            # Log that we're using default temperature for this model
+            logger.info(
+                f"Model '{model}' only supports default temperature (1), "
+                f"ignoring requested temperature={temperature}"
+            )
+
+        # Use appropriate parameter name based on model version
+        if uses_max_completion_tokens:
+            kwargs["max_completion_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = max_tokens
 
         # Add bearer token if provided (for Azure Foundry Entra ID auth)
         if bearer_token:

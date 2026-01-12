@@ -12,6 +12,84 @@ mermaid.initialize({
     }
 });
 
+// Token refresh state
+let isRefreshingToken = false;
+let refreshPromise = null;
+
+// Enhanced fetch with automatic token refresh on 401
+async function fetchWithAuth(url, options = {}) {
+    let response = await fetch(url, options);
+
+    // If 401 and auth is enabled, try to refresh token
+    if (response.status === 401 && currentConfig && currentConfig.authEnabled) {
+        console.log('Received 401, attempting token refresh...');
+
+        // If already refreshing, wait for that operation
+        if (isRefreshingToken) {
+            await refreshPromise;
+            // Retry original request after refresh completes
+            response = await fetch(url, options);
+            return response;
+        }
+
+        // Start token refresh
+        isRefreshingToken = true;
+        refreshPromise = refreshToken();
+
+        try {
+            const refreshResult = await refreshPromise;
+
+            if (refreshResult.success) {
+                console.log('Token refreshed successfully, retrying request...');
+                // Retry original request with new token
+                response = await fetch(url, options);
+            } else if (refreshResult.requiresLogin) {
+                // Silent refresh failed, need interactive login
+                console.warn('Token expired, prompting user to re-authenticate...');
+                showAuthenticationPrompt();
+                throw new Error('Authentication required. Please sign in again.');
+            } else {
+                throw new Error(refreshResult.error || 'Token refresh failed');
+            }
+        } finally {
+            isRefreshingToken = false;
+            refreshPromise = null;
+        }
+    }
+
+    return response;
+}
+
+// Refresh access token
+async function refreshToken() {
+    try {
+        const response = await fetch('/api/auth/refresh', {
+            method: 'POST'
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('Token refresh error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Show authentication prompt to user
+function showAuthenticationPrompt() {
+    const chatMessages = document.getElementById('chatMessages');
+    const authPrompt = document.createElement('div');
+    authPrompt.className = 'auth-prompt-message';
+    authPrompt.innerHTML = `
+        <div class="auth-prompt-content">
+            <div class="auth-icon">🔐</div>
+            <h3>Authentication Required</h3>
+            <p>Your session has expired. Please sign in again to continue.</p>
+            <button onclick="window.location.href='/api/auth/login'" class="auth-button">Sign In</button>
+        </div>
+    `;
+    chatMessages.appendChild(authPrompt);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
 // Render Mermaid diagrams in markdown content
 let mermaidCounter = 0;
 async function renderMermaidDiagrams(container) {
@@ -352,7 +430,7 @@ document.addEventListener('DOMContentLoaded', function () {
 // Load initial configuration and models
 async function loadConfig() {
     try {
-        const response = await fetch('/api/config');
+        const response = await fetchWithAuth('/api/config');
         currentConfig = await response.json();
         await loadModels();
         applyWorkflowRestrictions(currentWorkflow);
@@ -364,7 +442,7 @@ async function loadConfig() {
 // Load available models from gateway
 async function loadModels() {
     try {
-        const response = await fetch('/api/models');
+        const response = await fetchWithAuth('/api/models');
         if (!response.ok) {
             throw new Error('Failed to fetch models');
         }
@@ -483,7 +561,7 @@ async function submitRequest() {
 
         console.log('Sending request:', JSON.stringify(requestBody, null, 2));
 
-        const response = await fetch('/api/agent/execute', {
+        const response = await fetchWithAuth('/api/agent/execute', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -615,7 +693,7 @@ async function exportToMarkdown() {
             freshness_days: 365
         };
 
-        const response = await fetch(currentConfig.serviceUrl + '/api/v1/export/markdown', {
+        const response = await fetchWithAuth(currentConfig.serviceUrl + '/api/v1/export/markdown', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -691,7 +769,7 @@ async function stopRequest() {
 
         // Then, call the server to cancel the agent
         console.log('Sending cancel request to server for conversation:', conversationId);
-        const cancelResponse = await fetch(`/api/agent/cancel/${conversationId}`, {
+        const cancelResponse = await fetchWithAuth(`/api/agent/cancel/${conversationId}`, {
             method: 'POST'
         });
         const cancelData = await cancelResponse.json();
@@ -703,7 +781,7 @@ async function stopRequest() {
         while (attempts < maxAttempts) {
             await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
 
-            const statusResponse = await fetch(`/api/agent/status/${conversationId}`);
+            const statusResponse = await fetchWithAuth(`/api/agent/status/${conversationId}`);
             const statusData = await statusResponse.json();
             console.log('Status check:', statusData);
 
