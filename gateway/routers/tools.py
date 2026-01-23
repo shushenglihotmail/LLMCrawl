@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
 from typing import Any, Dict, List
 
 import httpx
@@ -21,9 +20,10 @@ from ..utils.metrics import (
     record_crawl_request,
     record_tool_call,
 )
+from ..utils.token_context import get_token
 from ..utils.tool_constants import (
+    AZURE_DEVOPS_TOOLS,
     TOOL_AZURE_DEVOPS_GET_FILE,
-    TOOL_AZURE_DEVOPS_SEARCH_CODE,
     TOOL_CRAWL_AND_REFRESH,
     TOOL_INDEX_FILES,
     TOOL_LIST_FILES,
@@ -88,10 +88,7 @@ class ToolHandler:
                 result = await self._handle_mcp_tool(
                     tool_name, arguments, request_id, initiator
                 )
-            elif tool_name in [
-                TOOL_AZURE_DEVOPS_SEARCH_CODE,
-                TOOL_AZURE_DEVOPS_GET_FILE,
-            ]:
+            elif tool_name in AZURE_DEVOPS_TOOLS:
                 result = await self._handle_azure_devops_tool(
                     tool_name, arguments, request_id, initiator
                 )
@@ -188,7 +185,7 @@ class ToolHandler:
                     max_results=max_results,
                     request_id=request_id,
                 )
-            except Exception as e:
+            except Exception:
                 crawl_status = "error"
                 record_crawl_request(
                     status=crawl_status,
@@ -495,7 +492,8 @@ class ToolHandler:
             Tool result
         """
         azure_devops_mcp_url = os.getenv(
-            "AZURE_DEVOPS_MCP_URL", "http://azure-devops-mcp-server:8004"
+            "AZURE_DEVOPS_MCP_URL",
+            "http://azure-devops-mcp-server:8004",
         )
 
         # Check for azdo:// URI in file_path argument
@@ -596,6 +594,3 @@ def get_tool_handler() -> ToolHandler:
     if _tool_handler is None:
         _tool_handler = ToolHandler()
     return _tool_handler
-
-
-from ..utils.token_context import get_token

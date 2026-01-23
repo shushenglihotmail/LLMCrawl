@@ -7,6 +7,7 @@ recursive search by default. No client-side recursive processing needed.
 """
 
 import base64
+import difflib
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -186,7 +187,8 @@ class AzureDevOpsClient:
 
         if content and len(content) > 0:
             first_match = content[0]
-            return first_match.get("charOffset", "")
+            char_offset: str = first_match.get("charOffset", "")
+            return char_offset
 
         return ""
 
@@ -266,6 +268,314 @@ class AzureDevOpsClient:
             raise
         except Exception as e:
             logger.error(f"Get file content error: {e}", exc_info=True)
+            raise
+
+    async def get_commit_changes(
+        self,
+        commit_id: str,
+        project: Optional[str] = None,
+        repository: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get changes associated with a specific commit.
+
+        See: https://learn.microsoft.com/en-us/rest/api/azure/devops/git/commits/get-changes
+
+        Args:
+            commit_id: The commit ID (SHA-1 hash)
+            project: Project name override (default: use configured project)
+            repository: Repository name override (default: use configured repository)
+
+        Returns:
+            Dict with commit changes including modified files and their changes
+        """
+        if not self.pat:
+            raise RuntimeError("Not authenticated - PAT required")
+
+        # Use configured values if not specified
+        get_project = project or self.project
+        get_repository = repository or self.repository
+
+        try:
+            url = (
+                f"{self.base_url}/{get_project}/_apis/git/repositories/"
+                f"{get_repository}/commits/{commit_id}/changes"
+            )
+            params = {"api-version": "7.1"}
+
+            logger.info(
+                f"Fetching commit changes: commit={commit_id}, "
+                f"project={get_project}, repo={get_repository}"
+            )
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    url, headers=self._get_auth_header(), params=params
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            # Extract relevant information
+            changes = data.get("changes", [])
+            commit_info = {
+                "commit_id": commit_id,
+                "change_count": data.get("changeCount", 0),
+                "changes": [],
+            }
+
+            # Process each change
+            change_types_count: Dict[str, int] = {}
+            for change in changes:
+                item = change.get("item", {})
+                change_type = change.get("changeType", "")
+                change_info = {
+                    "change_type": change_type,
+                    "path": item.get("path", ""),
+                    "git_object_type": item.get("gitObjectType", ""),
+                    "url": item.get("url", ""),
+                }
+
+                # Include source information if this is a rename
+                if "sourceServerItem" in change:
+                    change_info["source_path"] = change.get("sourceServerItem", "")
+
+                commit_info["changes"].append(change_info)
+
+                # Track change types for summary
+                change_types_count[change_type] = (
+                    change_types_count.get(change_type, 0) + 1
+                )
+
+            # Add a summary to help LLM generate a response
+            summary_parts = [
+                f"Found {len(changes)} file(s) changed in commit {commit_id[:8]}..."
+            ]
+            for change_type, count in change_types_count.items():
+                summary_parts.append(f"{count} {change_type.lower()}")
+            commit_info["summary"] = ". ".join(summary_parts) + "."
+
+            logger.info(f"Retrieved {len(changes)} changes for commit {commit_id}")
+            return commit_info
+
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to get commit changes: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Get commit changes error: {e}", exc_info=True)
+            raise
+
+    async def get_commit_file_diff(
+        self,
+        commit_id: str,
+        file_path: str,
+        project: Optional[str] = None,
+        repository: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get line-level diff for a specific file in a commit.
+
+        Fetches both original and modified blob content and computes unified diff client-side.
+        This is the official supported method since Azure DevOps public API doesn't return
+        diff blocks directly.
+
+        Args:
+            commit_id: The commit ID (SHA-1 hash)
+            file_path: Path to the file in the repository
+            project: Project name override (default: use configured project)
+            repository: Repository name override (default: use configured repository)
+
+        Returns:
+            Dict with line-level diff in unified diff format
+        """
+        if not self.pat:
+            raise RuntimeError("Not authenticated - PAT required")
+
+        # Use configured values if not specified
+        get_project = project or self.project
+        get_repository = repository or self.repository
+
+        # Normalize the file path - remove leading slash for comparison
+        normalized_path = file_path.lstrip("/")
+
+        try:
+            # Step 1: Get the commit to find its parent
+            commit_url = (
+                f"{self.base_url}/{get_project}/_apis/git/repositories/"
+                f"{get_repository}/commits/{commit_id}"
+            )
+            commit_params = {"api-version": "7.1"}
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                commit_response = await client.get(
+                    commit_url, headers=self._get_auth_header(), params=commit_params
+                )
+                commit_response.raise_for_status()
+                commit_data = commit_response.json()
+
+            # Get parent commit (compare against parent to show what this commit changed)
+            parents = commit_data.get("parents", [])
+            base_version = parents[0] if parents else None
+
+            if not base_version:
+                return {
+                    "commit_id": commit_id,
+                    "file_path": file_path,
+                    "base_commit": None,
+                    "diff": "",
+                    "summary": f"Commit {commit_id[:8]}... has no parent (initial commit)",
+                    "error": "Cannot show diff for initial commit (no parent to compare against)",
+                }
+
+            # Step 2: Get the changes list to find blob IDs
+            changes_url = (
+                f"{self.base_url}/{get_project}/_apis/git/repositories/"
+                f"{get_repository}/commits/{commit_id}/changes"
+            )
+            changes_params = {"api-version": "7.1"}
+
+            logger.info(
+                f"Fetching changes for commit {commit_id[:8]}... to find blob IDs for {normalized_path}"
+            )
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                changes_response = await client.get(
+                    changes_url, headers=self._get_auth_header(), params=changes_params
+                )
+                changes_response.raise_for_status()
+                changes_data = changes_response.json()
+
+            # Step 3: Find the specific file in changes
+            target_change = None
+            for change in changes_data.get("changes", []):
+                item = change.get("item", {})
+                item_path = item.get("path", "").lstrip("/")
+
+                if item_path.lower() == normalized_path.lower():
+                    target_change = change
+                    break
+
+            if not target_change:
+                return {
+                    "commit_id": commit_id,
+                    "file_path": file_path,
+                    "base_commit": base_version,
+                    "diff": "",
+                    "summary": f"File {file_path} not found in commit {commit_id[:8]}... changes",
+                    "warning": "File not modified in this commit",
+                }
+
+            # Get blob IDs
+            item = target_change.get("item", {})
+            change_type = target_change.get("changeType", "")
+            original_object_id = item.get("originalObjectId")  # Parent version blob ID
+            object_id = item.get("objectId")  # Current version blob ID
+
+            logger.info(
+                f"Found file: change_type={change_type}, "
+                f"original_blob={original_object_id[:8] if original_object_id else 'None'}..., "
+                f"new_blob={object_id[:8] if object_id else 'None'}..."
+            )
+
+            # Step 4: Fetch blob content for both versions
+            original_content = ""
+            new_content = ""
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Fetch original version (if exists)
+                if original_object_id and change_type != "add":
+                    original_blob_url = (
+                        f"{self.base_url}/{get_project}/_apis/git/repositories/"
+                        f"{get_repository}/blobs/{original_object_id}"
+                    )
+                    blob_params = {"api-version": "7.1"}
+                    try:
+                        original_response = await client.get(
+                            original_blob_url,
+                            headers=self._get_auth_header(),
+                            params=blob_params,
+                        )
+                        original_response.raise_for_status()
+                        original_content = original_response.text
+                    except httpx.HTTPError as e:
+                        logger.warning(f"Failed to fetch original blob: {e}")
+                        original_content = ""
+
+                # Fetch new version (if exists)
+                if object_id and change_type != "delete":
+                    new_blob_url = (
+                        f"{self.base_url}/{get_project}/_apis/git/repositories/"
+                        f"{get_repository}/blobs/{object_id}"
+                    )
+                    blob_params = {"api-version": "7.1"}
+                    try:
+                        new_response = await client.get(
+                            new_blob_url,
+                            headers=self._get_auth_header(),
+                            params=blob_params,
+                        )
+                        new_response.raise_for_status()
+                        new_content = new_response.text
+                    except httpx.HTTPError as e:
+                        logger.warning(f"Failed to fetch new blob: {e}")
+                        new_content = ""
+
+            # Step 5: Compute unified diff using Python's difflib
+            original_lines = original_content.splitlines(keepends=True)
+            new_lines = new_content.splitlines(keepends=True)
+
+            diff_lines = list(
+                difflib.unified_diff(
+                    original_lines,
+                    new_lines,
+                    fromfile=f"a/{file_path}",
+                    tofile=f"b/{file_path}",
+                    lineterm="",
+                )
+            )
+
+            # Join diff lines into single string
+            unified_diff = "\n".join(diff_lines)
+
+            # Count additions and deletions
+            lines_added = sum(
+                1
+                for line in diff_lines
+                if line.startswith("+") and not line.startswith("+++")
+            )
+            lines_removed = sum(
+                1
+                for line in diff_lines
+                if line.startswith("-") and not line.startswith("---")
+            )
+
+            # Build summary
+            summary_parts = [f"Diff for {file_path} in commit {commit_id[:8]}..."]
+            if lines_added > 0:
+                summary_parts.append(f"+{lines_added} lines")
+            if lines_removed > 0:
+                summary_parts.append(f"-{lines_removed} lines")
+            summary = ". ".join(summary_parts) + "."
+
+            logger.info(
+                f"Generated diff for {file_path}: +{lines_added} -{lines_removed} lines"
+            )
+
+            return {
+                "commit_id": commit_id,
+                "file_path": file_path,
+                "base_commit": base_version,
+                "change_type": change_type,
+                "lines_added": lines_added,
+                "lines_removed": lines_removed,
+                "diff": unified_diff,
+                "summary": summary,
+            }
+
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to get commit file diff: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Get commit file diff error: {e}", exc_info=True)
             raise
 
     async def test_connection(self) -> bool:

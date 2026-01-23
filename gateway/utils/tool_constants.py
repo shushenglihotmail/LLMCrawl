@@ -10,10 +10,14 @@ across the codebase (tool handlers, limit settings, tool descriptions).
 # =============================================================================
 TOOL_AZURE_DEVOPS_SEARCH_CODE = "search_azure_devops_code"
 TOOL_AZURE_DEVOPS_GET_FILE = "get_azure_devops_file"
+TOOL_AZURE_DEVOPS_GET_COMMIT_CHANGES = "get_azure_devops_commit_changes"
+TOOL_AZURE_DEVOPS_GET_COMMIT_FILE_DIFF = "get_azure_devops_commit_file_diff"
 
 AZURE_DEVOPS_TOOLS = [
     TOOL_AZURE_DEVOPS_SEARCH_CODE,
     TOOL_AZURE_DEVOPS_GET_FILE,
+    TOOL_AZURE_DEVOPS_GET_COMMIT_CHANGES,
+    TOOL_AZURE_DEVOPS_GET_COMMIT_FILE_DIFF,
 ]
 
 # =============================================================================
@@ -48,6 +52,9 @@ TOOL_QUERY_COMPOSITION_DB = "query_composition_db"
 DEFAULT_TOOL_LIMITS = {
     # Azure DevOps MCP tools - 30 calls
     TOOL_AZURE_DEVOPS_SEARCH_CODE: 30,
+    TOOL_AZURE_DEVOPS_GET_FILE: 30,
+    TOOL_AZURE_DEVOPS_GET_COMMIT_CHANGES: 5,
+    TOOL_AZURE_DEVOPS_GET_COMMIT_FILE_DIFF: 10,
     TOOL_AZURE_DEVOPS_GET_FILE: 30,
     # Crawler tool - 20 calls
     TOOL_CRAWL_AND_REFRESH: 20,

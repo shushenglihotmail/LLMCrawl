@@ -178,6 +178,92 @@ class AzureDevOpsMCPServer:
                     "required": ["file_path"],
                 },
             },
+            {
+                "name": "get_azure_devops_commit_changes",
+                "description": (
+                    "Get the changes associated with a specific commit in Azure DevOps. "
+                    "This returns the list of files that were added, modified, deleted, "
+                    "or renamed in the commit. Use this when you need to understand "
+                    "what changes were made in a specific commit."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "commit_id": {
+                            "type": "string",
+                            "description": (
+                                "The commit ID (SHA-1 hash) to retrieve changes for. "
+                                "Example: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0'"
+                            ),
+                        },
+                        "project": {
+                            "type": "string",
+                            "description": (
+                                "Azure DevOps project name override. "
+                                "Use this to query a different project than the "
+                                "default. Example: 'OS', 'OneCore'"
+                            ),
+                        },
+                        "repository": {
+                            "type": "string",
+                            "description": (
+                                "Azure DevOps repository name override. "
+                                "Use this to query a different repository than "
+                                "the default. Example: 'os.2020', "
+                                "'WindowsCompositionData'"
+                            ),
+                        },
+                    },
+                    "required": ["commit_id"],
+                },
+            },
+            {
+                "name": "get_azure_devops_commit_file_diff",
+                "description": (
+                    "Get line-level diff for a specific file in a commit. This shows "
+                    "the actual code changes (additions and deletions) for a particular "
+                    "file that was modified in the commit. Use this after getting commit "
+                    "changes to see the detailed line-by-line diff of what changed in a file."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "commit_id": {
+                            "type": "string",
+                            "description": (
+                                "The commit ID (SHA-1 hash) to retrieve diff for. "
+                                "Example: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0'"
+                            ),
+                        },
+                        "file_path": {
+                            "type": "string",
+                            "description": (
+                                "Path to the file in the repository to get diff for. "
+                                "Should match the path from get_azure_devops_commit_changes. "
+                                "Example: '/src/main.cpp' or 'src/main.cpp'"
+                            ),
+                        },
+                        "project": {
+                            "type": "string",
+                            "description": (
+                                "Azure DevOps project name override. "
+                                "Use this to query a different project than the "
+                                "default. Example: 'OS', 'OneCore'"
+                            ),
+                        },
+                        "repository": {
+                            "type": "string",
+                            "description": (
+                                "Azure DevOps repository name override. "
+                                "Use this to query a different repository than "
+                                "the default. Example: 'os.2020', "
+                                "'WindowsCompositionData'"
+                            ),
+                        },
+                    },
+                    "required": ["commit_id", "file_path"],
+                },
+            },
         ]
 
     async def initialize(self) -> bool:
@@ -224,6 +310,10 @@ class AzureDevOpsMCPServer:
                 return await self._handle_search_code(arguments)
             elif tool_name == "get_azure_devops_file":
                 return await self._handle_get_file(arguments)
+            elif tool_name == "get_azure_devops_commit_changes":
+                return await self._handle_get_commit_changes(arguments)
+            elif tool_name == "get_azure_devops_commit_file_diff":
+                return await self._handle_get_commit_file_diff(arguments)
             else:
                 return {"error": f"Unknown tool: {tool_name}"}
 
@@ -274,6 +364,43 @@ class AzureDevOpsMCPServer:
 
         result = await self.client.get_file_content(
             file_path, branch, project=project, repository=repository
+        )
+
+        return {"success": True, **result}
+
+    async def _handle_get_commit_changes(
+        self, arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Handle get commit changes tool."""
+        commit_id = arguments.get("commit_id")
+        project = arguments.get("project")
+        repository = arguments.get("repository")
+
+        if not commit_id:
+            return {"error": "commit_id parameter is required"}
+
+        result = await self.client.get_commit_changes(
+            commit_id, project=project, repository=repository
+        )
+
+        return {"success": True, **result}
+
+    async def _handle_get_commit_file_diff(
+        self, arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Handle get commit file diff tool."""
+        commit_id = arguments.get("commit_id")
+        file_path = arguments.get("file_path")
+        project = arguments.get("project")
+        repository = arguments.get("repository")
+
+        if not commit_id:
+            return {"error": "commit_id parameter is required"}
+        if not file_path:
+            return {"error": "file_path parameter is required"}
+
+        result = await self.client.get_commit_file_diff(
+            commit_id, file_path, project=project, repository=repository
         )
 
         return {"success": True, **result}
