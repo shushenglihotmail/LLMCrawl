@@ -985,3 +985,276 @@ function extractMarkdownFromElement(element) {
 
     return result;
 }
+
+// ===================== Claude Authentication Functions =====================
+
+let claudeAuthState = {
+    enabled: false,
+    authenticated: false,
+    models: []
+};
+
+// Check Claude auth status on load
+async function checkClaudeAuthStatus() {
+    try {
+        const response = await fetch('/api/claude/auth/status');
+        const status = await response.json();
+        claudeAuthState.enabled = status.enabled;
+        claudeAuthState.authenticated = status.authenticated;
+
+        // Show/hide Claude button and update its state
+        updateClaudeAuthUI();
+
+        // If authenticated, load Claude models
+        if (status.authenticated) {
+            await loadClaudeModels();
+        }
+
+        return status;
+    } catch (error) {
+        console.error('Failed to check Claude auth status:', error);
+        return { enabled: false, authenticated: false };
+    }
+}
+
+// Update Claude auth button UI
+function updateClaudeAuthUI() {
+    const claudeBtn = document.getElementById('claudeAuthBtn');
+
+    if (claudeBtn) {
+        // Always show the button
+        claudeBtn.style.display = 'block';
+
+        if (claudeAuthState.authenticated) {
+            claudeBtn.classList.add('authenticated');
+            claudeBtn.textContent = '✓ Claude Active';
+            claudeBtn.title = 'Claude authenticated - Click to sign out';
+        } else {
+            claudeBtn.classList.remove('authenticated');
+            claudeBtn.textContent = '⚡ Use Claude';
+            claudeBtn.title = 'Authenticate with Claude Code';
+        }
+    }
+}
+
+// Toggle Claude authentication
+async function toggleClaudeAuth() {
+    const claudeBtn = document.getElementById('claudeAuthBtn');
+
+    if (claudeAuthState.authenticated) {
+        // Sign out
+        if (confirm('Sign out from Claude Code?')) {
+            try {
+                claudeBtn.disabled = true;
+                const response = await fetch('/api/claude/auth/logout', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    claudeAuthState.authenticated = false;
+                    claudeAuthState.models = [];
+                    updateClaudeAuthUI();
+
+                    // Remove Claude models from model selector
+                    removeClaudeModelsFromSelector();
+
+                    showToast('✓ Signed out from Claude successfully', 'success');
+                } else {
+                    showToast('✗ Failed to sign out', 'error');
+                }
+            } catch (error) {
+                console.error('Claude logout error:', error);
+                showToast('✗ Sign out failed: ' + error.message, 'error');
+            } finally {
+                claudeBtn.disabled = false;
+            }
+        }
+    } else {
+        // Sign in
+        try {
+            claudeBtn.disabled = true;
+            claudeBtn.textContent = '⏳ Authenticating...';
+
+            showToast('🔐 Opening browser for Claude SSO login...', 'info');
+
+            const response = await fetch('/api/claude/auth/login', {
+                method: 'POST'
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                claudeAuthState.authenticated = true;
+                updateClaudeAuthUI();
+
+                // Load Claude models and add to selector
+                await loadClaudeModels();
+                addClaudeModelsToSelector();
+
+                showToast('✓ Claude authentication successful!', 'success');
+            } else {
+                showToast('✗ Authentication failed: ' + result.detail, 'error');
+            }
+        } catch (error) {
+            console.error('Claude login error:', error);
+            showToast('✗ Authentication failed: ' + error.message, 'error');
+        } finally {
+            claudeBtn.disabled = false;
+            updateClaudeAuthUI();
+        }
+    }
+}
+
+// Load Claude models
+async function loadClaudeModels() {
+    try {
+        const response = await fetch('/api/claude/models');
+        const data = await response.json();
+        claudeAuthState.models = data.models || [];
+        console.log('Loaded Claude models:', claudeAuthState.models);
+        return claudeAuthState.models;
+    } catch (error) {
+        console.error('Failed to load Claude models:', error);
+        return [];
+    }
+}
+
+// Add Claude models to model selector
+function addClaudeModelsToSelector() {
+    const modelSelector = document.getElementById('modelSelector');
+
+    if (!modelSelector || claudeAuthState.models.length === 0) {
+        return;
+    }
+
+    // Remove existing Claude models first
+    removeClaudeModelsFromSelector();
+
+    // Add separator if there are existing models
+    if (modelSelector.options.length > 0) {
+        const separator = document.createElement('option');
+        separator.disabled = true;
+        separator.textContent = '──────────';
+        modelSelector.appendChild(separator);
+    }
+
+    // Add Claude models
+    claudeAuthState.models.forEach(model => {
+        const option = document.createElement('option');
+        option.value = model.name;
+        option.textContent = model.display_name || model.name;
+        option.dataset.provider = 'claude';
+        modelSelector.appendChild(option);
+    });
+
+    // Select first Claude model
+    if (claudeAuthState.models.length > 0) {
+        const firstClaudeOption = Array.from(modelSelector.options).find(
+            opt => opt.dataset.provider === 'claude'
+        );
+        if (firstClaudeOption) {
+            modelSelector.value = firstClaudeOption.value;
+        }
+    }
+}
+
+// Remove Claude models from model selector
+function removeClaudeModelsFromSelector() {
+    const modelSelector = document.getElementById('modelSelector');
+    if (!modelSelector) return;
+
+    // Remove all options with provider='claude' and surrounding separator
+    const optionsToRemove = [];
+    let foundSeparatorBefore = false;
+
+    for (let i = 0; i < modelSelector.options.length; i++) {
+        const option = modelSelector.options[i];
+
+        // Check if this is a separator before Claude models
+        if (option.disabled && option.textContent.includes('─')) {
+            foundSeparatorBefore = true;
+            optionsToRemove.push(i);
+            continue;
+        }
+
+        if (option.dataset.provider === 'claude') {
+            optionsToRemove.push(i);
+        } else if (foundSeparatorBefore && option.dataset.provider !== 'claude') {
+            // Reset flag if we find non-Claude model after separator
+            foundSeparatorBefore = false;
+        }
+    }
+
+    // Remove in reverse order to maintain indices
+    for (let i = optionsToRemove.length - 1; i >= 0; i--) {
+        modelSelector.remove(optionsToRemove[i]);
+    }
+
+    // Select first available model if current selection was Claude
+    if (modelSelector.selectedOptions.length === 0 && modelSelector.options.length > 0) {
+        modelSelector.selectedIndex = 0;
+    }
+}
+
+// Show toast notification
+function showToast(message, type = 'info') {
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        background: ${type === 'success' ? '#38ef7d' : type === 'error' ? '#ff6b6b' : '#667eea'};
+        color: white;
+        padding: 15px 25px;
+        border-radius: 10px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        z-index: 10000;
+        font-weight: 600;
+        animation: slideInRight 0.3s ease;
+    `;
+
+    document.body.appendChild(toast);
+
+    // Remove after 4 seconds
+    setTimeout(() => {
+        toast.style.animation = 'slideOutRight 0.3s ease';
+        setTimeout(() => {
+            document.body.removeChild(toast);
+        }, 300);
+    }, 4000);
+}
+
+// Add CSS animations for toast
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideInRight {
+        from {
+            transform: translateX(400px);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+
+    @keyframes slideOutRight {
+        from {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        to {
+            transform: translateX(400px);
+            opacity: 0;
+        }
+    }
+`;
+document.head.appendChild(style);
+
+// Initialize Claude auth on page load
+window.addEventListener('DOMContentLoaded', async () => {
+    await checkClaudeAuthStatus();
+});

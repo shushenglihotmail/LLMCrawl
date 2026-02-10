@@ -235,6 +235,18 @@ class LLMClient:
                     stream,
                     bearer_token,
                 )
+            elif provider_type == "claude":
+                # Direct Claude API (console.anthropic.com) with OAuth token
+                return await self._claude_chat_completion(
+                    deployment_name,
+                    messages,
+                    tools,
+                    tool_choice,
+                    temperature,
+                    effective_max_tokens,
+                    stream,
+                    bearer_token,
+                )
             else:
                 return await self._openai_chat_completion(
                     deployment_name,
@@ -594,6 +606,251 @@ class LLMClient:
             record_llm_request(
                 model=model,
                 provider="anthropic",
+                status=status,
+                duration=duration,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                request_size=request_size,
+                response_size=response_size,
+                error_type=error_type,
+            )
+
+    async def _claude_chat_completion(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]],
+        tool_choice: str,
+        temperature: float,
+        max_tokens: int,
+        stream: bool,
+        bearer_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Handle Claude chat completion via direct Claude API (console.anthropic.com).
+
+        This uses the official Claude API with OAuth bearer token authentication.
+
+        Args:
+            bearer_token: Required OAuth bearer token from Claude authentication
+        """
+        if not bearer_token:
+            raise Exception(
+                "Claude authentication required. Please authenticate with Claude Code first."
+            )
+
+        # Claude API endpoint
+        claude_api_endpoint = "https://api.anthropic.com/v1/messages"
+
+        start_time = time.time()
+        request_size = len(json.dumps(messages))
+        status = "success"
+        error_type = None
+        prompt_tokens = 0
+        completion_tokens = 0
+        response_size = 0
+
+        # Convert OpenAI message format to Anthropic/Claude format
+        anthropic_messages = []
+        system_message = None
+
+        for msg in messages:
+            role = msg["role"]
+            if role == "system":
+                system_message = msg["content"]
+            elif role in ["user", "assistant"]:
+                # Handle tool_calls in assistant messages
+                if role == "assistant" and msg.get("tool_calls"):
+                    # Anthropic format: content blocks with tool_use
+                    content_blocks = []
+                    if msg.get("content"):
+                        content_blocks.append({"type": "text", "text": msg["content"]})
+                    for tool_call in msg["tool_calls"]:
+                        content_blocks.append(
+                            {
+                                "type": "tool_use",
+                                "id": tool_call["id"],
+                                "name": tool_call["function"]["name"],
+                                "input": json.loads(tool_call["function"]["arguments"]),
+                            }
+                        )
+                    anthropic_messages.append(
+                        {"role": "assistant", "content": content_blocks}
+                    )
+                else:
+                    anthropic_messages.append({"role": role, "content": msg["content"]})
+            elif role == "tool":
+                # Convert tool result to Anthropic format
+                anthropic_messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": msg.get("tool_call_id"),
+                                "content": msg["content"],
+                            }
+                        ],
+                    }
+                )
+
+        # Prepare request payload
+        logger.info(f"Claude API request: model={model}, max_tokens={max_tokens}")
+
+        payload = {
+            "model": model,
+            "messages": anthropic_messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+
+        if system_message:
+            payload["system"] = system_message
+
+        # Add tools if provided (convert OpenAI format to Anthropic format)
+        if tools:
+            anthropic_tools = []
+            for tool in tools:
+                anthropic_tool = {
+                    "name": tool["function"]["name"],
+                    "description": tool["function"]["description"],
+                    "input_schema": tool["function"]["parameters"],
+                }
+                anthropic_tools.append(anthropic_tool)
+            payload["tools"] = anthropic_tools
+
+            # Convert tool_choice
+            if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+                # Force specific tool
+                payload["tool_choice"] = {
+                    "type": "tool",
+                    "name": tool_choice["function"]["name"],
+                }
+            elif tool_choice == "auto":
+                payload["tool_choice"] = {"type": "auto"}
+            elif tool_choice == "none":
+                payload["tool_choice"] = {"type": "none"}
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {bearer_token}",
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "claude-code-20250219",  # Required for OAuth tokens
+        }
+
+        try:
+            logger.info("Using Claude OAuth token for authentication")
+
+            # Use longer timeout for large context windows
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                response = await client.post(
+                    claude_api_endpoint,
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            # Convert Claude/Anthropic response to OpenAI format
+            content = ""
+            tool_calls = []
+
+            if data.get("content"):
+                for block in data["content"]:
+                    if block.get("type") == "text":
+                        content += block.get("text", "")
+                    elif block.get("type") == "tool_use":
+                        # Convert Anthropic tool_use to OpenAI tool_call format
+                        tool_calls.append(
+                            {
+                                "id": block["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": block["name"],
+                                    "arguments": json.dumps(block["input"]),
+                                },
+                            }
+                        )
+
+            stop_reason = data.get("stop_reason")
+            usage = data.get("usage", {})
+
+            # Extract token usage for metrics
+            prompt_tokens = usage.get("input_tokens", 0)
+            completion_tokens = usage.get("output_tokens", 0)
+
+            logger.info(
+                f"Claude API response: stop_reason={stop_reason}, "
+                f"input_tokens={usage.get('input_tokens')}, "
+                f"output_tokens={usage.get('output_tokens')}"
+            )
+
+            # Warn if response was truncated
+            if stop_reason == "max_tokens":
+                logger.warning(
+                    f"Claude response truncated at max_tokens={max_tokens}. "
+                    f"Consider increasing max_output_tokens in config."
+                )
+
+            # Map Anthropic finish reason to OpenAI format
+            finish_reason_map = {
+                "end_turn": "stop",
+                "max_tokens": "length",
+                "stop_sequence": "stop",
+                "tool_use": "tool_calls",
+            }
+            finish_reason = finish_reason_map.get(stop_reason, "stop")
+
+            result = {
+                "content": content,
+                "finish_reason": finish_reason,
+                "tool_calls": tool_calls,
+            }
+
+            response_size = len(json.dumps(result))
+            return result
+
+        except httpx.HTTPStatusError as e:
+            status = "error"
+            error_type = f"HTTP{e.response.status_code}"
+
+            # Try to extract error details from response
+            error_detail = e.response.text
+            try:
+                error_json = e.response.json()
+                if "error" in error_json:
+                    error_detail = error_json["error"].get("message", error_detail)
+            except Exception:
+                pass
+
+            logger.error(f"Claude API error ({e.response.status_code}): {error_detail}")
+
+            # Check for auth errors
+            if e.response.status_code == 401:
+                raise Exception(
+                    "Claude authentication failed. Please re-authenticate with Claude Code."
+                ) from e
+
+            raise Exception(
+                f"Claude API error ({e.response.status_code}): {error_detail}"
+            ) from e
+        except httpx.TimeoutException as e:
+            status = "error"
+            error_type = "TimeoutException"
+            logger.error(f"Claude API timeout after 180s")
+            raise Exception(
+                f"Claude API timeout: Request took too long (>180s). Try reducing context size."
+            ) from e
+        except Exception as e:
+            status = "error"
+            error_type = type(e).__name__
+            logger.error(f"Claude chat completion failed: {e}")
+            raise Exception(f"Claude API error: {str(e)}") from e
+        finally:
+            duration = time.time() - start_time
+            record_llm_request(
+                model=model,
+                provider="claude",
                 status=status,
                 duration=duration,
                 prompt_tokens=prompt_tokens,

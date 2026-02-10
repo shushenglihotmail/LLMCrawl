@@ -52,11 +52,16 @@ app = FastAPI(
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    """Middleware to extract Bearer token and set it in context."""
+    """Middleware to extract Bearer token and provider info, set in context."""
     auth_header = request.headers.get("Authorization")
+    provider = request.headers.get(
+        "X-Provider-Auth", "azure"
+    )  # Default to azure for backward compatibility
+
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header.split(" ")[1]
-        set_token(token)
+        set_token(token, provider)
+        logger.debug(f"Set bearer token with provider: {provider}")
 
     response = await call_next(request)
     return response

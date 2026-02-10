@@ -30,8 +30,10 @@ from fastapi.staticfiles import StaticFiles
 
 # Handle both direct execution and module import
 try:
+    from .claude_auth import ClaudeAuthClient, create_claude_auth_client_from_env
     from .msal_auth import MSALAuthClient, create_auth_client_from_env
 except ImportError:
+    from claude_auth import ClaudeAuthClient, create_claude_auth_client_from_env
     from msal_auth import MSALAuthClient, create_auth_client_from_env
 
 # Configure logging
@@ -62,6 +64,11 @@ config = {
     "auth_enabled": False,
     "auth_client": None,
     "access_token": None,
+    # Claude authentication
+    "claude_auth_enabled": False,
+    "claude_auth_client": None,
+    # Allow manual override via env var
+    "claude_access_token": os.getenv("CLAUDE_ACCESS_TOKEN"),
 }
 
 
@@ -114,51 +121,99 @@ async def execute_agent(request: Request) -> JSONResponse:
             f"Proxying request to gateway: {json.dumps(body, indent=2)[:500]}..."
         )
 
-        # Refresh token if auth is enabled
-        if config.get("auth_enabled"):
-            auth_client = config.get("auth_client")
-            if auth_client:
-                # Try silent acquisition to refresh token
-                result = auth_client.acquire_token_silent()
-                if result:
-                    config["access_token"] = result["access_token"]
-                else:
-                    # If silent refresh fails, clear the stale token
-                    config["access_token"] = None
+        # Determine which authentication to use based on model's provider_type
+        model_name = body.get("model", "")
+        use_claude_auth = False
 
-        # Check if we need to acquire a token (initial login or re-login after expiry)
-        if not config.get("access_token") and config.get("auth_enabled"):
-            auth_client = config.get("auth_client")
-            if auth_client:
-                logger.info("No token available, triggering sign-in...")
-                try:
-                    # Try to get token (will prompt for interactive login, no device code fallback)
-                    token = auth_client.get_token(
-                        force_interactive=False, allow_device_code=False
+        # Check if this is a Claude model request
+        if model_name:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(
+                        f"{config['gateway_url']}/api/models/available"
                     )
-                    config["access_token"] = token
-                    account = auth_client.get_account_info()
-                    logger.info(
-                        f"User signed in: {account.get('username') if account else 'unknown'}"
-                    )
-                except Exception as e:
-                    error_msg = str(e)
-                    logger.error(f"Authentication failed: {error_msg}")
+                    if response.status_code == 200:
+                        all_models = response.json()
+                        for m in all_models:
+                            if (
+                                m.get("name") == model_name
+                                and m.get("provider_type") == "claude"
+                            ):
+                                use_claude_auth = True
+                                logger.info(
+                                    f"Model '{model_name}' uses Claude authentication"
+                                )
+                                break
+            except Exception as e:
+                logger.warning(f"Failed to check model provider type: {e}")
 
-                    # Return error immediately so frontend can display it
-                    return JSONResponse(
-                        status_code=401,
-                        content={
-                            "error": error_msg,
-                            "response": f"❌ **Authentication Failed**\n\n{error_msg}\n\nPlease try again or contact your administrator.",
-                        },
-                    )
-
-        # Prepare headers with bearer token if authenticated
+        # Prepare headers with appropriate bearer token
         headers = {}
-        if config.get("access_token"):
-            headers["Authorization"] = f"Bearer {config['access_token']}"
-            logger.info("Including bearer token in gateway request")
+
+        if use_claude_auth:
+            # Use Claude authentication
+            if config.get("claude_access_token"):
+                headers["Authorization"] = f"Bearer {config['claude_access_token']}"
+                headers[
+                    "X-Provider-Auth"
+                ] = "claude"  # Signal to gateway which provider token this is
+                logger.info("Including Claude bearer token in gateway request")
+            elif config.get("claude_auth_enabled"):
+                # Try to get Claude token
+                claude_auth_client = config.get("claude_auth_client")
+                if claude_auth_client:
+                    try:
+                        # Run blocking auth in thread (avoid freezing FastAPI)
+                        token = await asyncio.to_thread(
+                            claude_auth_client.get_token, force_interactive=False
+                        )
+                        config["claude_access_token"] = token
+                        headers["Authorization"] = f"Bearer {token}"
+                        headers["X-Provider-Auth"] = "claude"
+                        logger.info("Acquired and included Claude bearer token")
+                    except Exception as e:
+                        error_msg = (
+                            f"Claude authentication required but failed: {str(e)}"
+                        )
+                        logger.error(error_msg)
+                        return JSONResponse(
+                            status_code=401,
+                            content={
+                                "error": error_msg,
+                                "response": f"❌ **Claude Authentication Required**\n\n{error_msg}\n\nPlease click 'Use Claude' button to authenticate.",
+                            },
+                        )
+        else:
+            # Use Azure Foundry authentication (default)
+            # Refresh token if auth is enabled
+            if config.get("auth_enabled"):
+                auth_client = config.get("auth_client")
+                if auth_client:
+                    # Try silent acquisition to refresh token
+                    result = auth_client.acquire_token_silent()
+                    if result:
+                        config["access_token"] = result["access_token"]
+                    else:
+                        # If silent refresh fails, clear the stale token
+                        config["access_token"] = None
+
+            # Check if we need a token
+            if not config.get("access_token") and config.get("auth_enabled"):
+                # Don't try interactive auth here - it blocks the server!
+                # Instead return error asking user to sign in first
+                logger.warning("No authentication token available")
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": "Authentication required",
+                        "response": "🔐 **Authentication Required**\n\nPlease sign in first:\n\n1. Click your browser's back button\n2. Look for a sign-in prompt or\n3. Refresh the page to trigger authentication\n\n**For the 'Missing state parameter' error:**\n- Your Azure admin needs to configure the app registration\n- See docs/TROUBLESHOOTING_AUTH.md for details",
+                    },
+                )
+
+            # Add Azure Foundry token if available
+            if config.get("access_token"):
+                headers["Authorization"] = f"Bearer {config['access_token']}"
+                logger.info("Including Azure Foundry bearer token in gateway request")
 
         async with httpx.AsyncClient(
             timeout=600.0
@@ -215,7 +270,7 @@ async def get_auth_status() -> JSONResponse:
 
 @app.post("/api/auth/login")
 async def login() -> JSONResponse:
-    """Trigger interactive login flow."""
+    """Trigger interactive login flow - WARNING: This will block the server temporarily."""
     if not config["auth_enabled"]:
         raise HTTPException(status_code=400, detail="Authentication not enabled")
 
@@ -224,13 +279,18 @@ async def login() -> JSONResponse:
         if not auth_client:
             raise HTTPException(status_code=500, detail="Auth client not initialized")
 
-        # Get token (will prompt for interactive login)
+        logger.info(
+            "⚠️  Starting interactive authentication - server will be blocked briefly"
+        )
+        logger.info("🌐 Opening browser for sign-in...")
+
+        # Get token (will prompt for interactive login - THIS BLOCKS!)
         token = auth_client.get_token(force_interactive=False)
         config["access_token"] = token
 
         account = auth_client.get_account_info()
         logger.info(
-            f"User signed in: {account.get('username') if account else 'unknown'}"
+            f"✓ User signed in: {account.get('username') if account else 'unknown'}"
         )
 
         return JSONResponse(
@@ -248,8 +308,16 @@ async def login() -> JSONResponse:
         )
 
     except Exception as e:
-        logger.error(f"Login failed: {e}")
-        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+        error_msg = str(e)
+        logger.error(f"Login failed: {error_msg}")
+
+        # Provide helpful context for common errors
+        if "state" in error_msg.lower():
+            error_msg += "\n\nℹ️  Azure AD app needs configuration. See docs/TROUBLESHOOTING_AUTH.md"
+
+        raise HTTPException(
+            status_code=401, detail=f"Authentication failed: {error_msg}"
+        )
 
 
 @app.post("/api/auth/logout")
@@ -298,6 +366,113 @@ async def refresh_token() -> JSONResponse:
         return JSONResponse({"success": False, "error": str(e)})
 
 
+# ===================== Claude Authentication Endpoints =====================
+
+
+@app.get("/api/claude/auth/status")
+async def get_claude_auth_status() -> JSONResponse:
+    """Get Claude authentication status."""
+    if not config["claude_auth_enabled"]:
+        return JSONResponse({"enabled": False, "authenticated": False})
+
+    has_token = config.get("claude_access_token") is not None
+    return JSONResponse(
+        {
+            "enabled": True,
+            "authenticated": has_token,
+        }
+    )
+
+
+@app.post("/api/claude/auth/login")
+async def claude_login() -> JSONResponse:
+    """Trigger Claude OAuth browser flow."""
+    try:
+        # Initialize Claude auth client if not already done
+        if not config.get("claude_auth_client"):
+            logger.info("Initializing Claude OAuth client...")
+            claude_auth_client = create_claude_auth_client_from_env()
+            config["claude_auth_client"] = claude_auth_client
+            config["claude_auth_enabled"] = True
+        else:
+            claude_auth_client = config.get("claude_auth_client")
+
+        # Get token (will open browser for SSO login)
+        token = claude_auth_client.get_token(force_interactive=False)
+        config["claude_access_token"] = token
+
+        logger.info("User signed in to Claude Code successfully")
+
+        return JSONResponse(
+            {
+                "success": True,
+                "message": "Successfully authenticated with Claude Code",
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Claude login failed: {e}")
+        raise HTTPException(
+            status_code=401, detail=f"Claude authentication failed: {str(e)}"
+        )
+
+
+@app.post("/api/claude/auth/logout")
+async def claude_logout() -> JSONResponse:
+    """Sign out from Claude (clear cached tokens)."""
+    try:
+        claude_auth_client = config.get("claude_auth_client")
+        if claude_auth_client:
+            claude_auth_client.sign_out()
+
+        config["claude_access_token"] = None
+        logger.info("User signed out from Claude Code")
+
+        return JSONResponse({"success": True})
+
+    except Exception as e:
+        logger.error(f"Claude logout failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Logout failed: {str(e)}")
+
+
+@app.get("/api/claude/models")
+async def get_claude_models() -> JSONResponse:
+    """Get available Claude models."""
+    # Return Claude models based on what's configured
+    try:
+        # Parse LLM_MODELS from gateway to find Claude models
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(f"{config['gateway_url']}/api/models/available")
+            response.raise_for_status()
+            all_models = response.json()
+
+            # Filter for Claude models (provider_type == "claude")
+            claude_models = [
+                m for m in all_models if m.get("provider_type") == "claude"
+            ]
+
+            return JSONResponse({"models": claude_models})
+
+    except httpx.HTTPError as e:
+        logger.error(f"Failed to fetch Claude models: {e}")
+        # Return default Claude models if gateway call fails
+        default_models = [
+            {
+                "name": "claude-sonnet-4",
+                "display_name": "Claude Sonnet 4",
+                "provider_type": "claude",
+                "max_output_tokens": 64000,
+            },
+            {
+                "name": "claude-3-5-sonnet-latest",
+                "display_name": "Claude 3.5 Sonnet",
+                "provider_type": "claude",
+                "max_output_tokens": 8192,
+            },
+        ]
+        return JSONResponse({"models": default_models})
+
+
 @app.post("/api/agent/cancel/{conversation_id}")
 async def cancel_agent_request(conversation_id: str) -> JSONResponse:
     """Cancel an active agent request."""
@@ -344,9 +519,10 @@ def load_environment_file(deploy_dir: Optional[str] = None) -> None:
 
     Searches for .env file in the following order:
     1. Custom deploy directory (if provided via --deploy-dir)
-    2. Current working directory (.env)
-    3. llmcrawl-deploy folder (./llmcrawl-deploy/.env) - for wheel package deployment
-    4. User's home directory (~/.llmcrawl/.env)
+    2. Script's directory (clients/hichat/.env) - preferred location
+    3. Current working directory (.env)
+    4. llmcrawl-deploy folder (./llmcrawl-deploy/.env) - for wheel package deployment
+    5. User's home directory (~/.llmcrawl/.env)
     """
     env_locations = []
 
@@ -359,6 +535,7 @@ def load_environment_file(deploy_dir: Optional[str] = None) -> None:
     # Standard search locations
     env_locations.extend(
         [
+            SCRIPT_DIR / ".env",  # Script's directory (clients/hichat/.env)
             Path.cwd() / ".env",
             Path.cwd() / "llmcrawl-deploy" / ".env",
             Path.home() / ".llmcrawl" / ".env",
@@ -432,14 +609,15 @@ def main() -> None:
     # Update global config
     config["gateway_url"] = args.gateway.rstrip("/")
 
-    # Always initialize MSAL authentication (required for Azure Foundry)
+    # Initialize MSAL authentication (required for Azure Foundry)
+    # Don't exit if this fails - allow server to start and show error in UI
     try:
         logger.info("Initializing MSAL authentication...")
         auth_client = create_auth_client_from_env()
         config["auth_enabled"] = True
         config["auth_client"] = auth_client
 
-        # Try to get token silently (from cache)
+        # Try to get token silently (from cache) - non-blocking
         result = auth_client.acquire_token_silent()
         if result:
             config["access_token"] = result["access_token"]
@@ -455,12 +633,17 @@ def main() -> None:
             )
 
     except Exception as e:
-        logger.error(f"Authentication initialization failed: {e}")
-        logger.error("Entra ID authentication is required to use Azure Foundry.")
-        logger.error(
-            "Please ensure ENTRA_CLIENT_ID, ENTRA_TENANT_ID, and AZURE_FOUNDRY_SCOPE are set."
+        logger.warning(f"Authentication initialization failed: {e}")
+        logger.warning("Azure Foundry authentication is not configured.")
+        logger.warning(
+            "Please ensure ENTRA_CLIENT_ID, ENTRA_TENANT_ID, and AZURE_FOUNDRY_SCOPE are set in .env file."
         )
-        raise SystemExit(1)
+        logger.warning(
+            "Server will start but authentication will be required before making requests."
+        )
+        # Don't exit - let server start anyway
+        config["auth_enabled"] = False
+        config["auth_client"] = None
 
     url = f"http://{args.host}:{args.port}"
 

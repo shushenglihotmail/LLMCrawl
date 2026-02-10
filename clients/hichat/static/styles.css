@@ -542,6 +542,42 @@ button {
     transform: scale(1.05);
 }
 
+/* Claude Auth Button */
+.claude-auth-btn {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.3s;
+    white-space: nowrap;
+}
+
+.claude-auth-btn:hover {
+    background: linear-gradient(135deg, #ff5252 0%, #dd4a5f 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 107, 107, 0.4);
+}
+
+.claude-auth-btn.authenticated {
+    background: linear-gradient(135deg, #38ef7d 0%, #11998e 100%);
+    border-color: rgba(56, 239, 125, 0.3);
+}
+
+.claude-auth-btn.authenticated:hover {
+    background: linear-gradient(135deg, #2dd96f 0%, #0f8979 100%);
+    box-shadow: 0 4px 12px rgba(56, 239, 125, 0.4);
+}
+
+.claude-auth-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
 /* Chat Area Wrapper (for hover actions) */
 .chat-area-wrapper {
     flex: 1;

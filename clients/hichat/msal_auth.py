@@ -57,7 +57,7 @@ class MSALAuthClient:
         self.cache_file = cache_file
         self.cache = self._load_cache()
 
-        # Create MSAL public client application
+        # Create MSAL public client application with explicit redirect URI
         self.app = msal.PublicClientApplication(
             client_id=self.client_id,
             authority=self.authority,
@@ -148,12 +148,16 @@ class MSALAuthClient:
             Exception: If authentication fails
         """
         logger.info("Starting interactive authentication flow")
+        logger.info(
+            "A browser window will open for sign-in. Please complete authentication there."
+        )
 
         try:
-            # Use interactive flow with browser
+            # Use interactive flow with browser and explicit port
             result = self.app.acquire_token_interactive(
                 scopes=self.scopes,
                 prompt="select_account",  # Allow account selection
+                port=8765,  # Use fixed port for redirect URI
                 # login_hint can be used to pre-fill username if known
             )
 
