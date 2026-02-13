@@ -1028,6 +1028,10 @@ except json.JSONDecodeError:
 # Default limit for unknown tools
 DEFAULT_TOOL_ROUND_LIMIT = int(os.getenv("MAX_TOOL_ROUNDS", "5"))
 
+# Maximum elapsed time for agent loop before forcing a final answer (seconds)
+# Default 900s = 15 min.  Covers ~5 Opus rounds comfortably.
+MAX_AGENT_ELAPSED_SECONDS = int(os.getenv("MAX_AGENT_ELAPSED_SECONDS", "900"))
+
 
 def _get_tool_limit(tool_name: str) -> int:
     """Get the round limit for a specific tool. Returns -1 for unlimited."""
@@ -1087,6 +1091,8 @@ async def _execute_llm_with_tools(
     tool_round = 0
     # Track per-tool usage
     tool_usage: Dict[str, int] = {}
+    # Track elapsed time for time-budget enforcement
+    agent_start_time = time.monotonic()
 
     # Log tools
     if tools:
@@ -1118,6 +1124,51 @@ async def _execute_llm_with_tools(
                 f"Request cancelled during tool round {tool_round}: {conversation_id}"
             )
             return "*Request was cancelled by user.*", None
+
+        # ── Time-budget enforcement ──────────────────────────────────
+        elapsed = time.monotonic() - agent_start_time
+        if elapsed > MAX_AGENT_ELAPSED_SECONDS:
+            logger.warning(
+                f"Agent time budget exceeded ({elapsed:.0f}s > "
+                f"{MAX_AGENT_ELAPSED_SECONDS}s) after {tool_round - 1} tool "
+                f"rounds.  Forcing final answer."
+            )
+            # Ask the LLM to wrap up with what it has — no more tools
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": response.get("content") or "",
+                    "tool_calls": response["tool_calls"],
+                }
+            )
+            # Add a synthetic tool result informing the model
+            for tc in response["tool_calls"]:
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.get("id", "budget"),
+                        "content": (
+                            "⏱️ Time budget exceeded — please provide your "
+                            "best answer now using the information already gathered."
+                        ),
+                    }
+                )
+            # Final LLM call with NO tools so it cannot request more
+            wrap_response = await llm_client.chat_completion(
+                model=request.model or "gpt-4",
+                messages=messages,
+                tools=None,
+                tool_choice="none",
+                bearer_token=bearer_token,
+            )
+            wrap_text = wrap_response.get("content") or ""
+            wrap_tokens = wrap_response.get("usage", {}).get("total_tokens")
+            budget_note = (
+                f"\n\n---\n*⏱️ Response generated under time budget "
+                f"({elapsed:.0f}s elapsed, {tool_round - 1} tool rounds). "
+                f"Some tool calls were skipped.*"
+            )
+            return (wrap_text + budget_note), wrap_tokens
 
         # Check which tools have exceeded their limits
         exceeded_tools = _check_tool_limits(response["tool_calls"], tool_usage)

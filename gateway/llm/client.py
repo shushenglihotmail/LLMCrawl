@@ -58,6 +58,11 @@ class LLMClient:
         if self.anthropic_endpoint:
             logger.info(f"Anthropic endpoint configured: {self.anthropic_endpoint}")
 
+        # Claude Bridge configuration (host-side Claude Code CLI bridge)
+        self.claude_bridge_url = os.getenv("CLAUDE_BRIDGE_URL")
+        if self.claude_bridge_url:
+            logger.info(f"Claude Bridge configured: {self.claude_bridge_url}")
+
         # For backward compatibility
         self.client = self.openai_client
         logger.info(f"Initialized LLM client: {self.provider}")
@@ -162,6 +167,15 @@ class LLMClient:
                     )
                     return deployment_name, provider_type, max_output_tokens
 
+            # Model not found in config — check if it's a Claude model
+            # discovered from the bridge at startup
+            from gateway.utils.claude_bridge_manager import get_claude_bridge_manager
+
+            bridge_mgr = get_claude_bridge_manager()
+            if bridge_mgr.is_claude_model(model_name):
+                logger.info(f"Model '{model_name}' routed to Claude Bridge")
+                return model_name, "claude", DEFAULT_MAX_RESPONSE_TOKENS
+
             # Model not found in config, assume OpenAI with default
             logger.warning(
                 f"Model '{model_name}' not found in LLM_MODELS config, assuming OpenAI"
@@ -224,7 +238,16 @@ class LLMClient:
                 )
 
             # Route to appropriate client based on provider type
-            if provider_type == "anthropic":
+            if provider_type == "claude":
+                return await self._claude_bridge_chat_completion(
+                    deployment_name,
+                    messages,
+                    tools,
+                    tool_choice,
+                    temperature,
+                    effective_max_tokens,
+                )
+            elif provider_type == "anthropic":
                 return await self._anthropic_chat_completion(
                     deployment_name,
                     messages,
@@ -603,6 +626,149 @@ class LLMClient:
                 error_type=error_type,
             )
 
+    async def _claude_bridge_chat_completion(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]],
+        tool_choice: str,
+        temperature: float,
+        max_tokens: int,
+    ) -> Dict[str, Any]:
+        """Handle chat completion via the host-side Claude Bridge service.
+
+        The bridge wraps the Claude Code CLI subprocess on the Windows host.
+        The gateway (running in Docker) communicates with it over HTTP, using
+        the same pattern as the Windows Composition Bridge.
+        """
+        if not self.claude_bridge_url:
+            raise Exception(
+                "Claude Bridge not configured. Set CLAUDE_BRIDGE_URL "
+                "(e.g. http://host.docker.internal:8006)."
+            )
+
+        start_time = time.time()
+        request_size = len(json.dumps(messages))
+        status = "success"
+        error_type = None
+        prompt_tokens = 0
+        completion_tokens = 0
+        response_size = 0
+
+        # Build bridge request payload
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+        }
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
+        if temperature is not None:
+            payload["temperature"] = temperature
+
+        # If tools were provided, embed their descriptions in a system prompt
+        # with explicit JSON format so Claude can reason about and call them.
+        if tools:
+            tool_schemas = []
+            for tool in tools:
+                fn = tool.get("function", {})
+                schema_entry = {
+                    "name": fn.get("name", ""),
+                    "description": fn.get("description", ""),
+                    "parameters": fn.get("parameters", {}),
+                }
+                tool_schemas.append(schema_entry)
+
+            tools_json = json.dumps(tool_schemas, indent=2)
+            tools_text = (
+                "You have access to the following tools:\n\n"
+                f"{tools_json}\n\n"
+                "IMPORTANT: When you need to call a tool, you MUST respond with "
+                "ONLY a JSON object in this EXACT format (no other text before or after):\n"
+                "```json\n"
+                "{\n"
+                '  "tool_name": "<tool_name>",\n'
+                '  "arguments": { <arguments matching the tool\'s parameters> }\n'
+                "}\n"
+                "```\n\n"
+                "Rules for tool calling:\n"
+                "1. Output ONLY the JSON block when calling a tool — no explanation before or after\n"
+                "2. Use the exact tool name from the list above\n"
+                "3. Include all required parameters\n"
+                "4. If you do NOT need to call a tool, respond normally with text\n"
+                "5. Call only ONE tool at a time"
+            )
+            payload["system_prompt"] = tools_text
+
+        try:
+            async with httpx.AsyncClient(timeout=1860.0) as client:
+                response = await client.post(
+                    f"{self.claude_bridge_url.rstrip('/')}/chat",
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            content = data.get("content", "")
+            usage = data.get("usage", {})
+            prompt_tokens = usage.get("input_tokens", 0)
+            completion_tokens = usage.get("output_tokens", 0)
+
+            result = {
+                "content": content,
+                "role": "assistant",
+                "finish_reason": data.get("finish_reason", "end_turn"),
+                "usage": usage,
+            }
+
+            response_size = len(json.dumps(result))
+
+            # If tools were passed, try to detect JSON tool calls in the text
+            if tools and not result.get("tool_calls"):
+                converted = self._try_convert_json_to_tool_call(content, tools)
+                if converted:
+                    logger.info(
+                        f"Claude bridge: converted JSON to tool call: "
+                        f"{converted['function']['name']}"
+                    )
+                    result["tool_calls"] = [converted]
+                    result["content"] = self._strip_json_from_content(content)
+
+            return result
+
+        except httpx.HTTPStatusError as e:
+            status = "error"
+            error_type = "HTTPStatusError"
+            detail = e.response.text[:500]
+            logger.error(
+                f"Claude Bridge HTTP error: {e.response.status_code} - {detail}"
+            )
+            raise Exception(
+                f"Claude Bridge error ({e.response.status_code}): {detail}"
+            ) from e
+        except httpx.TimeoutException:
+            status = "error"
+            error_type = "TimeoutException"
+            logger.error("Claude Bridge timeout after 1860s")
+            raise Exception("Claude Bridge timeout: request took too long (>1860s)")
+        except Exception as e:
+            status = "error"
+            error_type = type(e).__name__
+            logger.error(f"Claude Bridge chat failed: {e}")
+            raise Exception(f"Claude Bridge error: {str(e)}") from e
+        finally:
+            duration = time.time() - start_time
+            record_llm_request(
+                model=model,
+                provider="claude_bridge",
+                status=status,
+                duration=duration,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                request_size=request_size,
+                response_size=response_size,
+                error_type=error_type,
+            )
+
     async def _stream_completion(
         self, **kwargs
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -664,8 +830,11 @@ class LLMClient:
         """
         Try to detect and convert JSON text in response to a proper tool call.
 
-        Some LLMs output tool call parameters as JSON text instead of using the
-        function calling API. This method detects such patterns and converts them.
+        Handles two formats:
+        1. Explicit format: {"tool_name": "...", "arguments": {...}}
+           (used by Claude Bridge with our tool prompt)
+        2. Implicit format: JSON whose keys match a tool's required parameters
+           (fallback for LLMs that output raw parameter JSON)
 
         Args:
             content: The response content text
@@ -677,46 +846,32 @@ class LLMClient:
         if not content:
             return None
 
-        # Try to extract JSON from the content
-        # Use a smarter approach that handles nested braces in string values
-        json_str = None
+        # Build a set of valid tool names for quick lookup
+        valid_tool_names = {t.get("function", {}).get("name", "") for t in tools}
 
-        # First, try to find JSON in code blocks
-        code_block_match = re.search(r"```json?\s*(\{.*?\})\s*```", content, re.DOTALL)
-        if code_block_match:
-            json_str = code_block_match.group(1)
-        else:
-            # Try to find JSON starting at beginning or after newline
-            # Match from { to the last } that makes valid JSON
-            start_patterns = [r"^\s*\{", r"\n\s*\{"]
-            for pattern in start_patterns:
-                match = re.search(pattern, content)
-                if match:
-                    # Found a potential JSON start, try to extract valid JSON
-                    start_idx = match.end() - 1  # Include the {
-                    # Try progressively longer substrings until we get valid JSON
-                    for end_idx in range(start_idx + 2, len(content) + 1):
-                        candidate = content[start_idx:end_idx]
-                        if candidate.count("{") == candidate.count("}"):
-                            try:
-                                json.loads(candidate)
-                                json_str = candidate
-                                break
-                            except json.JSONDecodeError:
-                                continue
-                    if json_str:
-                        break
-
-        if not json_str:
+        # Extract JSON from the content
+        parsed_json = self._extract_json_from_text(content)
+        if parsed_json is None:
             return None
 
-        try:
-            parsed_json = json.loads(json_str)
-        except json.JSONDecodeError:
-            return None
+        # --- Format 1: Explicit {"tool_name": "...", "arguments": {...}} ---
+        if "tool_name" in parsed_json and parsed_json["tool_name"] in valid_tool_names:
+            tool_name = parsed_json["tool_name"]
+            arguments = parsed_json.get("arguments", {})
+            return {
+                "id": f"call_{uuid.uuid4().hex[:24]}",
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": (
+                        json.dumps(arguments)
+                        if isinstance(arguments, dict)
+                        else str(arguments)
+                    ),
+                },
+            }
 
-        # Check if the JSON matches any of our tool schemas
-        # For crawl_and_refresh, we expect: query, and optionally seed_urls, freshness_days, depth
+        # --- Format 2: Implicit — JSON keys match tool parameters ---
         for tool in tools:
             tool_name = tool.get("function", {}).get("name", "")
             tool_params = (
@@ -724,10 +879,8 @@ class LLMClient:
             )
 
             if tool_name == TOOL_CRAWL_AND_REFRESH:
-                # Check if JSON has the expected fields for crawl_and_refresh
+                # Special case: crawl_and_refresh needs "query"
                 if "query" in parsed_json:
-                    # This looks like a crawl_and_refresh call!
-                    # Build the tool call structure
                     return {
                         "id": f"call_{uuid.uuid4().hex[:24]}",
                         "type": "function",
@@ -736,13 +889,10 @@ class LLMClient:
                             "arguments": json.dumps(parsed_json),
                         },
                     }
-
-            # Generic check: if JSON keys match tool parameter names
             elif tool_params:
                 required_params = (
                     tool.get("function", {}).get("parameters", {}).get("required", [])
                 )
-                # Check if all required params are present in the JSON
                 if required_params and all(
                     param in parsed_json for param in required_params
                 ):
@@ -754,6 +904,45 @@ class LLMClient:
                             "arguments": json.dumps(parsed_json),
                         },
                     }
+
+        return None
+
+    def _extract_json_from_text(self, content: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract a JSON object from text content.
+
+        Tries multiple strategies:
+        1. JSON in ```json code blocks
+        2. JSON starting at beginning of text
+        3. JSON after a newline
+        """
+        if not content:
+            return None
+
+        # Strategy 1: JSON in code blocks
+        code_block_match = re.search(r"```json?\s*(\{.*?\})\s*```", content, re.DOTALL)
+        if code_block_match:
+            try:
+                return json.loads(code_block_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # Strategy 2 & 3: JSON starting at beginning or after newline
+        start_patterns = [r"^\s*\{", r"\n\s*\{"]
+        for pattern in start_patterns:
+            match = re.search(pattern, content)
+            if match:
+                start_idx = match.end() - 1  # Include the {
+                # Try progressively longer substrings until valid JSON
+                for end_idx in range(start_idx + 2, len(content) + 1):
+                    candidate = content[start_idx:end_idx]
+                    if candidate.count("{") == candidate.count("}"):
+                        try:
+                            return json.loads(candidate)
+                        except json.JSONDecodeError:
+                            continue
+
+        return None
 
         return None
 

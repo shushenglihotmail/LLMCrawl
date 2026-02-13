@@ -176,6 +176,7 @@ Ensure Microsoft Edge is installed. The script looks for:
 - Crawler might not be running: `cd deploy && docker-compose up -d crawler`
 - Wait a few more seconds for crawler to initialize
 - Check crawler logs: `docker-compose logs --tail=20 crawler`
+- The auth tool auto-detects the correct compose file (`docker-compose.dev.yml` for development, `docker-compose.yml` for production)
 
 ### Cookie expires quickly
 Azure App Service cookies expire in 8-24 hours. Just re-run the authentication:

@@ -12,84 +12,6 @@ mermaid.initialize({
     }
 });
 
-// Token refresh state
-let isRefreshingToken = false;
-let refreshPromise = null;
-
-// Enhanced fetch with automatic token refresh on 401
-async function fetchWithAuth(url, options = {}) {
-    let response = await fetch(url, options);
-
-    // If 401 and auth is enabled, try to refresh token
-    if (response.status === 401 && currentConfig && currentConfig.authEnabled) {
-        console.log('Received 401, attempting token refresh...');
-
-        // If already refreshing, wait for that operation
-        if (isRefreshingToken) {
-            await refreshPromise;
-            // Retry original request after refresh completes
-            response = await fetch(url, options);
-            return response;
-        }
-
-        // Start token refresh
-        isRefreshingToken = true;
-        refreshPromise = refreshToken();
-
-        try {
-            const refreshResult = await refreshPromise;
-
-            if (refreshResult.success) {
-                console.log('Token refreshed successfully, retrying request...');
-                // Retry original request with new token
-                response = await fetch(url, options);
-            } else if (refreshResult.requiresLogin) {
-                // Silent refresh failed, need interactive login
-                console.warn('Token expired, prompting user to re-authenticate...');
-                showAuthenticationPrompt();
-                throw new Error('Authentication required. Please sign in again.');
-            } else {
-                throw new Error(refreshResult.error || 'Token refresh failed');
-            }
-        } finally {
-            isRefreshingToken = false;
-            refreshPromise = null;
-        }
-    }
-
-    return response;
-}
-
-// Refresh access token
-async function refreshToken() {
-    try {
-        const response = await fetch('/api/auth/refresh', {
-            method: 'POST'
-        });
-        return await response.json();
-    } catch (error) {
-        console.error('Token refresh error:', error);
-        return { success: false, error: error.message };
-    }
-}
-
-// Show authentication prompt to user
-function showAuthenticationPrompt() {
-    const chatMessages = document.getElementById('chatMessages');
-    const authPrompt = document.createElement('div');
-    authPrompt.className = 'auth-prompt-message';
-    authPrompt.innerHTML = `
-        <div class="auth-prompt-content">
-            <div class="auth-icon">🔐</div>
-            <h3>Authentication Required</h3>
-            <p>Your session has expired. Please sign in again to continue.</p>
-            <button onclick="window.location.href='/api/auth/login'" class="auth-button">Sign In</button>
-        </div>
-    `;
-    chatMessages.appendChild(authPrompt);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
 // Render Mermaid diagrams in markdown content
 let mermaidCounter = 0;
 async function renderMermaidDiagrams(container) {
@@ -430,7 +352,7 @@ document.addEventListener('DOMContentLoaded', function () {
 // Load initial configuration and models
 async function loadConfig() {
     try {
-        const response = await fetchWithAuth('/api/config');
+        const response = await fetch('/api/config');
         currentConfig = await response.json();
         await loadModels();
         applyWorkflowRestrictions(currentWorkflow);
@@ -442,7 +364,7 @@ async function loadConfig() {
 // Load available models from gateway
 async function loadModels() {
     try {
-        const response = await fetchWithAuth('/api/models');
+        const response = await fetch('/api/models');
         if (!response.ok) {
             throw new Error('Failed to fetch models');
         }
@@ -497,6 +419,18 @@ async function submitRequest() {
     messageInput.disabled = true;
     downloadBtn.disabled = true;
     loading.classList.add('active');
+
+    // Start elapsed-time timer
+    const elapsedTimer = document.getElementById('elapsedTimer');
+    const timerStart = Date.now();
+    const timerInterval = setInterval(() => {
+        const secs = Math.floor((Date.now() - timerStart) / 1000);
+        const m = Math.floor(secs / 60);
+        const s = secs % 60;
+        elapsedTimer.textContent = m > 0
+            ? `${m}m ${s.toString().padStart(2, '0')}s elapsed`
+            : `${s}s elapsed`;
+    }, 1000);
 
     // Toggle Clear Chat button to Stop button
     isRequestInProgress = true;
@@ -561,7 +495,7 @@ async function submitRequest() {
 
         console.log('Sending request:', JSON.stringify(requestBody, null, 2));
 
-        const response = await fetchWithAuth('/api/agent/execute', {
+        const response = await fetch('/api/agent/execute', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -609,6 +543,10 @@ async function submitRequest() {
             addMessage('assistant', 'Error: ' + error.message, null, true);
         }
     } finally {
+        // Stop elapsed timer
+        clearInterval(timerInterval);
+        elapsedTimer.textContent = '';
+
         // Reset UI state
         sendBtn.disabled = false;
         messageInput.disabled = false;
@@ -661,6 +599,16 @@ function addMessage(role, content, meta = null, isError = false) {
         messageDiv.innerHTML += metaHTML;
     }
 
+    // Add per-exchange save button to assistant messages
+    if (role === 'assistant') {
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'exchange-save-btn';
+        saveBtn.title = 'Save this exchange to Markdown';
+        saveBtn.textContent = '💾';
+        saveBtn.addEventListener('click', () => saveExchange(messageDiv));
+        messageDiv.appendChild(saveBtn);
+    }
+
     chatArea.appendChild(messageDiv);
     chatArea.scrollTop = chatArea.scrollHeight;
 }
@@ -693,7 +641,7 @@ async function exportToMarkdown() {
             freshness_days: 365
         };
 
-        const response = await fetchWithAuth(currentConfig.serviceUrl + '/api/v1/export/markdown', {
+        const response = await fetch(currentConfig.serviceUrl + '/api/v1/export/markdown', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -769,7 +717,7 @@ async function stopRequest() {
 
         // Then, call the server to cancel the agent
         console.log('Sending cancel request to server for conversation:', conversationId);
-        const cancelResponse = await fetchWithAuth(`/api/agent/cancel/${conversationId}`, {
+        const cancelResponse = await fetch(`/api/agent/cancel/${conversationId}`, {
             method: 'POST'
         });
         const cancelData = await cancelResponse.json();
@@ -781,7 +729,7 @@ async function stopRequest() {
         while (attempts < maxAttempts) {
             await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
 
-            const statusResponse = await fetchWithAuth(`/api/agent/status/${conversationId}`);
+            const statusResponse = await fetch(`/api/agent/status/${conversationId}`);
             const statusData = await statusResponse.json();
             console.log('Status check:', statusData);
 
@@ -907,6 +855,65 @@ function saveConversationToMarkdown() {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     link.href = url;
     link.download = `hichat-conversation-${timestamp}.md`;
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+function saveExchange(assistantDiv) {
+    // Find the preceding user message by walking back through siblings
+    let userDiv = assistantDiv.previousElementSibling;
+    while (userDiv && !userDiv.classList.contains('user')) {
+        userDiv = userDiv.previousElementSibling;
+    }
+
+    let markdown = '# HiChat Exchange\n\n';
+    markdown += `**Date:** ${new Date().toLocaleString()}\n\n`;
+    markdown += `**Workflow:** ${currentWorkflow}\n\n`;
+    markdown += '---\n\n';
+
+    // User question
+    if (userDiv) {
+        const userContent = userDiv.querySelector('.message-content');
+        markdown += '## 👤 **User**\n\n';
+        markdown += (userContent ? userContent.textContent.trim() : '') + '\n\n';
+        markdown += '---\n\n';
+    }
+
+    // Assistant answer
+    const assistantContent = assistantDiv.querySelector('.message-content');
+    const markdownEl = assistantContent ? assistantContent.querySelector('.markdown-content') : null;
+    let answerText = '';
+    if (markdownEl) {
+        answerText = extractMarkdownFromElement(markdownEl);
+    } else if (assistantContent) {
+        answerText = assistantContent.textContent.trim();
+    }
+
+    markdown += '## 🤖 **Assistant**\n\n';
+    markdown += answerText + '\n';
+
+    // Include model/token meta if present
+    const metaEl = assistantDiv.querySelector('.message-meta');
+    if (metaEl) {
+        markdown += '\n---\n\n*' + metaEl.textContent.trim() + '*\n';
+    }
+
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    // Use first few words of user question for filename
+    let slug = '';
+    if (userDiv) {
+        const userText = userDiv.querySelector('.message-content').textContent.trim();
+        slug = '-' + userText.substring(0, 40).replace(/[^a-zA-Z0-9]+/g, '-').replace(/-+$/, '').toLowerCase();
+    }
+    link.href = url;
+    link.download = `hichat-exchange-${timestamp}${slug}.md`;
 
     document.body.appendChild(link);
     link.click();

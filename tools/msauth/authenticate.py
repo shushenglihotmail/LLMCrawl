@@ -463,9 +463,29 @@ FIRECRAWL_AUTH_STORAGE_STATE={storage_state_json}
     return True
 
 
+def _get_compose_file(deploy_dir: Path) -> str:
+    """
+    Determine which docker-compose file to use based on the environment.
+
+    - docker-compose.dev.yml: Local development (volume-mounts source code)
+    - docker-compose.yml:     Production / wheel deployment (baked into image)
+
+    Returns:
+        Filename of the compose file to use.
+    """
+    dev_compose = deploy_dir / "docker-compose.dev.yml"
+    if dev_compose.exists():
+        return "docker-compose.dev.yml"
+    return "docker-compose.yml"
+
+
 def recreate_crawler(deploy_dir: Path = DEPLOY_DIR) -> bool:
     """
     Force recreate the crawler container to reload .env.
+
+    Automatically selects the correct docker-compose file:
+    - docker-compose.dev.yml for local development (correct volume mounts)
+    - docker-compose.yml for production deployments
 
     Args:
         deploy_dir: Path to deploy directory
@@ -479,13 +499,18 @@ def recreate_crawler(deploy_dir: Path = DEPLOY_DIR) -> bool:
         print(f"❌ Deploy directory not found: {deploy_dir}")
         return False
 
+    compose_file = _get_compose_file(deploy_dir)
+    print(f"   Environment: {'development' if 'dev' in compose_file else 'production'}")
+    print(f"   Compose file: {compose_file}")
+
     try:
-        # Run docker-compose to recreate crawler
+        # Use 'docker compose' (v2 plugin) which is the modern standard
         result = subprocess.run(
             [
-                "docker-compose",
+                "docker",
+                "compose",
                 "-f",
-                "docker-compose.yml",
+                compose_file,
                 "up",
                 "-d",
                 "--force-recreate",
@@ -511,7 +536,7 @@ def recreate_crawler(deploy_dir: Path = DEPLOY_DIR) -> bool:
         print("❌ Timeout waiting for container recreation")
         return False
     except FileNotFoundError:
-        print("❌ docker-compose not found. Please install Docker.")
+        print("❌ docker compose not found. Please install Docker.")
         return False
     except Exception as e:
         print(f"❌ Error recreating crawler: {e}")
@@ -574,7 +599,9 @@ def test_authentication(url: str) -> bool:
 
     except requests.exceptions.ConnectionError:
         print("❌ Could not connect to crawler. Is it running?")
-        print("   Try: cd deploy && docker-compose up -d crawler")
+        print(
+            "   Try: cd deploy && docker compose -f docker-compose.dev.yml up -d crawler"
+        )
         return False
     except Exception as e:
         print(f"❌ Test failed: {e}")

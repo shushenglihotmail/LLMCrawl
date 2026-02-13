@@ -6,11 +6,16 @@ A production-ready, containerized Python web RAG system that enables LLMs to tri
 
 The system consists of five main services:
 
-- **Gateway Service** (Port 8000): FastAPI orchestrator with OpenAI/Azure OpenAI/Anthropic support
+- **Gateway Service** (Port 8000): FastAPI orchestrator with OpenAI/Azure OpenAI/Anthropic/Claude Bridge support
 - **Crawler Service** (Port 8001): FireCrawl + Playwright fallback + Trafilatura extraction
 - **Indexer Service** (Port 8002): LlamaIndex + Vector DB (Qdrant/pgvector) for RAG
 - **MCP Server** (Port 8003): Local file operations with semantic search
 - **Azure DevOps MCP** (Port 8004): Azure DevOps code search integration
+
+**Host-side services** (run on the host machine, accessed via `host.docker.internal`):
+
+- **WCD Bridge** (Port 8005): Windows Composition Database query bridge
+- **Claude Bridge** (Port 8006): Claude Code CLI HTTP bridge for Opus/CLI models
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -21,17 +26,23 @@ The system consists of five main services:
 ┌─────────────────────────▼───────────────────────────────────┐
 │                    Gateway API (8000)                        │
 │              LLM Orchestration & Agent                       │
-└──────┬──────────────────┼───────────────────────┬───────────┘
-       │                  │                       │
-┌──────▼──────┐   ┌───────▼───────┐      ┌───────▼───────┐
-│   Crawler   │   │    Indexer    │      │  MCP Servers  │
-│   (8001)    │   │    (8002)     │      │  (8003/8004)  │
-└──────┬──────┘   └───────┬───────┘      └───────────────┘
+└──────┬──────────────────┼───────────────┬───────────────────┘
+       │                  │               │
+┌──────▼──────┐   ┌───────▼───────┐  ┌───▼───────────┐
+│   Crawler   │   │    Indexer    │  │  MCP Servers  │
+│   (8001)    │   │    (8002)     │  │  (8003/8004)  │
+└──────┬──────┘   └───────┬───────┘  └───────────────┘
        │                  │
 ┌──────▼──────────────────▼───────────────────────────────────┐
 │                   Data Stores                                │
 │  PostgreSQL (5432) │ Qdrant (6333) │ Redis (6379)           │
 └─────────────────────────────────────────────────────────────┘
+
+Host-side Bridge Services (accessed via host.docker.internal):
+┌─────────────────┐  ┌──────────────────┐
+│  WCD Bridge     │  │  Claude Bridge   │
+│  (8005)         │  │  (8006)          │
+└─────────────────┘  └──────────────────┘
 ```
 
 📖 **See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for detailed system design and data flows.
@@ -151,11 +162,15 @@ All environment variables are in `deploy/.env`.
 
 ```bash
 # LLM Provider (required)
-OPENAI_API_KEY=your_key_here
-# OR Azure OpenAI
 LLM_PROVIDER=azure
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
-AZURE_OPENAI_API_KEY=your_key_here
+
+# Entra ID Authentication (recommended over API keys)
+ENTRA_CLIENT_ID=04b07795-8ddb-461a-bbee-02f9e1bf7b46
+ENTRA_TENANT_ID=your-tenant-id
+
+# Claude Bridge (optional, for Claude Opus via CLI)
+CLAUDE_BRIDGE_URL=http://host.docker.internal:8006
 
 # Vector Database
 VECTOR_DB=qdrant  # or pgvector
@@ -192,13 +207,15 @@ make health
 
 ### Service Endpoints
 
-| Service    | URL                           | Purpose           |
-|------------|-------------------------------|-------------------|
-| Gateway    | http://localhost:8000/health  | API orchestrator  |
-| Crawler    | http://localhost:8001/health  | Web crawling      |
-| Indexer    | http://localhost:8002/health  | Vector indexing   |
-| MCP Server | http://localhost:8003/health  | File operations   |
-| HiChat     | http://localhost:8080         | Web client        |
+| Service        | URL                           | Purpose              |
+|----------------|-------------------------------|----------------------|
+| Gateway        | http://localhost:8000/health  | API orchestrator     |
+| Crawler        | http://localhost:8001/health  | Web crawling         |
+| Indexer        | http://localhost:8002/health  | Vector indexing      |
+| MCP Server     | http://localhost:8003/health  | File operations      |
+| HiChat         | http://localhost:8080         | Web client           |
+| WCD Bridge     | http://localhost:8005         | WCD query bridge     |
+| Claude Bridge  | http://localhost:8006         | Claude Code CLI      |
 
 📖 **See [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md)** for troubleshooting guide.
 
@@ -248,7 +265,7 @@ llmcrawl deploy --up --profile monitoring
 | [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) | Crawl authenticated internal sites |
 | [docs/CRAWL_STRATEGY.md](docs/CRAWL_STRATEGY.md) | How crawling works, limitations |
 | [docs/VISUAL_OVERVIEW.md](docs/VISUAL_OVERVIEW.md) | Quick visual guide with diagrams |
-| [docs/MULTI_PROVIDER_LLM.md](docs/MULTI_PROVIDER_LLM.md) | Multi-provider LLM configuration |
+| [docs/MULTI_PROVIDER_LLM.md](docs/MULTI_PROVIDER_LLM.md) | Multi-provider LLM configuration (OpenAI, Anthropic, Claude Bridge) |
 
 ---
 
@@ -261,6 +278,7 @@ llmcrawl/
 ├── indexer/              # Document indexing service
 ├── mcp_servers/          # MCP servers (local files, Azure DevOps)
 ├── clients/hichat/       # Web client
+├── tools/                # Host-side bridge services and utilities
 ├── deploy/               # Docker and deployment configs
 ├── docs/                 # Documentation
 ├── scripts/              # Setup and utility scripts

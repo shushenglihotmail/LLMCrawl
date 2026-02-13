@@ -19,20 +19,12 @@ import logging
 import os
 import webbrowser
 from pathlib import Path
-from typing import Optional
 
 import httpx
 import uvicorn
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-
-# Handle both direct execution and module import
-try:
-    from .msal_auth import MSALAuthClient, create_auth_client_from_env
-except ImportError:
-    from msal_auth import MSALAuthClient, create_auth_client_from_env
 
 # Configure logging
 logging.basicConfig(
@@ -59,9 +51,6 @@ app = FastAPI(
 config = {
     "gateway_url": DEFAULT_GATEWAY_URL,
     "mode": "service",  # Always service mode in Python version
-    "auth_enabled": False,
-    "auth_client": None,
-    "access_token": None,
 }
 
 
@@ -83,8 +72,6 @@ async def get_config() -> dict:
         "hasServiceConfig": True,
         "hasAzureConfig": False,
         "serviceUrl": config["gateway_url"],
-        "authEnabled": config["auth_enabled"],
-        "isAuthenticated": config["access_token"] is not None,
     }
 
 
@@ -114,57 +101,11 @@ async def execute_agent(request: Request) -> JSONResponse:
             f"Proxying request to gateway: {json.dumps(body, indent=2)[:500]}..."
         )
 
-        # Refresh token if auth is enabled
-        if config.get("auth_enabled"):
-            auth_client = config.get("auth_client")
-            if auth_client:
-                # Try silent acquisition to refresh token
-                result = auth_client.acquire_token_silent()
-                if result:
-                    config["access_token"] = result["access_token"]
-                else:
-                    # If silent refresh fails, clear the stale token
-                    config["access_token"] = None
-
-        # Check if we need to acquire a token (initial login or re-login after expiry)
-        if not config.get("access_token") and config.get("auth_enabled"):
-            auth_client = config.get("auth_client")
-            if auth_client:
-                logger.info("No token available, triggering sign-in...")
-                try:
-                    # Try to get token (will prompt for interactive login, no device code fallback)
-                    token = auth_client.get_token(
-                        force_interactive=False, allow_device_code=False
-                    )
-                    config["access_token"] = token
-                    account = auth_client.get_account_info()
-                    logger.info(
-                        f"User signed in: {account.get('username') if account else 'unknown'}"
-                    )
-                except Exception as e:
-                    error_msg = str(e)
-                    logger.error(f"Authentication failed: {error_msg}")
-
-                    # Return error immediately so frontend can display it
-                    return JSONResponse(
-                        status_code=401,
-                        content={
-                            "error": error_msg,
-                            "response": f"❌ **Authentication Failed**\n\n{error_msg}\n\nPlease try again or contact your administrator.",
-                        },
-                    )
-
-        # Prepare headers with bearer token if authenticated
-        headers = {}
-        if config.get("access_token"):
-            headers["Authorization"] = f"Bearer {config['access_token']}"
-            logger.info("Including bearer token in gateway request")
-
         async with httpx.AsyncClient(
-            timeout=600.0
-        ) as client:  # 10 min timeout for long requests
+            timeout=1800.0
+        ) as client:  # 30 min timeout for slow models like Claude Opus
             response = await client.post(
-                f"{config['gateway_url']}/agent/chat", json=body, headers=headers
+                f"{config['gateway_url']}/agent/chat", json=body
             )
 
             # Return response as-is
@@ -186,116 +127,6 @@ async def execute_agent(request: Request) -> JSONResponse:
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON in request: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON in request body")
-
-
-@app.get("/api/auth/status")
-async def get_auth_status() -> JSONResponse:
-    """Get authentication status."""
-    if not config["auth_enabled"]:
-        return JSONResponse({"enabled": False, "authenticated": False})
-
-    auth_client = config.get("auth_client")
-    account = auth_client.get_account_info() if auth_client else None
-
-    return JSONResponse(
-        {
-            "enabled": True,
-            "authenticated": config.get("access_token") is not None,
-            "account": (
-                {
-                    "username": account.get("username") if account else None,
-                    "name": account.get("name") if account else None,
-                }
-                if account
-                else None
-            ),
-        }
-    )
-
-
-@app.post("/api/auth/login")
-async def login() -> JSONResponse:
-    """Trigger interactive login flow."""
-    if not config["auth_enabled"]:
-        raise HTTPException(status_code=400, detail="Authentication not enabled")
-
-    try:
-        auth_client = config.get("auth_client")
-        if not auth_client:
-            raise HTTPException(status_code=500, detail="Auth client not initialized")
-
-        # Get token (will prompt for interactive login)
-        token = auth_client.get_token(force_interactive=False)
-        config["access_token"] = token
-
-        account = auth_client.get_account_info()
-        logger.info(
-            f"User signed in: {account.get('username') if account else 'unknown'}"
-        )
-
-        return JSONResponse(
-            {
-                "success": True,
-                "account": (
-                    {
-                        "username": account.get("username") if account else None,
-                        "name": account.get("name") if account else None,
-                    }
-                    if account
-                    else None
-                ),
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Login failed: {e}")
-        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
-
-
-@app.post("/api/auth/logout")
-async def logout() -> JSONResponse:
-    """Sign out the current user."""
-    if not config["auth_enabled"]:
-        raise HTTPException(status_code=400, detail="Authentication not enabled")
-
-    try:
-        auth_client = config.get("auth_client")
-        if auth_client:
-            auth_client.sign_out()
-
-        config["access_token"] = None
-        logger.info("User signed out")
-
-        return JSONResponse({"success": True})
-
-    except Exception as e:
-        logger.error(f"Logout failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Logout failed: {str(e)}")
-
-
-@app.post("/api/auth/refresh")
-async def refresh_token() -> JSONResponse:
-    """Refresh access token silently."""
-    if not config["auth_enabled"]:
-        raise HTTPException(status_code=400, detail="Authentication not enabled")
-
-    try:
-        auth_client = config.get("auth_client")
-        if not auth_client:
-            raise HTTPException(status_code=500, detail="Auth client not initialized")
-
-        # Try silent token acquisition
-        result = auth_client.acquire_token_silent()
-        if result:
-            config["access_token"] = result["access_token"]
-            return JSONResponse({"success": True, "refreshed": True})
-        else:
-            # Token expired, need interactive login
-            return JSONResponse({"success": False, "requiresLogin": True})
-
-    except Exception as e:
-        logger.error(f"Token refresh failed: {e}")
-        return JSONResponse({"success": False, "error": str(e)})
 
 
 @app.post("/api/agent/cancel/{conversation_id}")
@@ -336,44 +167,6 @@ async def get_agent_status(conversation_id: str) -> JSONResponse:
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-def load_environment_file(deploy_dir: Optional[str] = None) -> None:
-    """Load environment variables from .env file.
-
-    Args:
-        deploy_dir: Optional path to deploy directory containing .env file
-
-    Searches for .env file in the following order:
-    1. Custom deploy directory (if provided via --deploy-dir)
-    2. Current working directory (.env)
-    3. llmcrawl-deploy folder (./llmcrawl-deploy/.env) - for wheel package deployment
-    4. User's home directory (~/.llmcrawl/.env)
-    """
-    env_locations = []
-
-    # Add custom deploy directory if provided
-    if deploy_dir:
-        custom_path = Path(deploy_dir) / ".env"
-        env_locations.append(custom_path)
-        logger.info(f"Custom deploy directory specified: {custom_path}")
-
-    # Standard search locations
-    env_locations.extend(
-        [
-            Path.cwd() / ".env",
-            Path.cwd() / "llmcrawl-deploy" / ".env",
-            Path.home() / ".llmcrawl" / ".env",
-        ]
-    )
-
-    for env_path in env_locations:
-        if env_path.exists():
-            logger.info(f"Loading environment from {env_path}")
-            load_dotenv(env_path, override=False)  # Don't override existing env vars
-            return
-
-    logger.info("No .env file found, using existing environment variables")
-
-
 def open_browser(url: str, delay: float = 1.0) -> None:
     """Open the default browser after a short delay."""
 
@@ -391,14 +184,8 @@ def open_browser(url: str, delay: float = 1.0) -> None:
 
 def main() -> None:
     """Main entry point."""
-    # Parse args first to get deploy_dir if specified
     parser = argparse.ArgumentParser(
         description="HiChat Web Client - AI Chat Interface for LLMCrawl"
-    )
-    parser.add_argument(
-        "--deploy-dir",
-        type=str,
-        help="Path to deploy directory containing .env file (e.g., ../../deploy)",
     )
     parser.add_argument(
         "--port",
@@ -426,41 +213,8 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Load environment variables from .env file if available
-    load_environment_file(deploy_dir=args.deploy_dir)
-
     # Update global config
     config["gateway_url"] = args.gateway.rstrip("/")
-
-    # Always initialize MSAL authentication (required for Azure Foundry)
-    try:
-        logger.info("Initializing MSAL authentication...")
-        auth_client = create_auth_client_from_env()
-        config["auth_enabled"] = True
-        config["auth_client"] = auth_client
-
-        # Try to get token silently (from cache)
-        result = auth_client.acquire_token_silent()
-        if result:
-            config["access_token"] = result["access_token"]
-            account = auth_client.get_account_info()
-            logger.info(
-                f"Signed in from cache: {account.get('username') if account else 'unknown'}"
-            )
-        else:
-            # No cached token - user will need to sign in on first request
-            logger.info("No cached token found.")
-            logger.info(
-                "You will be prompted to sign in when you send your first message."
-            )
-
-    except Exception as e:
-        logger.error(f"Authentication initialization failed: {e}")
-        logger.error("Entra ID authentication is required to use Azure Foundry.")
-        logger.error(
-            "Please ensure ENTRA_CLIENT_ID, ENTRA_TENANT_ID, and AZURE_FOUNDRY_SCOPE are set."
-        )
-        raise SystemExit(1)
 
     url = f"http://{args.host}:{args.port}"
 
@@ -469,8 +223,6 @@ def main() -> None:
     print("=" * 60)
     print(f"  Gateway URL:  {config['gateway_url']}")
     print(f"  Web UI:       {url}")
-    if config["auth_enabled"]:
-        print(f"  Auth:         Enabled (Entra ID)")
     print("=" * 60)
     print("\nPress Ctrl+C to stop\n")
 

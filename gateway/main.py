@@ -12,6 +12,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from .routers import agent, export, models
+from .utils.claude_bridge_manager import get_claude_bridge_manager
 from .utils.logging import get_logger, setup_logging
 from .utils.metrics import record_service_error, set_service_up
 from .utils.token_context import set_token
@@ -30,6 +31,12 @@ async def lifespan(app: FastAPI):
     try:
         # Mark service as up
         set_service_up("gateway", True)
+
+        # Probe Claude Bridge (host-side) and cache available models.
+        # If the bridge isn't running, gateway starts without Claude models.
+        bridge_mgr = get_claude_bridge_manager()
+        await bridge_mgr.probe_and_discover(max_retries=3, retry_delay=2.0)
+
         logger.info("Gateway service started successfully")
         yield
     except Exception as e:

@@ -13,6 +13,8 @@ from typing import List
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from gateway.utils.claude_bridge_manager import get_claude_bridge_manager
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -61,15 +63,23 @@ async def list_available_models():
     """
     Get list of available LLM models.
 
-    All models in LLM_MODELS configuration are available.
+    Combines models from LLM_MODELS configuration and Claude models
+    cached at startup from the Claude Bridge (if it was running).
     Does not expose sensitive information (API keys, endpoints).
-
-    Response:
-    [
-        {
-            "name": "gpt-5-chat",
-            "display_name": "GPT-5 Chat"
-        }
-    ]
     """
-    return get_available_models()
+    models = get_available_models()
+
+    # Append Claude models cached at startup
+    bridge_mgr = get_claude_bridge_manager()
+    if bridge_mgr.available:
+        existing_names = {m.name for m in models}
+        for cm in bridge_mgr.cached_models:
+            if cm["name"] not in existing_names:
+                models.append(
+                    ModelInfo(
+                        name=cm["name"],
+                        display_name=cm["display_name"],
+                    )
+                )
+
+    return models
