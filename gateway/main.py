@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from .routers import agent, export, models
+from .routers import agent, export, files, models
 from .utils.claude_bridge_manager import get_claude_bridge_manager
 from .utils.logging import get_logger, setup_logging
 from .utils.metrics import record_service_error, set_service_up
@@ -86,6 +86,7 @@ app.add_middleware(
 app.include_router(export.router, prefix="/api/v1")  # Export endpoints
 app.include_router(agent.router)  # Agent router has its own /agent prefix
 app.include_router(models.router, prefix="/api")  # Models endpoint
+app.include_router(files.router)  # File download endpoint (in-memory store)
 
 # Setup Prometheus metrics
 Instrumentator().instrument(app).expose(app)
@@ -102,6 +103,7 @@ async def root():
             "agent": "/agent/chat",
             "export": "/api/v1/export/markdown",
             "download": "/api/v1/export/download/{filename}",
+            "files": "/api/files/{file_id}",
             "health": "/health",
             "docs": "/docs",
         },

@@ -52,9 +52,9 @@ try {
     $existing = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
         Select-Object -ExpandProperty OwningProcess -Unique
     if ($existing) {
-        foreach ($pid in $existing) {
-            Write-Host "Killing existing process on port $Port (PID $pid)..." -ForegroundColor Yellow
-            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+        foreach ($procId in $existing) {
+            Write-Host "Killing existing process on port $Port (PID $procId)..." -ForegroundColor Yellow
+            Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
         }
         Start-Sleep -Seconds 1
     }

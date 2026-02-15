@@ -13,6 +13,7 @@ import httpx
 
 from ..agents.windows_composition import get_composition_client
 from ..utils.azdo_uri import is_azdo_uri, parse_azdo_uri
+from ..utils.file_store import get_file_store
 from ..utils.logging import log_tool_call, log_tool_result
 from ..utils.metrics import (
     classify_error,
@@ -29,6 +30,7 @@ from ..utils.tool_constants import (
     TOOL_LIST_FILES,
     TOOL_QUERY_COMPOSITION_DB,
     TOOL_READ_LOCAL_FILE,
+    TOOL_SAVE_FILE_FOR_DOWNLOAD,
     TOOL_SEARCH_FILE_CONTENT,
 )
 
@@ -94,6 +96,10 @@ class ToolHandler:
                 )
             elif tool_name == TOOL_QUERY_COMPOSITION_DB:
                 result = await self._handle_composition_tool(arguments, request_id)
+            elif tool_name == TOOL_SAVE_FILE_FOR_DOWNLOAD:
+                result = await self._handle_save_file_for_download(
+                    arguments, request_id
+                )
             else:
                 result = {"error": f"Unknown tool: {tool_name}"}
                 status = "error"
@@ -513,14 +519,9 @@ class ToolHandler:
             else:
                 logger.warning(f"Failed to parse azdo URI: {file_path}")
 
-        # Add branch parameter if not provided and environment variable exists
-        if tool_name == TOOL_AZURE_DEVOPS_GET_FILE and "branch" not in arguments:
-            branch = os.getenv("AZURE_DEVOPS_BRANCH")
-            if branch:
-                arguments["branch"] = branch
-                logger.debug(f"Added branch from environment: {branch}")
-
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(
+            timeout=self.timeout, follow_redirects=True
+        ) as client:
             try:
                 response = await client.post(
                     f"{azure_devops_mcp_url}/invoke",
@@ -582,6 +583,65 @@ class ToolHandler:
         except Exception as e:
             logger.error(f"Composition query failed: {e}")
             return {"error": str(e)}
+
+    async def _handle_save_file_for_download(
+        self, arguments: Dict[str, Any], request_id: str
+    ) -> Dict[str, Any]:
+        """
+        Handle save_file_for_download tool call.
+
+        Stores file content in the in-memory file store and returns
+        metadata that the gateway will include in the response JSON.
+        The LLM does NOT need to construct download URLs — the gateway
+        and HiChat handle that automatically.
+
+        Args:
+            arguments: Tool arguments (filename, content, content_type)
+            request_id: Request tracking ID
+
+        Returns:
+            Dict with file_id and metadata for the LLM to acknowledge
+        """
+        filename = arguments.get("filename")
+        content = arguments.get("content")
+        content_type = arguments.get("content_type", "text/plain")
+        conversation_id = arguments.get("conversation_id")
+
+        if not filename:
+            return {"error": "filename parameter is required"}
+        if not content:
+            return {"error": "content parameter is required"}
+
+        try:
+            store = get_file_store()
+            stored = store.store(
+                filename=filename,
+                content=content,
+                content_type=content_type,
+                conversation_id=conversation_id,
+            )
+
+            logger.info(
+                f"File stored for download: {filename} "
+                f"({stored.size} bytes) -> {stored.file_id}"
+            )
+
+            return {
+                "success": True,
+                "file_id": stored.file_id,
+                "filename": stored.filename,
+                "size": stored.size,
+                "message": (
+                    f"File '{filename}' ({stored.size} bytes) has been saved. "
+                    f"The user will see a download button in the chat UI. "
+                    f"You do NOT need to include a download link in your response."
+                ),
+            }
+        except ValueError as e:
+            return {"error": str(e)}
+        except Exception as e:
+            logger.error(f"Failed to store file: {e}")
+            return {"error": f"Failed to store file: {e}"}
 
 
 # Global tool handler

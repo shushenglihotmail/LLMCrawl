@@ -2,13 +2,14 @@
 """
 LLMCrawl CLI - Main entry point
 
-Provides subcommands for deployment, authentication, and WCD bridge.
+Provides subcommands for deployment, authentication, WCD bridge, and Claude bridge.
 
 Usage:
     llmcrawl deploy --init              # Initialize deployment folder
     llmcrawl deploy --up                # Start all services
     llmcrawl auth <url>                 # Authenticate to internal site
     llmcrawl wcd-bridge --build <path>  # Start WCD bridge service
+    llmcrawl claude-bridge              # Start Claude bridge service
 """
 
 import sys
@@ -43,6 +44,11 @@ def main() -> None:
 
         wcd_main()
 
+    elif command == "claude-bridge":
+        from llmcrawl_cli.claude_bridge import main as claude_bridge_main
+
+        claude_bridge_main()
+
     else:
         print(f"Unknown command: {command}")
         print_help()
@@ -52,16 +58,17 @@ def main() -> None:
 def print_help() -> None:
     """Print help message."""
     print(
-        """usage: llmcrawl [-h] [--version] {deploy,auth,wcd-bridge} ...
+        """usage: llmcrawl [-h] [--version] {deploy,auth,wcd-bridge,claude-bridge} ...
 
 LLMCrawl - Web RAG System CLI
 
 positional arguments:
-  {deploy,auth,wcd-bridge}
+  {deploy,auth,wcd-bridge,claude-bridge}
                         Available commands
     deploy              Manage LLMCrawl deployment (Docker Compose)
     auth                Authenticate to internal sites for crawling
     wcd-bridge          Start Windows Composition Database bridge
+    claude-bridge       Start Claude Code CLI bridge for LLM routing
 
 options:
   -h, --help            show this help message and exit
@@ -75,6 +82,8 @@ Examples:
   llmcrawl deploy --health                  Check service health endpoints
   llmcrawl auth https://www.osgwiki.com     Authenticate to internal site
   llmcrawl wcd-bridge --build "\\\\winbuilds\\release\\..."
+  llmcrawl claude-bridge                    Start Claude Bridge (port 8006)
+  llmcrawl claude-bridge --port 8007        Start Claude Bridge on custom port
 """
     )
 

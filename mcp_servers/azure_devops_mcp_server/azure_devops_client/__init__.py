@@ -5,7 +5,7 @@ A Model Context Protocol server for querying files from Azure DevOps repositorie
 Supports both stdio transport (for VS Code) and HTTP REST API (for LLMCrawl).
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.5"
 
 from .server import AzureDevOpsMCPServer
 

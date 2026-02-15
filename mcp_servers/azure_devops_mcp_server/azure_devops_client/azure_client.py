@@ -75,8 +75,8 @@ class AzureDevOpsClient:
     async def search_code(
         self,
         search_text: str,
+        branch: str,
         max_results: int = 20,
-        branch: str = "",
         path: str = "/",
         project: Optional[str] = None,
         repository: Optional[str] = None,
@@ -102,7 +102,7 @@ class AzureDevOpsClient:
             search_text: Search query text, passed directly to Azure DevOps Code Search API.
                         Include filters like ext:, file:, path:, class:, etc. in this string.
             max_results: Maximum number of results
-            branch: Branch to search (uses configured branch if empty string)
+            branch: REQUIRED. Branch to search. Must be specified explicitly.
             path: Path scope filter - folder path like "/src/services" to limit search scope
             project: Project name override (default: use configured project)
             repository: Repository name override (default: use configured repository)
@@ -114,10 +114,18 @@ class AzureDevOpsClient:
             raise RuntimeError("Not authenticated - PAT required")
 
         # Use provided values or fall back to configured defaults
-        search_branch = branch or self.branch
+        search_branch = branch
         search_path = path or "/"
         search_project = project or self.project
         search_repository = repository or self.repository
+
+        if not search_branch:
+            raise ValueError(
+                "Missing required 'branch' parameter for code search. "
+                "You must specify which branch to search. "
+                "Examples: 'official/rs_sparc_ctr', 'official/rs_sparc_ctr_exp', 'main'. "
+                "Ask the user which branch to search if you are unsure."
+            )
 
         try:
             url = f"https://almsearch.dev.azure.com/{self.organization}/_apis/search/codesearchresults"
@@ -143,7 +151,7 @@ class AzureDevOpsClient:
                 f"project='{search_project}', repo='{search_repository}', branch='{search_branch}'"
             )
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 response = await client.post(
                     url,
                     headers={
@@ -153,7 +161,17 @@ class AzureDevOpsClient:
                     params=params,
                     json=payload,
                 )
-                response.raise_for_status()
+                if response.status_code != 200:
+                    logger.error(
+                        f"Code search API returned {response.status_code}: "
+                        f"{response.text[:500]}"
+                    )
+                    raise RuntimeError(
+                        f"Code search API returned HTTP {response.status_code}. "
+                        f"Check that the repository '{search_repository}' exists "
+                        f"in project '{search_project}' and that the PAT has "
+                        f"Code (Read) scope."
+                    )
                 data = response.json()
 
             # Parse results
@@ -195,7 +213,7 @@ class AzureDevOpsClient:
     async def get_file_content(
         self,
         file_path: str,
-        branch: Optional[str] = None,
+        branch: str,
         project: Optional[str] = None,
         repository: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -204,7 +222,7 @@ class AzureDevOpsClient:
 
         Args:
             file_path: Path to file in repository
-            branch: Branch name (default: use configured branch or repository default)
+            branch: REQUIRED. Branch name. Must be specified explicitly.
             project: Project name override (default: use configured project)
             repository: Repository name override (default: use configured repository)
 
@@ -215,16 +233,17 @@ class AzureDevOpsClient:
             raise RuntimeError("Not authenticated - PAT required")
 
         # Use configured values if not specified
-        # Only use default branch if we're also using default project/repo
         get_project = project or self.project
         get_repository = repository or self.repository
+        get_branch = branch
 
-        # If project or repo is overridden, don't use the default branch
-        # (let Azure DevOps use the repo's default branch instead)
-        if project or repository:
-            get_branch = branch  # Use provided branch or None (repo default)
-        else:
-            get_branch = branch or self.branch  # Use provided or configured default
+        if not get_branch:
+            raise ValueError(
+                "Missing required 'branch' parameter for get_file. "
+                "You must specify which branch to retrieve the file from. "
+                "Examples: 'official/rs_sparc_ctr', 'official/rs_sparc_ctr_exp', 'main'. "
+                "Ask the user which branch if you are unsure."
+            )
 
         try:
             url = (
@@ -236,16 +255,24 @@ class AzureDevOpsClient:
                 "api-version": "7.0",
             }
 
-            # Only add version descriptor if branch is specified
-            if get_branch:
-                params["versionDescriptor.version"] = get_branch
-                params["versionDescriptor.versionType"] = "branch"
+            params["versionDescriptor.version"] = get_branch
+            params["versionDescriptor.versionType"] = "branch"
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 response = await client.get(
                     url, headers=self._get_auth_header(), params=params
                 )
-                response.raise_for_status()
+                if response.status_code != 200:
+                    logger.error(
+                        f"Get file API returned {response.status_code} for "
+                        f"'{file_path}': {response.text[:500]}"
+                    )
+                    raise RuntimeError(
+                        f"Get file API returned HTTP {response.status_code} for "
+                        f"'{file_path}'. Check that the file path, repository "
+                        f"'{get_repository}', and branch '{get_branch or 'default'}' "
+                        f"are correct."
+                    )
 
                 # Get content
                 content = response.text
@@ -308,7 +335,7 @@ class AzureDevOpsClient:
                 f"project={get_project}, repo={get_repository}"
             )
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 response = await client.get(
                     url, headers=self._get_auth_header(), params=params
                 )
@@ -405,7 +432,7 @@ class AzureDevOpsClient:
             )
             commit_params = {"api-version": "7.1"}
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 commit_response = await client.get(
                     commit_url, headers=self._get_auth_header(), params=commit_params
                 )
@@ -437,7 +464,7 @@ class AzureDevOpsClient:
                 f"Fetching changes for commit {commit_id[:8]}... to find blob IDs for {normalized_path}"
             )
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 changes_response = await client.get(
                     changes_url, headers=self._get_auth_header(), params=changes_params
                 )
@@ -480,7 +507,7 @@ class AzureDevOpsClient:
             original_content = ""
             new_content = ""
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 # Fetch original version (if exists)
                 if original_object_id and change_type != "add":
                     original_blob_url = (
@@ -589,7 +616,7 @@ class AzureDevOpsClient:
             url = f"{self.base_url}/_apis/projects/{self.project}"
             params = {"api-version": "7.0"}
 
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
                 response = await client.get(
                     url, headers=self._get_auth_header(), params=params
                 )

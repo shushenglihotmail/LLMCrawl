@@ -41,6 +41,11 @@ LOCAL_MCP_TOOLS = [
 ]
 
 # =============================================================================
+# File Download Tool (gateway-native, no MCP server)
+# =============================================================================
+TOOL_SAVE_FILE_FOR_DOWNLOAD = "save_file_for_download"
+
+# =============================================================================
 # Windows Composition Database Tool
 # =============================================================================
 TOOL_QUERY_COMPOSITION_DB = "query_composition_db"
@@ -63,6 +68,8 @@ DEFAULT_TOOL_LIMITS = {
     TOOL_LIST_FILES: 50,
     TOOL_SEARCH_FILE_CONTENT: 50,
     TOOL_INDEX_FILES: 50,
+    # File download tool - 20 calls
+    TOOL_SAVE_FILE_FOR_DOWNLOAD: 20,
     # WCD tool - unlimited
     TOOL_QUERY_COMPOSITION_DB: -1,
 }

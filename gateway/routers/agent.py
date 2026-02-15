@@ -37,7 +37,12 @@ from gateway.utils.metrics import (
     record_agent_request,
 )
 from gateway.utils.token_context import get_token
-from gateway.utils.tool_constants import DEFAULT_TOOL_LIMITS, TOOL_QUERY_COMPOSITION_DB
+from gateway.utils.tool_constants import (
+    DEFAULT_TOOL_LIMITS,
+    TOOL_QUERY_COMPOSITION_DB,
+    TOOL_SAVE_FILE_FOR_DOWNLOAD,
+)
+from gateway.utils.file_store import get_file_store
 
 logger = logging.getLogger(__name__)
 
@@ -606,6 +611,31 @@ def _apply_workflow_restrictions(workflow: WorkflowType, expose_to_llm: dict) ->
     return effective_settings
 
 
+def _file_download_prompt_section() -> str:
+    """Build the file download instruction section for system prompts."""
+    return (
+        "\nFILE DOWNLOAD RULES (MANDATORY):\n"
+        "- When you retrieve file content using ANY tool (get_azure_devops_file, "
+        "read_local_file, get_azure_devops_commit_changes, "
+        "get_azure_devops_commit_file_diff, search_azure_devops_code, or any "
+        "other file-retrieving tool), you MUST call save_file_for_download with "
+        "the content so the user can download the file from the chat UI.\n"
+        "- When you generate reports, analysis summaries, code, scripts, "
+        "configuration files, or any document the user would want to save, "
+        "you MUST call save_file_for_download to offer a download.\n"
+        "- CRITICAL: NEVER say 'I have saved the file' or 'a download is available' "
+        "unless you have ACTUALLY called the save_file_for_download tool in this "
+        "conversation. Claiming a file was saved without calling the tool is "
+        "incorrect behavior.\n"
+        "- You do NOT need to include download links in your response text. "
+        "The chat UI will automatically show download buttons when you call "
+        "save_file_for_download.\n"
+        "- Use an appropriate filename with the correct file extension.\n"
+        "- When writing a report or analysis, save the full report as a "
+        "markdown file via save_file_for_download.\n\n"
+    )
+
+
 def _build_system_prompt_general_chat(expose_to_llm: dict) -> str:
     """
     Build system prompt for GENERAL_CHAT workflow.
@@ -685,6 +715,8 @@ def _build_system_prompt_code_analysis(expose_to_llm: dict) -> str:
         "- **Focus**: The input message may contain previous conversation history. You must ONLY answer the NEWEST/LAST question or instruction at the very end. Treat everything before it as read-only context.\n"
     )
 
+    system_prompt += _file_download_prompt_section()
+
     return system_prompt
 
 
@@ -735,6 +767,8 @@ def _build_system_prompt_build_system(expose_to_llm: dict) -> str:
         "- **Be Precise**: Provide exact file paths, target names, and configuration values.\n"
         "- **Focus**: The input message may contain previous conversation history. You must ONLY answer the NEWEST/LAST question or instruction at the very end. Treat everything before it as read-only context.\n"
     )
+
+    system_prompt += _file_download_prompt_section()
 
     return system_prompt
 
@@ -816,6 +850,8 @@ def _build_system_prompt_file_explorer(expose_to_llm: dict) -> str:
         '- WRONG: Writing `{"query": "...", "seed_urls": [...]}` in your response.\n'
         "- RIGHT: Invoking the tool through the function calling interface.\n"
     )
+
+    system_prompt += _file_download_prompt_section()
 
     return system_prompt
 
@@ -1002,6 +1038,61 @@ async def _load_tools(
             }
         )
         logger.info("Exposed Windows Composition tool to LLM")
+
+    # Always expose save_file_for_download tool when any tools are being loaded
+    # This lets the LLM offer file downloads to the user
+    if tools:  # Only add if we have at least one other tool
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": TOOL_SAVE_FILE_FOR_DOWNLOAD,
+                    "description": (
+                        "Save content as a downloadable file for the user. "
+                        "You MUST call this tool whenever you retrieve file "
+                        "content from ANY source (get_azure_devops_file, "
+                        "read_local_file, get_azure_devops_commit_file_diff, "
+                        "search_azure_devops_code, etc.) so the user can "
+                        "download files directly from the chat UI. "
+                        "Also call this when you generate reports, analysis, "
+                        "code, scripts, or any document the user would want "
+                        "to keep. The user will see a download button "
+                        "automatically. NEVER claim you saved a file without "
+                        "actually calling this tool."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "filename": {
+                                "type": "string",
+                                "description": (
+                                    "Filename for the download. Include the file "
+                                    "extension. Examples: 'easyBMT.ps1', "
+                                    "'config.json', 'analysis.md'"
+                                ),
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": (
+                                    "The full file content to save. Must be the "
+                                    "complete content, not truncated."
+                                ),
+                            },
+                            "content_type": {
+                                "type": "string",
+                                "description": (
+                                    "MIME type of the file. Default: 'text/plain'. "
+                                    "Examples: 'text/plain', 'application/json', "
+                                    "'text/markdown', 'text/x-powershell'"
+                                ),
+                            },
+                        },
+                        "required": ["filename", "content"],
+                    },
+                },
+            }
+        )
+        logger.info("Exposed save_file_for_download tool to LLM")
 
     return tools
 
@@ -1216,6 +1307,16 @@ async def _execute_llm_with_tools(
                 return "*Request was cancelled by user.*", None
 
             tool_name = tool_call.get("function", {}).get("name", "unknown")
+
+            # Inject conversation_id for save_file_for_download so files
+            # are tracked per conversation
+            if tool_name == TOOL_SAVE_FILE_FOR_DOWNLOAD:
+                try:
+                    args = json.loads(tool_call["function"]["arguments"])
+                    args["conversation_id"] = conversation_id
+                    tool_call["function"]["arguments"] = json.dumps(args)
+                except (json.JSONDecodeError, KeyError):
+                    pass
 
             # Increment tool usage counter
             tool_usage[tool_name] = tool_usage.get(tool_name, 0) + 1
@@ -1443,12 +1544,26 @@ async def execute(
         conversation_store.add_message(conversation_id, "user", request.user_message)
         conversation_store.add_message(conversation_id, "assistant", response_text)
 
+        # Step 7: Collect downloadable files saved during tool execution
+        file_store = get_file_store()
+        stored_files = file_store.get_files_for_conversation(conversation_id)
+        downloadable_files = [
+            {
+                "file_id": f.file_id,
+                "filename": f.filename,
+                "size": f.size,
+                "content_type": f.content_type,
+            }
+            for f in stored_files
+        ]
+
         result = UnifiedWorkflowResponse(
             response=response_text,
             conversation_id=conversation_id,
             model=request.model or "default",
             tokens_used=tokens_used,
             context_gathered=context_gathered,
+            downloadable_files=downloadable_files,
         )
 
         # Record successful agent request

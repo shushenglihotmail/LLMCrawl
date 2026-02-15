@@ -332,6 +332,37 @@ async def get_agent_status(conversation_id: str) -> JSONResponse:
         raise HTTPException(status_code=502, detail=f"Status request failed: {str(e)}")
 
 
+@app.get("/api/files/{file_id}")
+async def download_file(file_id: str):
+    """Proxy file download from gateway's in-memory file store."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(f"{config['gateway_url']}/api/files/{file_id}")
+
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail="File not found or expired.",
+                )
+
+            # Forward the response with original headers
+            from fastapi.responses import Response
+
+            return Response(
+                content=response.content,
+                media_type=response.headers.get("content-type", "text/plain"),
+                headers={
+                    "Content-Disposition": response.headers.get(
+                        "content-disposition", "attachment"
+                    ),
+                },
+            )
+
+    except httpx.HTTPError as e:
+        logger.error(f"File download proxy failed: {e}")
+        raise HTTPException(status_code=502, detail=f"File download failed: {str(e)}")
+
+
 # Mount static files (CSS, JS)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

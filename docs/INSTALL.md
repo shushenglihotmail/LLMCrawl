@@ -575,6 +575,45 @@ Keep the bridge running in a separate terminal while using WCD queries.
 
 ---
 
+### Claude Bridge (Claude Code CLI)
+
+Route LLM requests through the Claude Code CLI on the host machine. This enables Docker-based gateway containers to use Claude models via the locally installed `claude.exe`.
+
+**Prerequisites:**
+- Claude Code CLI installed (`claude.exe` available in `%USERPROFILE%\.claude-cli\currentVersion\` or system PATH)
+
+**Start the bridge:**
+
+```bash
+# Default (port 8006, auto-detect claude CLI)
+llmcrawl claude-bridge
+
+# Custom port
+llmcrawl claude-bridge --port 8007
+
+# Explicit Claude CLI path
+llmcrawl claude-bridge --claude-path "C:\Users\you\.claude-cli\currentVersion\claude.exe"
+```
+
+Options:
+- `--port`, `-p` - Port to run the bridge on (default: 8006)
+- `--claude-path` - Full path to `claude` CLI executable (auto-detected if not specified)
+
+**Auto-detection order** for Claude CLI:
+1. `CLAUDE_CLI_PATH` environment variable
+2. `%USERPROFILE%\.claude-cli\currentVersion\claude.exe` (Windows)
+3. System PATH
+
+**Configure in `.env`:**
+
+```bash
+CLAUDE_BRIDGE_URL=http://host.docker.internal:8006
+```
+
+Keep the bridge running in a separate terminal while using Claude models.
+
+---
+
 ## Management Commands
 
 ### Service Control

@@ -159,6 +159,45 @@ body {
     border-color: #667eea;
 }
 
+/* Downloadable files section */
+.downloadable-files {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid #e8e8e8;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.file-download-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 14px;
+    background: linear-gradient(135deg, #f0f4ff 0%, #e8f0fe 100%);
+    border: 1px solid #c4d4f0;
+    border-radius: 8px;
+    color: #333;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.file-download-btn:hover {
+    background: linear-gradient(135deg, #e0eaff 0%, #d0e0fe 100%);
+    border-color: #667eea;
+    box-shadow: 0 2px 6px rgba(102, 126, 234, 0.2);
+    transform: translateY(-1px);
+}
+
+.file-download-btn .file-size {
+    color: #888;
+    font-size: 11px;
+    font-weight: 400;
+}
+
 /* Input Area */
 .input-area {
     padding: 20px 30px;

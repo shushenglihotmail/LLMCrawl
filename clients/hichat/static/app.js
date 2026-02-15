@@ -532,7 +532,7 @@ async function submitRequest() {
         addMessage('assistant', data.response + contextInfo, {
             model: data.model,
             tokens: data.tokens_used
-        });
+        }, false, data.downloadable_files);
 
     } catch (error) {
         if (error.name === 'AbortError') {
@@ -570,7 +570,7 @@ function generateUUID() {
     });
 }
 
-function addMessage(role, content, meta = null, isError = false) {
+function addMessage(role, content, meta = null, isError = false, downloadableFiles = null) {
     const chatArea = document.getElementById('chatArea');
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message ' + role;
@@ -590,6 +590,25 @@ function addMessage(role, content, meta = null, isError = false) {
         contentDiv.appendChild(markdownDiv);
 
         setTimeout(() => renderMermaidDiagrams(markdownDiv), 0);
+
+        // Render download buttons for files saved by LLM
+        if (downloadableFiles && downloadableFiles.length > 0) {
+            const filesDiv = document.createElement('div');
+            filesDiv.className = 'downloadable-files';
+            downloadableFiles.forEach(file => {
+                const fileBtn = document.createElement('a');
+                fileBtn.className = 'file-download-btn';
+                fileBtn.href = '/api/files/' + file.file_id;
+                fileBtn.download = file.filename;
+                fileBtn.title = 'Download ' + file.filename;
+                const sizeStr = file.size < 1024
+                    ? file.size + ' B'
+                    : (file.size / 1024).toFixed(1) + ' KB';
+                fileBtn.innerHTML = '📄 ' + file.filename + ' <span class="file-size">(' + sizeStr + ')</span>';
+                filesDiv.appendChild(fileBtn);
+            });
+            contentDiv.appendChild(filesDiv);
+        }
     } else {
         contentDiv.textContent = content;
     }

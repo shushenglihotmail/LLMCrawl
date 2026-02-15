@@ -142,9 +142,11 @@ class UnifiedWorkflowResponse(BaseModel):
     context_gathered: dict = Field(
         default_factory=dict, description="Summary of context gathered by agent"
     )
-    # Example: {
-    #     "target_files": 5,
-    #     "reference_files": 2,
-    #     "crawled_urls": 3,
-    #     "web_search_results": 10
-    # }
+
+    downloadable_files: list = Field(
+        default_factory=list,
+        description="Files available for download (saved by LLM during tool calling)",
+    )
+    # Example: [
+    #     {"file_id": "uuid", "filename": "easyBMT.ps1", "size": 4280}
+    # ]

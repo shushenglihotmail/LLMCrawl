@@ -55,6 +55,12 @@ class AzureDevOpsMCPServer:
                     "Search for code/files in Azure DevOps repository using Azure "
                     "DevOps Code Search API. This is the primary tool for finding "
                     "files and code in Azure DevOps repositories.\n\n"
+                    "**IMPORTANT**: The `branch` parameter is REQUIRED. You must "
+                    "specify the correct branch name. Ask the user which branch "
+                    "to search if you are unsure. Common branches:\n"
+                    "- official/rs_sparc_ctr\n"
+                    "- official/rs_sparc_ctr_exp\n"
+                    "- main\n\n"
                     "The search_text is passed DIRECTLY to Azure DevOps Code Search "
                     "API. Use Azure DevOps search syntax in search_text:\n\n"
                     "**Search Syntax Examples:**\n"
@@ -107,7 +113,11 @@ class AzureDevOpsMCPServer:
                         "branch": {
                             "type": "string",
                             "description": (
-                                "Branch name (default: configured default branch)"
+                                "REQUIRED. Branch name to search in. "
+                                "You MUST specify the correct branch. "
+                                "Ask the user which branch if unsure. "
+                                "Examples: 'official/rs_sparc_ctr', "
+                                "'official/rs_sparc_ctr_exp', 'main'"
                             ),
                         },
                         "project": {
@@ -128,7 +138,7 @@ class AzureDevOpsMCPServer:
                             ),
                         },
                     },
-                    "required": ["search_text"],
+                    "required": ["search_text", "branch"],
                 },
             },
             {
@@ -154,7 +164,11 @@ class AzureDevOpsMCPServer:
                         "branch": {
                             "type": "string",
                             "description": (
-                                "Branch name (default: repository default branch)"
+                                "REQUIRED. Branch name to retrieve the file from. "
+                                "You MUST specify the correct branch. "
+                                "Ask the user which branch if unsure. "
+                                "Examples: 'official/rs_sparc_ctr', "
+                                "'official/rs_sparc_ctr_exp', 'main'"
                             ),
                         },
                         "project": {
@@ -175,7 +189,7 @@ class AzureDevOpsMCPServer:
                             ),
                         },
                     },
-                    "required": ["file_path"],
+                    "required": ["file_path", "branch"],
                 },
             },
             {
@@ -333,6 +347,16 @@ class AzureDevOpsMCPServer:
         if not search_text:
             return {"error": "search_text parameter is required"}
 
+        if not branch:
+            return {
+                "error": (
+                    "Missing required 'branch' parameter. "
+                    "You must specify which branch to search. "
+                    "Examples: 'official/rs_sparc_ctr', 'official/rs_sparc_ctr_exp', 'main'. "
+                    "Ask the user which branch to search if you are unsure."
+                )
+            }
+
         results = await self.client.search_code(
             search_text=search_text,
             max_results=max_results,
@@ -342,25 +366,51 @@ class AzureDevOpsMCPServer:
             repository=repository,
         )
 
-        return {
+        # Include effective filters in response for diagnostics
+        effective_project = project or self.client.project
+        effective_repo = repository or self.client.repository
+
+        response = {
             "success": True,
             "search_text": search_text,
             "path_scope": path,
+            "branch": branch,
+            "project": effective_project,
+            "repository": effective_repo,
             "results_count": len(results),
             "results": results,
         }
 
+        if len(results) == 0:
+            response["hint"] = (
+                f"No results found. Verify that repository "
+                f"'{effective_repo}' exists in project '{effective_project}', "
+                f"that branch '{branch}' exists in that repository, "
+                f"and that the search text matches actual code content. "
+                f"Azure DevOps Code Search requires repositories to be indexed."
+            )
+
+        return response
+
     async def _handle_get_file(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Handle get file tool."""
         file_path = arguments.get("file_path")
-        branch = (
-            arguments.get("branch") or self.client.branch
-        )  # Use configured branch if not specified
+        branch = arguments.get("branch", "")
         project = arguments.get("project")
         repository = arguments.get("repository")
 
         if not file_path:
             return {"error": "file_path parameter is required"}
+
+        if not branch:
+            return {
+                "error": (
+                    "Missing required 'branch' parameter. "
+                    "You must specify which branch to retrieve the file from. "
+                    "Examples: 'official/rs_sparc_ctr', 'official/rs_sparc_ctr_exp', 'main'. "
+                    "Ask the user which branch if you are unsure."
+                )
+            }
 
         result = await self.client.get_file_content(
             file_path, branch, project=project, repository=repository
@@ -453,7 +503,7 @@ class AzureDevOpsMCPServer:
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "azure-devops-mcp", "version": "1.0.0"},
+                    "serverInfo": {"name": "azure-devops-mcp", "version": "1.1.5"},
                 },
             }
 
