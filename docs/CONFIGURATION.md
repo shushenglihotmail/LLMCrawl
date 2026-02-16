@@ -1,20 +1,34 @@
 # LLMCrawl Configuration Guide
 
-Complete guide for configuring LLMCrawl environment variables and settings.
+Complete reference for all LLMCrawl environment variables and settings.
 
 ## Table of Contents
 
 - [Quick Start](#quick-start)
 - [Configuration File Location](#configuration-file-location)
-- [Required Configuration](#required-configuration)
 - [LLM Configuration](#llm-configuration)
+  - [Provider Selection](#provider-selection)
+  - [Azure OpenAI](#azure-openai)
+  - [OpenAI Direct](#openai-direct)
+  - [Anthropic Claude (Azure)](#anthropic-claude-azure)
+  - [Claude Bridge (Claude CLI)](#claude-bridge-claude-cli)
+  - [Model Configuration](#model-configuration)
+  - [Embedding Model](#embedding-model)
+- [Entra ID Authentication](#entra-id-authentication)
 - [Tool Configuration](#tool-configuration)
-- [Service Configuration](#service-configuration)
+  - [Azure DevOps MCP](#azure-devops-mcp)
+  - [Local File Access MCP](#local-file-access-mcp)
+  - [Windows Composition Database](#windows-composition-database)
+  - [Tool Call Limits](#tool-call-limits)
+- [Web Crawling](#web-crawling)
+  - [Domain Allowlist](#domain-allowlist)
+  - [Internal Site Authentication](#internal-site-authentication)
 - [Vector Database](#vector-database)
-- [Logging and Cache](#logging-and-cache)
+- [Service Configuration](#service-configuration)
+- [Logging and Caching](#logging-and-caching)
+- [Rate Limiting](#rate-limiting)
 - [Applying Changes](#applying-changes)
-- [Troubleshooting](#troubleshooting)
-- [Security Best Practices](#security-best-practices)
+- [Complete Settings Reference](#complete-settings-reference)
 
 ---
 
@@ -26,163 +40,315 @@ cd llmcrawl-deploy
 
 # 2. Edit configuration
 notepad .env        # Windows
-# or: nano .env     # Linux/Mac
+nano .env           # Linux/Mac
 
 # 3. Apply changes (restart services)
-llmcrawl deploy --down
-llmcrawl deploy --up
+llmcrawl deploy --down && llmcrawl deploy --up
 ```
 
 ---
 
 ## Configuration File Location
 
-**⚠️ IMPORTANT:** Configuration is in `llmcrawl-deploy/.env`
+**Location:** `llmcrawl-deploy/.env`
 
 ```
 your-folder/
 └── llmcrawl-deploy/
     ├── .env              ← EDIT THIS FILE
-    ├── .env.example      ← Reference (copy to .env if missing)
-    ├── docker-compose.yml
-    └── ...
+    ├── .env.example      ← Reference template
+    └── docker-compose.yml
 ```
 
-The `.env` file was created when you ran `llmcrawl deploy --init`.
-
----
-
-## Required Configuration
-
-At minimum, configure one LLM provider:
-
-### Option A: Azure OpenAI (Recommended)
-
-```bash
-# Azure OpenAI Configuration
-AZURE_OPENAI_API_KEY=your-azure-openai-key
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_API_VERSION=2024-02-15-preview
-LLM_PROVIDER=azure
-
-# Model Configuration (JSON array)
-LLM_MODELS=[{"name":"gpt-4","display_name":"GPT-4","deployment_name":"your-gpt4-deployment","provider_type":"openai"}]
-```
-
-### Option B: OpenAI Direct
-
-```bash
-# OpenAI Configuration
-OPENAI_API_KEY=sk-your-openai-key
-LLM_PROVIDER=openai
-```
-
-### Option C: Anthropic Claude (via Azure)
-
-```bash
-# Azure with Anthropic
-AZURE_ANTHROPIC_ENDPOINT=https://your-resource.services.ai.azure.com/anthropic/
-AZURE_OPENAI_API_KEY=your-azure-key
-
-# Add Claude to models
-LLM_MODELS=[{"name":"claude-sonnet","display_name":"Claude Sonnet","deployment_name":"claude-sonnet","provider_type":"anthropic"}]
-```
+The `.env` file is created by `llmcrawl deploy --init`.
 
 ---
 
 ## LLM Configuration
 
-### Available Models
-
-Configure multiple models for user selection:
+### Provider Selection
 
 ```bash
-# JSON array of available models
+# Base LLM provider: openai or azure
+LLM_PROVIDER=azure
+```
+
+| Value | Description |
+|-------|-------------|
+| `azure` | Azure OpenAI (recommended) |
+| `openai` | Direct OpenAI API |
+
+### Azure OpenAI
+
+```bash
+# Azure OpenAI endpoint
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+
+# API version
+AZURE_OPENAI_API_VERSION=2025-01-01-preview
+
+# API Key (optional if using Entra ID authentication)
+AZURE_OPENAI_API_KEY=your-key-here
+```
+
+### OpenAI Direct
+
+```bash
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-your-openai-key
+```
+
+### Anthropic Claude (Azure)
+
+For Claude models hosted on Azure AI Foundry:
+
+```bash
+# Anthropic endpoint (Azure AI Foundry)
+AZURE_ANTHROPIC_ENDPOINT=https://your-resource.services.ai.azure.com/anthropic/
+
+# Uses same API key as Azure OpenAI (or Entra ID bearer token)
+```
+
+### Claude Bridge (Claude CLI)
+
+For routing requests through the locally installed Claude Code CLI:
+
+```bash
+# Claude Bridge URL (host-side service)
+# Use host.docker.internal to reach host from Docker
+CLAUDE_BRIDGE_URL=http://host.docker.internal:8006
+```
+
+**Setup:**
+1. Install Claude Code CLI: `npm install -g @anthropic-ai/claude-code`
+2. Start the bridge: `llmcrawl claude-bridge` or `python tools/claude_bridge.py`
+3. Models with `provider_type: "claude"` will route through the bridge
+
+### Model Configuration
+
+Configure available models with the `LLM_MODELS` JSON array:
+
+```bash
 LLM_MODELS=[
-  {"name":"gpt-4","display_name":"GPT-4","deployment_name":"gpt-4-deployment","provider_type":"openai"},
-  {"name":"gpt-4o","display_name":"GPT-4o","deployment_name":"gpt-4o-deployment","provider_type":"openai"},
-  {"name":"claude-sonnet","display_name":"Claude Sonnet","deployment_name":"claude-sonnet","provider_type":"anthropic"}
+  {
+    "name": "gpt-4",
+    "display_name": "GPT-4",
+    "deployment_name": "gpt-4-deployment",
+    "provider_type": "openai",
+    "max_output_tokens": 16384
+  },
+  {
+    "name": "claude-sonnet-4-5",
+    "display_name": "Claude Sonnet 4.5",
+    "deployment_name": "claude-sonnet-4-5",
+    "provider_type": "anthropic",
+    "max_output_tokens": 64000
+  },
+  {
+    "name": "claude-opus-4-6",
+    "display_name": "Claude Opus 4.6 (CLI)",
+    "deployment_name": "claude-opus-4-6",
+    "provider_type": "claude"
+  }
 ]
 ```
 
 **Model Properties:**
-- `name`: Internal identifier
-- `display_name`: Shown in UI
-- `deployment_name`: Azure deployment name (must match your Azure resource)
-- `provider_type`: `openai` or `anthropic`
+
+| Property | Required | Description |
+|----------|----------|-------------|
+| `name` | Yes | API identifier used in requests |
+| `display_name` | Yes | Shown in HiChat UI dropdown |
+| `deployment_name` | Yes | Azure deployment name (or model ID for Claude) |
+| `provider_type` | Yes | Routing: `openai`, `anthropic`, or `claude` |
+| `max_output_tokens` | No | Maximum response tokens (default: 16384 for OpenAI, 64000 for Anthropic) |
+
+**Provider Types:**
+
+| Type | Route | Use For |
+|------|-------|---------|
+| `openai` | Azure OpenAI or direct OpenAI API | GPT-4, GPT-4o, o1, o3 models |
+| `anthropic` | Azure Anthropic endpoint | Claude models on Azure AI Foundry |
+| `claude` | Claude Bridge (host-side CLI) | Claude Opus via Claude Code CLI |
 
 ### Embedding Model
 
 ```bash
-# OpenAI embedding model
+# Embedding model for vector search
 EMBED_MODEL=text-embedding-3-large
-
-# Or Azure embedding deployment
-AZURE_EMBED_DEPLOYMENT=text-embedding-3-large
 ```
 
-### Context and Token Limits
+---
+
+## Entra ID Authentication
+
+Use Azure Entra ID (OAuth) instead of API keys for Azure AI services:
 
 ```bash
-# Maximum context tokens (depends on model)
-MAX_CONTEXT_TOKENS=128000
+# Entra ID Application (client) ID
+# Use Azure CLI client ID for broad permissions without admin consent:
+ENTRA_CLIENT_ID=04b07795-8ddb-461a-bbee-02f9e1bf7b46
 
-# Maximum input tokens for code analysis
-MAX_INPUT_TOKENS=100000
+# Entra ID Tenant ID
+ENTRA_TENANT_ID=your-tenant-id-here
+
+# Azure Foundry scope for token acquisition
+AZURE_FOUNDRY_SCOPE=https://cognitiveservices.azure.com/.default
+
+# JWT validation at gateway (optional, for production)
+JWT_VALIDATION_ENABLED=false
 ```
+
+**How it works:**
+1. HiChat acquires bearer token via MSAL browser flow
+2. Token is passed to gateway with each request
+3. Gateway forwards token to Azure OpenAI/Anthropic endpoints
+4. No API keys stored in configuration
+
+See [AUTHENTICATION.md](AUTHENTICATION.md) for detailed Entra ID setup.
 
 ---
 
 ## Tool Configuration
 
-### Azure DevOps Integration
+### Azure DevOps MCP
+
+Allow the agent to search and read code from Azure DevOps:
 
 ```bash
-# Personal Access Token (required for Azure DevOps tools)
+# Personal Access Token (required)
 AZURE_DEVOPS_PAT=your-pat-here
 
-# Default settings (can be overridden per request)
+# Default organization/project (optional, can be overridden per request)
 AZURE_DEVOPS_ORG=your-organization
 AZURE_DEVOPS_PROJECT=your-project
 AZURE_DEVOPS_REPO=your-repo
 AZURE_DEVOPS_BRANCH=main
 ```
 
-**How to create a PAT:**
-1. Go to `https://dev.azure.com/{your-org}/_usersSettings/tokens`
-2. Create new token with **Code (Read)** scope
-3. Copy the token to `.env`
+**Creating a PAT:**
+1. Go to `https://dev.azure.com/{org}/_usersSettings/tokens`
+2. Create token with **Code (Read)** and **Code (Search)** scopes
+3. Copy token to `.env`
 
-### Local File Access (MCP Server)
+### Local File Access MCP
+
+Allow the agent to read files on your local machine:
 
 ```bash
-# Host folder to mount (accessible to LLM)
-# Windows: Use forward slashes
+# Host folder to mount (use forward slashes on Windows)
 MCP_HOST_FOLDER=C:/src
 
-# Linux/Mac:
-# MCP_HOST_FOLDER=/home/user/src
+# Container mount point (don't change)
+MCP_ROOT_FOLDER=/data/files
+
+# Vector database for file indexing
+MCP_VECTOR_DB_PATH=/data/mcp_vector_db
 ```
+
+### Windows Composition Database
+
+For querying Windows build component information:
+
+```bash
+# WCD Bridge URL (host-side service)
+WIN_COMP_BRIDGE_URL=http://host.docker.internal:8005
+```
+
+**Setup:**
+```powershell
+# Start with network share
+llmcrawl wcd-bridge --build "\\winbuilds\release\rs_sparc_ctr_exp\29503.1000"
+
+# Or with WCDaaS local mode
+llmcrawl wcd-bridge --wcdaas-local --branch rs_sparc_ctr_exp --build-name 29503.1000
+```
+
+See [WINDOWS_COMPOSITION_TOOL.md](WINDOWS_COMPOSITION_TOOL.md) for details.
 
 ### Tool Call Limits
 
+Control how many times each tool can be called per request:
+
 ```bash
-# Per-tool call limits (JSON object)
-# -1 = unlimited
-TOOL_ROUND_LIMITS={"search_azure_devops_code":30,"get_azure_devops_file":30,"crawl_and_refresh":20,"read_local_file":50,"list_files":50,"search_file_content":50}
+# Per-tool limits (JSON object, -1 = unlimited)
+TOOL_ROUND_LIMITS={
+  "search_azure_devops_code": 30,
+  "get_azure_devops_file": 30,
+  "crawl_and_refresh": 20,
+  "read_local_file": 50,
+  "list_files": 50,
+  "search_file_content": 50,
+  "index_files": 50,
+  "query_composition_db": -1
+}
 
 # Default limit for tools not specified above
 MAX_TOOL_ROUNDS=5
 
-# Maximum files per code analysis request
+# Code analysis limits
 MAX_FILES_PER_REQUEST=80
+MAX_INPUT_TOKENS=100000
 ```
 
-### Windows Composition Database (WCD)
+---
+
+## Web Crawling
+
+### Domain Allowlist
 
 ```bash
-# WCD Bridge URL (if running wcd-bridge on host)
-WIN_COMP_BRIDGE_URL=http://host.docker.internal:8005
+# Comma-separated list of allowed domains
+ALLOWED_DOMAINS=sec.gov,ft.com,wsj.com,nvidia.com,reuters.com,bloomberg.com
+
+# Respect robots.txt
+RESPECT_ROBOTS=true
+
+# Concurrent requests
+MAX_CONCURRENCY=4
+
+# Request timeout (milliseconds)
+REQUEST_TIMEOUT_MS=20000
+
+# User agent string
+USER_AGENT=WebRAG/1.0 (+https://github.com/yourorg/webrag)
+```
+
+### Internal Site Authentication
+
+For crawling sites requiring SSO/cookie authentication:
+
+```bash
+# Authentication type: none, cookies, headers, basic, bearer
+FIRECRAWL_AUTH_TYPE=cookies
+
+# Captured session state (auto-populated by llmcrawl auth command)
+FIRECRAWL_AUTH_STORAGE_STATE={"cookies": [...], "origins": [...]}
+```
+
+**One-command setup:**
+```bash
+llmcrawl auth https://internal-site.com
+```
+
+This opens a browser, captures cookies after login, and updates `.env` automatically.
+
+See [AUTHENTICATION.md](AUTHENTICATION.md) for details.
+
+---
+
+## Vector Database
+
+```bash
+# Vector database type
+VECTOR_DB=qdrant
+# Options: qdrant, pgvector
+
+# Qdrant URL (default container)
+QDRANT_URL=http://qdrant:6333
+
+# PostgreSQL connection (for pgvector)
+PG_DSN=postgresql://postgres:password@postgres:5432/rag_db
 ```
 
 ---
@@ -192,90 +358,36 @@ WIN_COMP_BRIDGE_URL=http://host.docker.internal:8005
 ### Service Ports
 
 ```bash
-# Change ports if defaults conflict with other services
+# Change if defaults conflict with other services
 GATEWAY_PORT=8000
 CRAWLER_PORT=8001
 INDEXER_PORT=8002
-MCP_SERVER_PORT=8003
-HICHAT_PORT=8080
 ```
 
 ### Internal Service URLs
 
-These are used for container-to-container communication:
+Container-to-container communication (usually don't change):
 
 ```bash
-# Usually don't need to change these
 CRAWLER_URL=http://crawler:8001
 INDEXER_URL=http://indexer:8002
 MCP_SERVER_URL=http://mcp-server:8003
 AZURE_DEVOPS_MCP_URL=http://azure-devops-mcp-server:8004
-```
-
-### Web Crawling
-
-```bash
-# Allowed domains for crawling (comma-separated)
-ALLOWED_DOMAINS=example.com,docs.microsoft.com
-
-# Respect robots.txt
-RESPECT_ROBOTS=true
-
-# Concurrent crawl requests
-MAX_CONCURRENCY=4
-
-# Request timeout (milliseconds)
-REQUEST_TIMEOUT_MS=20000
-
-# Gateway timeout (seconds)
-GATEWAY_TIMEOUT=45
-
-# Crawler timeout (seconds)
-CRAWLER_TIMEOUT=25
-```
-
-### Authentication for Internal Sites
-
-```bash
-# Authentication type: none, cookies, headers, basic
-FIRECRAWL_AUTH_TYPE=cookies
-
-# Test URL for auth verification
-AUTH_TEST_URL=https://internal-site.com
-
-# Captured session state (set by llmcrawl auth command)
-FIRECRAWL_AUTH_STORAGE_STATE=<captured_state>
-```
-
-> **Tip:** Use `llmcrawl auth <url>` to automatically capture and configure authentication cookies.
-
----
-
-## Vector Database
-
-```bash
-# Vector database type: qdrant or pgvector
-VECTOR_DB=qdrant
-
-# Qdrant URL (default, runs in container)
-QDRANT_URL=http://qdrant:6333
-
-# PostgreSQL (for pgvector)
-# PG_DSN=postgresql://user:password@postgres:5432/rag_db
+FIRECRAWL_URL=http://firecrawl:3002
 ```
 
 ---
 
-## Logging and Cache
+## Logging and Caching
 
 ```bash
-# Log level: DEBUG, INFO, WARNING, ERROR
+# Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_LEVEL=INFO
 
 # Log format: json or text
 LOG_FORMAT=json
 
-# Redis URL (for caching)
+# Redis URL (caching and rate limiting)
 REDIS_URL=redis://redis:6379/0
 
 # Cache TTL (seconds)
@@ -284,118 +396,101 @@ CACHE_TTL_SECONDS=3600
 
 ---
 
-## Applying Changes
-
-**⚠️ IMPORTANT:** After editing `.env`, you must restart services to apply changes.
-
-### Using llmcrawl CLI
+## Rate Limiting
 
 ```bash
-# Recommended: Stop and start
-llmcrawl deploy --down
-llmcrawl deploy --up
+# Requests per minute
+RATE_LIMIT_PER_MINUTE=60
+
+# Burst allowance
+RATE_LIMIT_BURST=10
 ```
 
-### Using Docker Compose Directly
+---
+
+## Applying Changes
+
+**Important:** After editing `.env`, restart services to apply changes.
 
 ```bash
-cd llmcrawl-deploy
+# Recommended method
+llmcrawl deploy --down
+llmcrawl deploy --up
 
-# Force recreate to reload .env
+# Alternative (force recreate)
+cd llmcrawl-deploy
 docker compose up -d --force-recreate
 ```
 
-> **Note:** `docker compose restart` does NOT reload `.env` changes!
+**Note:** `docker compose restart` does NOT reload `.env` changes.
 
 ---
 
-## Troubleshooting
+## Complete Settings Reference
 
-### Changes Not Applied
-
-**Problem:** Modified `.env` but services still use old values
-
-**Solution:**
-```bash
-# Stop completely and restart
-llmcrawl deploy --down
-llmcrawl deploy --up
-```
-
-### Missing API Key Error
-
-**Problem:** "Invalid API key" or "API key not found"
-
-**Solution:**
-```bash
-# Check if key is set in .env
-cd llmcrawl-deploy
-grep API_KEY .env
-
-# Verify no typos, extra spaces, or quotes around value
-# CORRECT:
-OPENAI_API_KEY=sk-abc123
-
-# WRONG:
-OPENAI_API_KEY="sk-abc123"   # No quotes!
-OPENAI_API_KEY= sk-abc123    # No leading space!
-```
-
-### Model Not Found
-
-**Problem:** "Deployment not found" or "Model not found"
-
-**Solution:**
-1. Verify deployment name in Azure Portal matches `deployment_name` in `LLM_MODELS`
-2. Check the model JSON is valid (no trailing commas, proper quotes)
-3. Ensure `provider_type` is correct (`openai` or `anthropic`)
-
-### Azure DevOps 401 Error
-
-**Problem:** "Unauthorized" when using Azure DevOps tools
-
-**Solution:**
-1. Verify PAT hasn't expired
-2. Check PAT has **Code (Read)** scope
-3. Ensure `AZURE_DEVOPS_PAT` is set correctly in `.env`
-
-### Port Already in Use
-
-**Problem:** "Port 8000 is already in use"
-
-**Solution:**
-```bash
-# Option 1: Stop conflicting service
-# Option 2: Change port in .env
-GATEWAY_PORT=8100
-```
-
----
-
-## Security Best Practices
-
-1. **Never commit `.env`** - It's in `.gitignore` for a reason
-2. **Use environment variables** - Don't hardcode credentials in code
-3. **Rotate credentials regularly** - Update API keys and PATs periodically
-4. **Use separate configurations** - Different `.env` for dev/staging/prod
-5. **Limit file access** - Only mount necessary folders in `MCP_HOST_FOLDER`
-6. **Restrict domains** - Use `ALLOWED_DOMAINS` to limit crawlable sites
-
----
-
-## Complete .env Example
-
-See `llmcrawl-deploy/.env.example` for a complete example with all options.
-
-```bash
-# View example configuration
-cat llmcrawl-deploy/.env.example
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| **LLM Configuration** |||
+| `LLM_PROVIDER` | `openai` | Base provider: `openai` or `azure` |
+| `AZURE_OPENAI_ENDPOINT` | - | Azure OpenAI resource URL |
+| `AZURE_OPENAI_API_KEY` | - | API key (optional with Entra ID) |
+| `AZURE_OPENAI_API_VERSION` | `2025-01-01-preview` | Azure OpenAI API version |
+| `AZURE_ANTHROPIC_ENDPOINT` | - | Azure Anthropic endpoint URL |
+| `OPENAI_API_KEY` | - | Direct OpenAI API key |
+| `LLM_MODELS` | `[]` | JSON array of available models |
+| `EMBED_MODEL` | `text-embedding-3-large` | Embedding model |
+| `CLAUDE_BRIDGE_URL` | - | Claude Code CLI bridge URL |
+| **Entra ID Auth** |||
+| `ENTRA_CLIENT_ID` | - | Azure AD application ID |
+| `ENTRA_TENANT_ID` | - | Azure AD tenant ID |
+| `AZURE_FOUNDRY_SCOPE` | - | Token scope for Azure AI |
+| `JWT_VALIDATION_ENABLED` | `false` | Validate JWT tokens at gateway |
+| **Tool Configuration** |||
+| `AZURE_DEVOPS_PAT` | - | Azure DevOps Personal Access Token |
+| `AZURE_DEVOPS_ORG` | - | Default Azure DevOps organization |
+| `AZURE_DEVOPS_PROJECT` | - | Default Azure DevOps project |
+| `AZURE_DEVOPS_REPO` | - | Default repository |
+| `AZURE_DEVOPS_BRANCH` | `main` | Default branch |
+| `WIN_COMP_BRIDGE_URL` | - | WCD Bridge service URL |
+| `TOOL_ROUND_LIMITS` | `{}` | Per-tool call limits (JSON) |
+| `MAX_TOOL_ROUNDS` | `5` | Default tool call limit |
+| `MAX_FILES_PER_REQUEST` | `80` | Max files for code analysis |
+| `MAX_INPUT_TOKENS` | `100000` | Max input tokens |
+| **MCP Server** |||
+| `MCP_HOST_FOLDER` | `./data/files` | Host folder to mount |
+| `MCP_ROOT_FOLDER` | `/data/files` | Container mount point |
+| `MCP_VECTOR_DB_PATH` | `/data/mcp_vector_db` | MCP vector DB path |
+| **Web Crawling** |||
+| `ALLOWED_DOMAINS` | - | Comma-separated domain allowlist |
+| `RESPECT_ROBOTS` | `true` | Respect robots.txt |
+| `MAX_CONCURRENCY` | `4` | Concurrent crawl requests |
+| `REQUEST_TIMEOUT_MS` | `20000` | Request timeout (ms) |
+| `USER_AGENT` | `WebRAG/1.0` | User agent string |
+| `FIRECRAWL_AUTH_TYPE` | `none` | Auth type: none/cookies/headers/basic/bearer |
+| `FIRECRAWL_AUTH_STORAGE_STATE` | - | Captured auth cookies (JSON) |
+| **Vector Database** |||
+| `VECTOR_DB` | `qdrant` | Vector DB: `qdrant` or `pgvector` |
+| `QDRANT_URL` | `http://qdrant:6333` | Qdrant URL |
+| `PG_DSN` | - | PostgreSQL connection string |
+| **Services** |||
+| `GATEWAY_PORT` | `8000` | Gateway port |
+| `CRAWLER_PORT` | `8001` | Crawler port |
+| `INDEXER_PORT` | `8002` | Indexer port |
+| `FIRECRAWL_URL` | `http://firecrawl:3002` | Firecrawl URL |
+| **Logging & Cache** |||
+| `LOG_LEVEL` | `INFO` | Log level |
+| `LOG_FORMAT` | `json` | Log format: json/text |
+| `REDIS_URL` | `redis://redis:6379/0` | Redis URL |
+| `CACHE_TTL_SECONDS` | `3600` | Cache TTL |
+| **Rate Limiting** |||
+| `RATE_LIMIT_PER_MINUTE` | `60` | Requests per minute |
+| `RATE_LIMIT_BURST` | `10` | Burst allowance |
 
 ---
 
 ## Related Documentation
 
 - **[INSTALL.md](INSTALL.md)** - Installation and setup guide
-- **[DIAGNOSTICS.md](DIAGNOSTICS.md)** - Troubleshooting and debugging
-- **[MONITORING.md](MONITORING.md)** - Metrics and dashboards
+- **[AUTHENTICATION.md](AUTHENTICATION.md)** - Entra ID and internal site authentication
+- **[DIAGNOSTICS.md](DIAGNOSTICS.md)** - Monitoring and troubleshooting
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design and workflows

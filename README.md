@@ -237,35 +237,28 @@ llmcrawl deploy --up --profile monitoring
 | Prometheus | http://localhost:9090      |
 | Grafana    | http://localhost:3001      |
 
-📖 **See [docs/MONITORING.md](docs/MONITORING.md)** for complete monitoring guide.
+📖 **See [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md)** for monitoring and diagnostics guide.
 
 ---
 
 ## 📚 Documentation
 
-### Core Documentation
 | Document | Description |
 |----------|-------------|
-| [docs/INSTALL.md](docs/INSTALL.md) | Installation and deployment for users |
+| [docs/INSTALL.md](docs/INSTALL.md) | Installation and deployment guide |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Environment variables and settings |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and data flows |
-| [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) | Troubleshooting and debugging |
-| [docs/MONITORING.md](docs/MONITORING.md) | Observability, metrics, and dashboards |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, workflows, and data flows |
+| [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) | Internal site auth and Entra ID setup |
+| [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) | Troubleshooting, monitoring, and debugging |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Development setup and testing |
+| [docs/MCP_SERVERS.md](docs/MCP_SERVERS.md) | MCP server integration and VS Code setup |
+| [docs/WINDOWS_COMPOSITION_TOOL.md](docs/WINDOWS_COMPOSITION_TOOL.md) | Windows Composition Database tool |
 
-### MCP Servers
+### MCP Server READMEs
 | Server | Documentation |
 |--------|---------------|
 | Local File Operations | [mcp_servers/local_access_mcp_server/README.md](mcp_servers/local_access_mcp_server/README.md) |
 | Azure DevOps | [mcp_servers/azure_devops_mcp_server/docs/README.md](mcp_servers/azure_devops_mcp_server/docs/README.md) |
-
-### Additional Guides
-| Document | Description |
-|----------|-------------|
-| [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) | Crawl authenticated internal sites |
-| [docs/CRAWL_STRATEGY.md](docs/CRAWL_STRATEGY.md) | How crawling works, limitations |
-| [docs/VISUAL_OVERVIEW.md](docs/VISUAL_OVERVIEW.md) | Quick visual guide with diagrams |
-| [docs/MULTI_PROVIDER_LLM.md](docs/MULTI_PROVIDER_LLM.md) | Multi-provider LLM configuration (OpenAI, Anthropic, Claude Bridge) |
 
 ---
 

@@ -1,53 +1,91 @@
-# Diagnostics and Troubleshooting Guide
+# Diagnostics, Monitoring & Troubleshooting Guide
 
-This guide helps you debug issues with LLMCrawl after deployment. It covers viewing logs, diagnosing common problems, and step-by-step troubleshooting.
+This guide covers health monitoring, logging, metrics collection, and troubleshooting for the LLMCrawl system.
 
 ## Table of Contents
 
+- [Quick Health Check](#quick-health-check)
 - [Viewing Logs](#viewing-logs)
 - [Service Status](#service-status)
-- [Visual Diagnostics with Monitoring](#visual-diagnostics-with-monitoring)
+- [Monitoring Stack](#monitoring-stack)
+  - [Starting Monitoring](#starting-monitoring)
+  - [Prometheus Metrics](#prometheus-metrics)
+  - [Grafana Dashboards](#grafana-dashboards)
+  - [Alerting](#alerting)
 - [Debugging Specific Issues](#debugging-specific-issues)
-  - [Crawling Not Working](#1-crawling-not-working)
-  - [What URLs Does LLM Crawl](#2-what-urls-does-llm-crawl)
-  - [Agent Behavior](#3-agent-behavior)
-  - [Embedding Issues](#4-embedding-issues)
-  - [Tool Calls](#5-tool-calls)
 - [Common Errors and Solutions](#common-errors-and-solutions)
-- [Quick Debugging Checklist](#quick-debugging-checklist)
 - [Advanced Diagnostics](#advanced-diagnostics)
+
+---
+
+## Quick Health Check
+
+### Using CLI
+
+```bash
+llmcrawl deploy --status
+llmcrawl deploy --health
+```
+
+### Using Make
+
+```bash
+make health
+```
+
+### Using curl
+
+```bash
+curl http://localhost:8000/health  # Gateway
+curl http://localhost:8001/health  # Crawler
+curl http://localhost:8002/health  # Indexer
+curl http://localhost:8003/health  # MCP Server
+curl http://localhost:6333/health  # Qdrant
+```
+
+### Health Response Format
+
+```json
+{
+  "status": "healthy",
+  "service": "gateway",
+  "timestamp": "2025-11-15T10:30:00.123456",
+  "version": "1.0.0",
+  "components": {
+    "crawler": "healthy",
+    "indexer": "healthy",
+    "llm": "healthy"
+  }
+}
+```
+
+**Status Values:**
+- `healthy`: All components operational
+- `degraded`: Service running but some components failing
+- `unhealthy`: Service not functional
 
 ---
 
 ## Viewing Logs
 
-### View All Service Logs
+### All Service Logs
 
 ```powershell
-# Follow all logs in real-time (Ctrl+C to exit)
+# Follow all logs in real-time
 llmcrawl deploy --logs
 
-# View logs without following (snapshot)
+# Snapshot (no follow)
 llmcrawl deploy --logs --no-follow
 ```
 
-### View Specific Service Logs
+### Specific Service Logs
 
 ```powershell
-# Gateway (LLM agent, tool calls, orchestration)
-llmcrawl deploy --logs gateway
-
-# Crawler (web crawling, authentication)
-llmcrawl deploy --logs crawler
-
-# Indexer (embedding, vector storage)
-llmcrawl deploy --logs indexer
-
-# MCP Server (Azure DevOps, local file access)
-llmcrawl deploy --logs mcp-server
-
-# Qdrant vector database
-llmcrawl deploy --logs qdrant
+llmcrawl deploy --logs gateway    # LLM agent, tool calls
+llmcrawl deploy --logs crawler    # Web crawling, auth
+llmcrawl deploy --logs indexer    # Embedding, vector storage
+llmcrawl deploy --logs mcp-server # File access, Azure DevOps
+llmcrawl deploy --logs qdrant     # Vector database
 ```
 
 ### Docker Compose Direct Access
@@ -55,20 +93,17 @@ llmcrawl deploy --logs qdrant
 ```powershell
 cd llmcrawl-deploy
 
-# Follow specific service logs
+# Follow specific service
 docker compose logs -f gateway
 
 # Last N lines
 docker compose logs --tail=100 crawler
 
-# Multiple services
-docker compose logs -f gateway crawler
-
 # With timestamps
 docker compose logs -f --timestamps gateway
 ```
 
-### Filter Logs with PowerShell
+### Filter Logs
 
 ```powershell
 # Search for errors
@@ -107,93 +142,178 @@ hichat                Up        0.0.0.0:8080->8080/tcp
 ### Health Check APIs
 
 ```powershell
-# Gateway health
 Invoke-RestMethod -Uri "http://localhost:8000/health"
-
-# Crawler health
 Invoke-RestMethod -Uri "http://localhost:8001/health"
-
-# Indexer health
 Invoke-RestMethod -Uri "http://localhost:8002/health"
-
-# Qdrant health
 Invoke-RestMethod -Uri "http://localhost:6333/health"
 ```
 
 ---
 
-## Visual Diagnostics with Monitoring
+## Monitoring Stack
 
-For visual health monitoring without reading logs, use the Prometheus/Grafana monitoring stack.
+### Starting Monitoring
 
-### Starting the Monitoring Stack
+The Prometheus + Grafana monitoring stack is optional:
 
-The monitoring services (Prometheus + Grafana) are optional and require a separate startup:
+```bash
+# Start with monitoring profile
+llmcrawl deploy --up --profile monitoring
 
-```powershell
+# Or using docker compose
 cd llmcrawl-deploy
-
-# Start monitoring alongside existing services
 docker compose --profile monitoring up -d
 ```
 
 This starts:
-- **Prometheus** (http://localhost:9090) - Metrics collection
-- **Grafana** (http://localhost:3001) - Visual dashboards
+- **Prometheus** (http://localhost:9090): Metrics collection
+- **Grafana** (http://localhost:3001): Visual dashboards (admin/admin)
 
-### Quick Health Check with Prometheus
+### Prometheus Metrics
+
+#### Metrics Endpoints
+
+All services expose Prometheus-compatible metrics:
+
+```bash
+curl http://localhost:8000/metrics  # Gateway
+curl http://localhost:8001/metrics  # Crawler
+curl http://localhost:8002/metrics  # Indexer
+```
+
+#### Available Metrics
+
+**HTTP Request Metrics:**
+```promql
+# Total requests by handler, method, and status
+http_requests_total{handler="/agent/chat", method="POST", status="2xx"}
+
+# Request duration histogram
+http_request_duration_seconds_bucket{handler="/agent/chat", le="1.0"}
+```
+
+**System Metrics:**
+```promql
+# CPU usage
+process_cpu_seconds_total
+
+# Memory usage
+process_resident_memory_bytes
+process_virtual_memory_bytes
+```
+
+#### Useful Prometheus Queries
+
+**Service Availability:**
+```promql
+# Check which services are up
+up{job=~"gateway|crawler|indexer"}
+
+# Service uptime in hours
+(time() - process_start_time_seconds) / 3600
+```
+
+**Performance Monitoring:**
+```promql
+# Request rate per service
+sum(rate(http_requests_total[5m])) by (job)
+
+# 95th percentile latency
+histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+
+# Error rate
+sum(rate(http_requests_total{status=~"5.."}[5m])) by (job)
+
+# Error percentage
+sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) * 100
+```
+
+**Resource Usage:**
+```promql
+# Memory usage in MB
+process_resident_memory_bytes / 1024 / 1024
+
+# CPU usage percentage (approximate)
+rate(process_cpu_seconds_total[5m]) * 100
+```
+
+#### Quick Visual Checks via Prometheus
 
 Open http://localhost:9090 and use these queries:
 
-| What to Check | Prometheus Query | Meaning |
-|---------------|------------------|---------|
-| **All services up?** | `up` | 1 = running, 0 = down |
-| **Error rate** | `rate(http_requests_total{status=~"5.."}[5m])` | 5xx errors per second |
-| **Request latency (P95)** | `histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))` | 95th percentile response time |
-| **Request rate** | `rate(http_requests_total[5m])` | Requests per second per service |
+| What to Check | Query | Expected |
+|---------------|-------|----------|
+| All services up? | `up` | All values = 1 |
+| Error rate | `rate(http_requests_total{status=~"5.."}[5m])` | 0 or very low |
+| Is system slow? | `histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))` | < 2s chat, < 30s crawl |
 
-**How to use:**
-1. Open http://localhost:9090
-2. Paste a query in the search box
-3. Click **Execute**
-4. Switch to **Graph** tab for visualization
+### Grafana Dashboards
 
-### Grafana Dashboard
+#### Initial Setup
 
-1. Open http://localhost:3001
-2. Login with `admin` / `admin`
-3. Go to **Dashboards** → **New** → **Import**
-4. Create panels using Prometheus queries above
+1. Access Grafana: http://localhost:3001
+2. Login: admin / admin
+3. Datasource: Prometheus auto-configured at http://prometheus:9090
 
-### Quick Visual Checks
+#### Create Dashboard Panels
 
-**Is everything running?**
+**Service Health Panel:**
+- Panel Type: Stat
+- Query: `up{job="gateway"}`
+- Thresholds: Red < 1, Green >= 1
+
+**Request Rate Panel:**
+- Panel Type: Time series
+- Query: `sum(rate(http_requests_total[5m])) by (job)`
+- Legend: `{{job}}`
+
+**Response Time (P95) Panel:**
+- Panel Type: Time series
+- Query: `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))`
+
+**Memory Usage Panel:**
+- Panel Type: Time series
+- Query: `process_resident_memory_bytes{job=~"gateway|crawler|indexer"} / 1024 / 1024`
+- Unit: MB
+
+### Alerting
+
+#### Prometheus Alert Rules
+
+Create alert rules in `deploy/prometheus-alerts.yml`:
+
+```yaml
+groups:
+  - name: llmcrawl_alerts
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"gateway|crawler|indexer"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) by (job)
+          / sum(rate(http_requests_total[5m])) by (job) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes > 1073741824
+        for: 5m
+        labels:
+          severity: warning
 ```
-Query: up
-Result: All values should be 1
-```
-
-**Any errors happening?**
-```
-Query: rate(http_requests_total{status=~"5.."}[5m])
-Result: Should be 0 or very low
-```
-
-**Is the system slow?**
-```
-Query: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
-Result: < 2s for chat, < 30s for crawl operations
-```
-
-### Qdrant Dashboard
-
-For vector database health, use the built-in Qdrant dashboard:
-
-1. Open http://localhost:6333/dashboard
-2. Check:
-   - Collections exist (should see `llmcrawl_docs` or similar)
-   - Point count > 0 (documents have been indexed)
-   - No error messages
 
 ### Stopping Monitoring
 
@@ -201,10 +321,6 @@ For vector database health, use the built-in Qdrant dashboard:
 cd llmcrawl-deploy
 docker compose --profile monitoring down
 ```
-
-> **Note:** Stopping monitoring doesn't affect the main LLMCrawl services.
-
-For complete monitoring documentation, see [MONITORING.md](MONITORING.md).
 
 ---
 
@@ -222,7 +338,7 @@ For complete monitoring documentation, see [MONITORING.md](MONITORING.md).
 llmcrawl deploy --logs crawler
 ```
 
-**What to look for:**
+**Look for:**
 ```
 ❌ Error crawling URL: https://...
 🔒 Authentication required for: https://...
@@ -241,23 +357,14 @@ $body = @{
 Invoke-RestMethod -Uri "http://localhost:8001/crawl" -Method POST -ContentType "application/json" -Body $body
 ```
 
-**Common fixes:**
+**Solutions:**
 
 | Problem | Solution |
 |---------|----------|
-| Authentication required | Run `llmcrawl auth <url>` to capture cookies |
-| Connection timeout | Check network, increase timeout in `.env` |
+| Authentication required | Run `llmcrawl auth <url>` |
+| Connection timeout | Check network, increase timeout |
 | Robots.txt blocked | Site doesn't allow crawling |
 | SSL certificate error | Check system certificates |
-| FireCrawl unavailable | Check FireCrawl container, API key |
-
-**Check authentication cookies:**
-```powershell
-# View loaded cookies in crawler logs
-docker compose logs crawler | Select-String -Pattern "cookie|Cookie|auth"
-```
-
----
 
 ### 2. What URLs Does LLM Crawl
 
@@ -266,26 +373,10 @@ docker compose logs crawler | Select-String -Pattern "cookie|Cookie|auth"
 docker compose logs gateway | Select-String -Pattern "crawl|seed_urls|Crawling"
 ```
 
-**Look for:**
-```
-🔍 Tool call: web_search with URLs: ['https://...', 'https://...']
-📄 Crawled 3 documents from seed URLs
-✅ Indexed 3 documents for query: ...
-```
-
 **Crawler logs show actual fetches:**
 ```powershell
 docker compose logs crawler | Select-String -Pattern "Fetching|Retrieved|Processing"
 ```
-
-**Look for:**
-```
-📥 Fetching: https://www.example.com/page1
-✅ Retrieved 15,432 bytes from https://...
-📝 Extracted 2,341 chars of content
-```
-
----
 
 ### 3. Agent Behavior
 
@@ -294,95 +385,47 @@ docker compose logs crawler | Select-String -Pattern "Fetching|Retrieved|Process
 llmcrawl deploy --logs gateway
 ```
 
-**Look for the agent flow:**
+**Look for:**
 ```
 🤖 Agent starting workflow for query: "..."
 💭 LLM analyzing query...
 🔧 LLM decided to call tool: web_search
 📤 Tool input: {"query": "...", "urls": [...]}
 📥 Tool output: {"success": true, "docs": [...]}
-💬 LLM generating response with citations...
 ✅ Agent completed successfully
 ```
 
-**Enable DEBUG logging for more detail:**
-
+**Enable DEBUG logging:**
 Edit `llmcrawl-deploy/.env`:
 ```bash
 LOG_LEVEL=DEBUG
 ```
 
-Restart services:
+Restart:
 ```powershell
-llmcrawl deploy --down
-llmcrawl deploy --up
+llmcrawl deploy --down && llmcrawl deploy --up
 ```
 
-**Debug prompts and LLM responses:**
-With `LOG_LEVEL=DEBUG`, you'll see:
-- Full system prompts sent to LLM
-- LLM's raw response including reasoning
-- Tool call arguments
-- Context retrieved from vector DB
-
----
-
-### 4. Embedding Issues
+### 4. Embedding/Indexer Issues
 
 **Symptoms:**
 - "No relevant documents found"
 - Search returns wrong results
-- Indexer errors
 
 **Check indexer logs:**
 ```powershell
 llmcrawl deploy --logs indexer
 ```
 
-**Look for:**
-```
-📥 Indexing document: "Page Title"
-🔢 Generated embedding (1536 dimensions)
-✅ Stored in Qdrant collection: llmcrawl_docs
-❌ Embedding failed: Invalid API key
-❌ Qdrant connection refused
-```
-
 **Check Qdrant dashboard:**
-```powershell
-Start-Process "http://localhost:6333/dashboard"
-```
-
-In the dashboard:
+Open http://localhost:6333/dashboard
 - Check if collections exist
-- View point count (should be > 0 after indexing)
-- Verify vector dimensions (1536 for OpenAI, 768 for some Azure models)
+- View point count (should be > 0)
 
-**Test indexer API:**
+**Test indexer:**
 ```powershell
-# Health check
 Invoke-RestMethod -Uri "http://localhost:8002/health"
-
-# Search test
-$body = @{
-    query = "test query"
-    top_k = 5
-} | ConvertTo-Json
-
-Invoke-RestMethod -Uri "http://localhost:8002/search" -Method POST -ContentType "application/json" -Body $body
 ```
-
-**Common embedding issues:**
-
-| Problem | Solution |
-|---------|----------|
-| Invalid API key | Check `OPENAI_API_KEY` or `AZURE_OPENAI_*` in `.env` |
-| Model not found | Verify `EMBEDDING_MODEL` deployment name |
-| Qdrant connection refused | Check if Qdrant container is running |
-| Wrong dimensions | Model mismatch between indexing and search |
-| Collection not found | Documents haven't been indexed yet |
-
----
 
 ### 5. Tool Calls
 
@@ -391,35 +434,9 @@ Invoke-RestMethod -Uri "http://localhost:8002/search" -Method POST -ContentType 
 docker compose logs gateway | Select-String -Pattern "tool|Tool"
 ```
 
-**Detailed tool call flow:**
-```
-🔧 Available tools: ['web_search', 'read_local_file', 'search_code', ...]
-🔧 LLM requested tool: web_search
-📤 Tool call input: {"query": "latest news", "urls": ["https://..."]}
-⏱️ Tool execution started...
-📥 Tool result: {"success": true, "documents": [...]}
-✅ Tool call completed in 2.3s
-```
-
-**Tool errors:**
-```
-❌ Tool call failed: web_search - Connection refused to crawler
-⚠️ Tool timeout after 30s: azure_devops_search
-❌ Tool error: read_local_file - File not found: /data/files/missing.txt
-```
-
-**Check MCP server for file/Azure DevOps tools:**
+**Check MCP server:**
 ```powershell
 llmcrawl deploy --logs mcp-server
-```
-
-**Test tools directly:**
-```powershell
-# List available tools
-Invoke-RestMethod -Uri "http://localhost:8000/tools"
-
-# Test MCP file listing
-Invoke-RestMethod -Uri "http://localhost:8003/list" -Method POST -ContentType "application/json" -Body '{"path": "/"}'
 ```
 
 ---
@@ -430,30 +447,28 @@ Invoke-RestMethod -Uri "http://localhost:8003/list" -Method POST -ContentType "a
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `port already in use` | Another service using the port | Stop conflicting service or change port in `.env` |
-| `network webrag-network not found` | Docker network missing | Run `llmcrawl deploy --up` (auto-creates network) |
-| `image not found` | Images not built | Run `llmcrawl deploy --up` to build |
-| `permission denied` | Docker permissions | Run Docker Desktop as admin, or add user to docker group |
+| `port already in use` | Port conflict | Stop conflicting service or change port in `.env` |
+| `network not found` | Network missing | Run `llmcrawl deploy --up` |
+| `image not found` | Images not built | Run `llmcrawl deploy --up` |
+| `permission denied` | Docker permissions | Run Docker Desktop as admin |
 
 ### LLM/API Errors
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `Invalid API key` | Wrong or missing API key | Check `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY` in `.env` |
-| `Model not found` | Wrong deployment name | Verify `LLM_MODELS` configuration matches Azure deployment |
-| `Rate limit exceeded` | Too many API calls | Reduce request rate, upgrade API tier |
-| `Context length exceeded` | Too much text sent to LLM | Reduce `MAX_CONTEXT_TOKENS` in `.env` |
-| `Connection refused` | LLM service unreachable | Check network, API endpoint URL |
+| `Invalid API key` | Wrong/missing key | Check `.env` file |
+| `Model not found` | Wrong deployment | Verify `LLM_MODELS` matches Azure deployment |
+| `Rate limit exceeded` | Too many calls | Reduce rate, upgrade API tier |
+| `Context length exceeded` | Too much text | Reduce `MAX_CONTEXT_TOKENS` |
 
 ### Crawler Errors
 
 | Error | Cause | Solution |
 |-------|-------|----------|
 | `Authentication required` | Site needs login | Run `llmcrawl auth <url>` |
-| `Cookie expired` | Auth cookies too old | Re-run `llmcrawl auth <url>` |
-| `SSL certificate verify failed` | Certificate issues | Check system time, install CA certs |
-| `Timeout` | Slow site or network | Increase `CRAWL_TIMEOUT` in `.env` |
-| `Playwright error` | Browser issues | Restart crawler container |
+| `Cookie expired` | Old auth cookies | Re-run `llmcrawl auth <url>` |
+| `SSL verify failed` | Certificate issues | Check system time, install CA certs |
+| `Timeout` | Slow network | Increase `CRAWL_TIMEOUT` |
 
 ### Indexer/Vector DB Errors
 
@@ -461,26 +476,15 @@ Invoke-RestMethod -Uri "http://localhost:8003/list" -Method POST -ContentType "a
 |-------|-------|----------|
 | `Qdrant connection refused` | Qdrant not running | Check `llmcrawl deploy --status` |
 | `Collection not found` | No documents indexed | Crawl some content first |
-| `Dimension mismatch` | Wrong embedding model | Ensure consistent model across index/search |
-| `Out of memory` | Too many vectors | Increase Qdrant memory, or use disk storage |
+| `Dimension mismatch` | Wrong embedding model | Ensure consistent model |
 
 ### MCP Server Errors
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `File not found` | Wrong path or not mounted | Check `MCP_HOST_FOLDER` in `.env` |
-| `Permission denied` | Container can't read files | Check file permissions on host |
-| `Azure DevOps 401` | PAT expired or invalid | Generate new PAT, update `.env` |
-| `Azure DevOps 404` | Wrong org/project/repo | Verify `AZURE_DEVOPS_*` settings |
-
-### Docker Errors
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `Cannot connect to Docker daemon` | Docker not running | Start Docker Desktop |
-| `no space left on device` | Disk full | Run `docker system prune` |
-| `container unhealthy` | Service failing health checks | Check service logs |
-| `OOM killed` | Out of memory | Increase Docker memory limit |
+| `File not found` | Wrong path | Check `MCP_HOST_FOLDER` in `.env` |
+| `Permission denied` | Can't read files | Check file permissions |
+| `Azure DevOps 401` | PAT expired | Generate new PAT |
 
 ---
 
@@ -504,50 +508,33 @@ Invoke-RestMethod -Uri "http://localhost:8003/list" -Method POST -ContentType "a
 ### Container Resource Usage
 
 ```powershell
-# Real-time stats
 docker stats
-
-# Specific containers
 docker stats llmcrawl-gateway llmcrawl-crawler
 ```
 
 ### Enter Container Shell
 
 ```powershell
-# Gateway container
 docker compose exec gateway /bin/bash
-
-# Crawler container
 docker compose exec crawler /bin/bash
-
-# Run Python in container
-docker compose exec gateway python -c "import httpx; print(httpx.get('http://crawler:8001/health').json())"
 ```
 
 ### Check Container Environment
 
 ```powershell
-# View environment variables
 docker compose exec gateway env | Sort-Object
-
-# Check if API key is set (masked)
 docker compose exec gateway env | Select-String "API_KEY"
 ```
 
 ### Network Diagnostics
 
 ```powershell
-# Check container network
 docker network inspect webrag-network
-
-# Test inter-container connectivity
 docker compose exec gateway curl http://crawler:8001/health
 docker compose exec gateway curl http://indexer:8002/health
 ```
 
 ### Reset Everything
-
-If all else fails:
 
 ```powershell
 # Stop and remove everything
@@ -562,9 +549,25 @@ llmcrawl deploy --up
 
 ---
 
+## Performance Baselines
+
+Establish normal operating ranges:
+
+| Metric | Normal Range |
+|--------|--------------|
+| Request rate | Varies by traffic |
+| Response time (P95) | < 2s chat, < 30s crawl |
+| Error rate | < 1% |
+| Memory: Gateway | ~200MB |
+| Memory: Crawler | ~500MB |
+| Memory: Indexer | ~400MB |
+| CPU usage | < 50% average |
+
+---
+
 ## Related Documentation
 
-- **[Monitoring Guide](MONITORING.md)** - Prometheus metrics, Grafana dashboards, alerting
-- **[Configuration Guide](CONFIGURATION.md)** - All environment variables and settings
-- **[Installation Guide](INSTALL.md)** - Installation and deployment instructions
-- **[Architecture Overview](ARCHITECTURE.md)** - System design and components
+- **[CONFIGURATION.md](CONFIGURATION.md)** - Environment variables and settings
+- **[INSTALL.md](INSTALL.md)** - Installation and deployment
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design and components
+- **[AUTHENTICATION.md](AUTHENTICATION.md)** - Authentication setup

@@ -455,7 +455,7 @@ Access points:
 - **Grafana**: http://localhost:3001 (admin/admin)
 - **Prometheus**: http://localhost:9090
 
-See [MONITORING.md](MONITORING.md) for dashboard setup.
+See [DIAGNOSTICS.md](DIAGNOSTICS.md) for monitoring setup.
 
 ---
 
@@ -801,5 +801,5 @@ llmcrawl deploy --up
 - **Troubleshooting**: See [DIAGNOSTICS.md](DIAGNOSTICS.md)
 - **Architecture**: See [ARCHITECTURE.md](ARCHITECTURE.md)
 - **Configuration**: See [CONFIGURATION.md](CONFIGURATION.md)
-- **Monitoring**: See [MONITORING.md](MONITORING.md)
+- **Monitoring**: See [DIAGNOSTICS.md](DIAGNOSTICS.md)
 - **Authentication**: See [AUTHENTICATION.md](AUTHENTICATION.md)
