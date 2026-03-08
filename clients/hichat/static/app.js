@@ -795,6 +795,66 @@ function clearChat() {
     addMessage('assistant', '**Chat cleared!** Start a new conversation.', null, false);
 }
 
+// =============================================================================
+// Memory Distillation - Save to Memory
+// =============================================================================
+
+async function triggerDistill() {
+    if (!conversationId) {
+        alert('No active conversation to save to memory.');
+        return;
+    }
+
+    const memoryBtn = document.getElementById('memoryBtn');
+    const originalText = memoryBtn.textContent;
+    memoryBtn.disabled = true;
+    memoryBtn.textContent = 'Saving...';
+
+    try {
+        const response = await fetch('/api/agent/distill', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                conversation_id: conversationId,
+                model: document.getElementById('modelSelector').value
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || 'Failed to save to memory');
+        }
+
+        const data = await response.json();
+
+        if (data.success) {
+            let message = '**Memory Saved!** ✅\n\n';
+
+            if (data.summary_preview) {
+                message += '**Session Summary:**\n' + data.summary_preview + '\n\n';
+            }
+
+            if (data.facts_preview) {
+                message += '**Durable Facts:**\n' + data.facts_preview + '\n\n';
+            }
+
+            message += '*' + data.message + '*';
+            addMessage('assistant', message, null, false);
+        } else {
+            addMessage('assistant', '⚠️ **Memory Save Issue:** ' + data.message, null, false);
+        }
+
+    } catch (error) {
+        console.error('Distill error:', error);
+        addMessage('assistant', '❌ **Error saving to memory:** ' + error.message, null, true);
+    } finally {
+        memoryBtn.disabled = false;
+        memoryBtn.textContent = originalText;
+    }
+}
+
 // Initialize on page load
 loadConfig();
 

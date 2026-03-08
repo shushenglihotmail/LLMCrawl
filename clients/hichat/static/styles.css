@@ -289,6 +289,23 @@ button {
     transform: none;
 }
 
+.memory-btn {
+    background: linear-gradient(135deg, #0099cc 0%, #00cc99 100%);
+    color: white;
+    padding: 12px 20px;
+}
+
+.memory-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 153, 204, 0.4);
+}
+
+.memory-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
 .clear-btn {
     background: #f0f0f0;
     color: #666;

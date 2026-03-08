@@ -51,6 +51,15 @@ TOOL_SAVE_FILE_FOR_DOWNLOAD = "save_file_for_download"
 TOOL_QUERY_COMPOSITION_DB = "query_composition_db"
 
 # =============================================================================
+# Memory Service Tools
+# =============================================================================
+TOOL_MEMORY_SEARCH = "memory_search"
+
+MEMORY_TOOLS = [
+    TOOL_MEMORY_SEARCH,
+]
+
+# =============================================================================
 # Default Tool Round Limits
 # =============================================================================
 # -1 means unlimited
@@ -72,4 +81,6 @@ DEFAULT_TOOL_LIMITS = {
     TOOL_SAVE_FILE_FOR_DOWNLOAD: 20,
     # WCD tool - unlimited
     TOOL_QUERY_COMPOSITION_DB: -1,
+    # Memory service tool - 20 calls
+    TOOL_MEMORY_SEARCH: 20,
 }

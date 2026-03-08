@@ -4,16 +4,20 @@ A production-ready, containerized Python web RAG system that enables LLMs to tri
 
 ## 🏗️ Architecture
 
-The system consists of five main services:
+The system uses a hybrid architecture with **local Python services** and **Docker containers**:
 
+**Local Services** (run on host for local filesystem access):
 - **Gateway Service** (Port 8000): FastAPI orchestrator with OpenAI/Azure OpenAI/Anthropic/Claude Bridge support
+- **Memory Service** (Port 8007): OpenClaw-style auto-memory with semantic search (memsearch + Milvus)
+
+**Docker Containers** (managed via docker-compose):
 - **Crawler Service** (Port 8001): FireCrawl + Playwright fallback + Trafilatura extraction
 - **Indexer Service** (Port 8002): LlamaIndex + Vector DB (Qdrant/pgvector) for RAG
 - **MCP Server** (Port 8003): Local file operations with semantic search
 - **Azure DevOps MCP** (Port 8004): Azure DevOps code search integration
+- **Milvus** (Port 19530): Vector database for memory service
 
-**Host-side services** (run on the host machine, accessed via `host.docker.internal`):
-
+**Host-side Bridge Services** (optional, run on the host machine):
 - **WCD Bridge** (Port 8005): Windows Composition Database query bridge
 - **Claude Bridge** (Port 8006): Claude Code CLI HTTP bridge for Opus/CLI models
 
@@ -24,21 +28,22 @@ The system consists of five main services:
 └─────────────────────────┬───────────────────────────────────┘
                           │
 ┌─────────────────────────▼───────────────────────────────────┐
-│                    Gateway API (8000)                        │
+│         Gateway API (8000) - LOCAL PYTHON SERVICE            │
 │              LLM Orchestration & Agent                       │
 └──────┬──────────────────┼───────────────┬───────────────────┘
        │                  │               │
-┌──────▼──────┐   ┌───────▼───────┐  ┌───▼───────────┐
-│   Crawler   │   │    Indexer    │  │  MCP Servers  │
-│   (8001)    │   │    (8002)     │  │  (8003/8004)  │
-└──────┬──────┘   └───────┬───────┘  └───────────────┘
-       │                  │
-┌──────▼──────────────────▼───────────────────────────────────┐
-│                   Data Stores                                │
-│  PostgreSQL (5432) │ Qdrant (6333) │ Redis (6379)           │
-└─────────────────────────────────────────────────────────────┘
+┌──────▼──────┐   ┌───────▼───────┐  ┌───▼───────────┐  ┌─────────────┐
+│   Crawler   │   │    Indexer    │  │  MCP Servers  │  │   Memory    │
+│   (8001)    │   │    (8002)     │  │  (8003/8004)  │  │   (8007)    │
+│   Docker    │   │    Docker     │  │    Docker     │  │   LOCAL     │
+└──────┬──────┘   └───────┬───────┘  └───────────────┘  └──────┬──────┘
+       │                  │                                     │
+┌──────▼──────────────────▼─────────────────────────────────────▼─────┐
+│                         Data Stores                                  │
+│  PostgreSQL (5432) │ Qdrant (6333) │ Redis (6379) │ Milvus (19530)  │
+└─────────────────────────────────────────────────────────────────────┘
 
-Host-side Bridge Services (accessed via host.docker.internal):
+Host-side Bridge Services:
 ┌─────────────────┐  ┌──────────────────┐
 │  WCD Bridge     │  │  Claude Bridge   │
 │  (8005)         │  │  (8006)          │
@@ -77,6 +82,15 @@ Host-side Bridge Services (accessed via host.docker.internal):
 - **MSAL Authentication**: Interactive OAuth with browser flow + PAT support
 
 📖 **Azure DevOps Documentation**: [mcp_servers/azure_devops_mcp_server/docs/README.md](mcp_servers/azure_devops_mcp_server/docs/README.md)
+
+### Long-term Memory (Memory Service)
+- **Auto-logging**: Every conversation message logged to daily markdown files
+- **80% Context Flush**: Automatic distillation when context window fills up
+- **Durable Facts**: Important facts saved to MEMORY.md, always loaded in system prompt
+- **Semantic Search**: memsearch-powered search across conversation history
+- **Manual Trigger**: "Save to Memory" button in HiChat for user-initiated distillation
+
+📖 **Memory Service Documentation**: [docs/MEMORY.md](docs/MEMORY.md)
 
 ---
 
@@ -122,9 +136,17 @@ cd LLMCrawl
 # Linux/Mac:
 python scripts/setup_dev.py
 
-# Start development environment
-make dev-up
+# Start all services (Docker + local Python services)
+.\scripts\start-services.ps1        # Windows
+# or
+make dev-up                          # Linux/Mac (Docker only)
+
+# Stop services
+.\scripts\stop-services.ps1         # Windows
 ```
+
+**Note:** Gateway and Memory Service run locally (not in Docker) for direct filesystem access.
+Use `start-services.ps1` on Windows to start both Docker containers and local Python services.
 
 ---
 
@@ -207,15 +229,17 @@ make health
 
 ### Service Endpoints
 
-| Service        | URL                           | Purpose              |
-|----------------|-------------------------------|----------------------|
-| Gateway        | http://localhost:8000/health  | API orchestrator     |
-| Crawler        | http://localhost:8001/health  | Web crawling         |
-| Indexer        | http://localhost:8002/health  | Vector indexing      |
-| MCP Server     | http://localhost:8003/health  | File operations      |
-| HiChat         | http://localhost:8080         | Web client           |
-| WCD Bridge     | http://localhost:8005         | WCD query bridge     |
-| Claude Bridge  | http://localhost:8006         | Claude Code CLI      |
+| Service        | URL                           | Type     | Purpose              |
+|----------------|-------------------------------|----------|----------------------|
+| Gateway        | http://localhost:8000/health  | Local    | API orchestrator     |
+| Memory Service | http://localhost:8007/health  | Local    | Long-term memory     |
+| Crawler        | http://localhost:8001/health  | Docker   | Web crawling         |
+| Indexer        | http://localhost:8002/health  | Docker   | Vector indexing      |
+| MCP Server     | http://localhost:8003/health  | Docker   | File operations      |
+| Milvus         | http://localhost:19530        | Docker   | Vector DB (memory)   |
+| HiChat         | http://localhost:8080         | Local    | Web client           |
+| WCD Bridge     | http://localhost:8005         | Local    | WCD query bridge     |
+| Claude Bridge  | http://localhost:8006         | Local    | Claude Code CLI      |
 
 📖 **See [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md)** for troubleshooting guide.
 
@@ -251,6 +275,7 @@ llmcrawl deploy --up --profile monitoring
 | [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) | Internal site auth and Entra ID setup |
 | [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) | Troubleshooting, monitoring, and debugging |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Development setup and testing |
+| [docs/MEMORY.md](docs/MEMORY.md) | Long-term memory service and auto-distillation |
 | [docs/MCP_SERVERS.md](docs/MCP_SERVERS.md) | MCP server integration and VS Code setup |
 | [docs/WINDOWS_COMPOSITION_TOOL.md](docs/WINDOWS_COMPOSITION_TOOL.md) | Windows Composition Database tool |
 

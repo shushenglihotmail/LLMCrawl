@@ -7,6 +7,29 @@
 #   Or: .\scripts\restart-services.ps1 -Build
 
 services:
+  # Milvus - Vector database for memory service (milvus-lite doesn't support Windows)
+  milvus:
+    image: milvusdb/milvus:v2.5.5
+    container_name: web-rag-milvus
+    command: ["milvus", "run", "standalone"]
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    environment:
+      - ETCD_USE_EMBED=true
+      - ETCD_DATA_DIR=/var/lib/milvus/etcd
+      - COMMON_STORAGETYPE=local
+    volumes:
+      - milvus_data:/var/lib/milvus
+    networks:
+      - webrag-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9091/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
   # Vector Database - Qdrant
   qdrant:
     image: qdrant/qdrant:v1.7.0
@@ -126,43 +149,8 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # Gateway Service
-  gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile.gateway
-    container_name: web-rag-gateway
-    ports:
-      - "8000:8000"
-    environment:
-      - GATEWAY_HOST=0.0.0.0
-      - GATEWAY_PORT=8000
-      - CRAWLER_URL=http://crawler:8001
-      - INDEXER_URL=http://indexer:8002
-      - MCP_SERVER_URL=http://mcp-server:8003
-      - AZURE_DEVOPS_MCP_URL=http://azure-devops-mcp-server:8004
-      - AZURE_DEVOPS_BRANCH=official/rs_sparc_ctr_exp
-      - ENVIRONMENT=development
-      - LOG_LEVEL=DEBUG
-      - RELOAD=true
-    env_file:
-      - .env
-    volumes:
-      - ./logs:/app/logs
-      - ../gateway:/app/gateway:rw
-    networks:
-      - webrag-network
-    depends_on:
-      - crawler
-      - indexer
-      - mcp-server
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    command: uvicorn gateway.main:app --host 0.0.0.0 --port 8000 --reload
-    restart: unless-stopped
+  # Gateway runs locally (not containerized) - see scripts/start-services.ps1
+  # Memory Service runs locally (not containerized) - see scripts/start-services.ps1
 
   # Crawler Service
   crawler:
@@ -305,13 +293,11 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GATEWAY_URL=http://gateway:8000
+      - GATEWAY_URL=http://host.docker.internal:8000
     volumes:
       - ./clients/demo:/app
     networks:
       - webrag-network
-    depends_on:
-      - gateway
     profiles:
       - demo
 
@@ -353,6 +339,7 @@ services:
       - monitoring
 
 volumes:
+  milvus_data:
   qdrant_data:
   postgres_data:
   redis_data:
@@ -360,6 +347,7 @@ volumes:
   grafana_data:
   mcp_vector_db:
   azure_devops_cache:
+  # memory_data removed - using local folder mount ./memory for shared access
 
 networks:
   webrag-network:

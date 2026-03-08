@@ -1,4 +1,6 @@
 # Indexer service dependencies
+# NOTE: llama-index requires setuptools>=80.9, conflicts with memsearch (<75)
+# Use a separate venv or run indexer in Docker only
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 llama-index>=0.9.0

@@ -100,3 +100,6 @@ yarn-error.log*
 # Monitoring data
 prometheus_data/
 grafana_data/
+
+# Claude setting
+settings.local.json

@@ -23,6 +23,7 @@ up:
 	@echo "Gateway: http://localhost:8000"
 	@echo "Crawler: http://localhost:8001"
 	@echo "Indexer: http://localhost:8002"
+	@echo "Memory Service: http://localhost:8007"
 	@echo "Qdrant Dashboard: http://localhost:6333/dashboard"
 
 down:
@@ -46,6 +47,7 @@ dev-up:
 	@echo "Gateway: http://localhost:8000"
 	@echo "Crawler: http://localhost:8001"
 	@echo "Indexer: http://localhost:8002"
+	@echo "Memory Service: http://localhost:8007"
 	@echo "Qdrant Dashboard: http://localhost:6333/dashboard"
 
 dev-down:
@@ -109,6 +111,9 @@ metrics-crawler:
 metrics-indexer:
 	curl http://localhost:8002/metrics
 
+metrics-memory:
+	curl http://localhost:8007/metrics
+
 metrics-all:
 	@echo "=== Gateway Metrics ==="
 	@curl -s http://localhost:8000/metrics | grep "http_requests_total"
@@ -116,6 +121,8 @@ metrics-all:
 	@curl -s http://localhost:8001/metrics | grep "http_requests_total"
 	@echo "\n=== Indexer Metrics ==="
 	@curl -s http://localhost:8002/metrics | grep "http_requests_total"
+	@echo "\n=== Memory Metrics ==="
+	@curl -s http://localhost:8007/metrics | grep "http_requests_total"
 
 # Cleanup
 clean:
@@ -140,6 +147,9 @@ health-crawler:
 
 health-indexer:
 	@curl -s http://localhost:8002/health | python -m json.tool 2>/dev/null || echo "Service not available"
+
+health-memory:
+	@curl -s http://localhost:8007/health | python -m json.tool 2>/dev/null || echo "Service not available"
 
 # Example queries
 test-query:

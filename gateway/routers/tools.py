@@ -28,6 +28,7 @@ from ..utils.tool_constants import (
     TOOL_CRAWL_AND_REFRESH,
     TOOL_INDEX_FILES,
     TOOL_LIST_FILES,
+    TOOL_MEMORY_SEARCH,
     TOOL_QUERY_COMPOSITION_DB,
     TOOL_READ_LOCAL_FILE,
     TOOL_SAVE_FILE_FOR_DOWNLOAD,
@@ -44,6 +45,7 @@ class ToolHandler:
         self.crawler_url = "http://crawler:8001"
         self.indexer_url = "http://indexer:8002"
         self.mcp_server_url = os.getenv("MCP_SERVER_URL", "http://mcp-server:8003")
+        self.memory_service_url = os.getenv("MEMORY_SERVICE_URL")
         # Increased to 90s to allow for depth crawling with Playwright
         # which can take 60-70s for depth=2 with authentication
         self.timeout = 90.0
@@ -100,6 +102,8 @@ class ToolHandler:
                 result = await self._handle_save_file_for_download(
                     arguments, request_id
                 )
+            elif tool_name == TOOL_MEMORY_SEARCH:
+                result = await self._handle_memory_search(arguments, request_id)
             else:
                 result = {"error": f"Unknown tool: {tool_name}"}
                 status = "error"
@@ -642,6 +646,75 @@ class ToolHandler:
         except Exception as e:
             logger.error(f"Failed to store file: {e}")
             return {"error": f"Failed to store file: {e}"}
+
+    async def _handle_memory_search(
+        self, arguments: Dict[str, Any], request_id: str
+    ) -> Dict[str, Any]:
+        """
+        Handle memory_search tool call.
+
+        Queries the memory service for relevant memories using hybrid search.
+
+        Args:
+            arguments: Tool arguments (query)
+            request_id: Request tracking ID
+
+        Returns:
+            Dict with search results or error
+        """
+        if not self.memory_service_url:
+            return {"error": "Memory service not configured"}
+
+        query = arguments.get("query")
+        if not query:
+            return {"error": "query parameter is required"}
+
+        limit = arguments.get("limit", 5)
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.memory_service_url}/search",
+                    json={"query": query, "limit": limit},
+                    headers={"X-Request-ID": request_id},
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            results = data.get("results", [])
+            if not results:
+                return {
+                    "found": False,
+                    "message": "No relevant memories found for this query.",
+                }
+
+            # Format results for LLM (memsearch API uses 'source' and 'score')
+            formatted_results = []
+            for r in results:
+                formatted_results.append(
+                    {
+                        "content": r.get("content", ""),
+                        "source": r.get("source", ""),
+                        "relevance": round(r.get("score", 0), 3),
+                    }
+                )
+
+            logger.info(
+                f"Memory search for '{query[:50]}...' returned {len(results)} results"
+            )
+
+            return {
+                "found": True,
+                "count": len(results),
+                "memories": formatted_results,
+            }
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Memory service error: {e.response.status_code}")
+            return {"error": f"Memory service error: {e.response.status_code}"}
+        except Exception as e:
+            logger.error(f"Memory search failed: {e}")
+            return {"error": f"Memory search failed: {str(e)}"}
 
 
 # Global tool handler

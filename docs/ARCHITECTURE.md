@@ -4,6 +4,8 @@
 
 LLMCrawl is a production-grade Web RAG system that combines LLM chat capabilities with real-time web crawling and semantic search. The system features conversation memory, intelligent tool calling, multi-source web scraping, and workflow-based interactions.
 
+**Hybrid Architecture:** Gateway and Memory Service run as local Python processes for direct filesystem access, while other services run in Docker containers.
+
 ## System Architecture
 
 ```
@@ -74,37 +76,53 @@ Host-side Bridge Services (accessed via host.docker.internal):
 │  WCD Bridge     │  │  Claude Bridge   │
 │  (8005)         │  │  (8006)          │
 └─────────────────┘  └──────────────────┘
+
+Memory Service (Port 8007):
+┌─────────────────────────────────────────┐
+│  MEMORY SERVICE (memsearch)              │
+├─────────────────────────────────────────┤
+│  • Auto-logging to daily markdown        │
+│  • 80% context flush with distillation   │
+│  • Semantic search across history        │
+│  • Durable facts in MEMORY.md            │
+│  • memsearch.watch() auto-indexing       │
+└─────────────────────────────────────────┘
 ```
 
 ## Service Communication
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
+│                    LOCAL PYTHON SERVICES                         │
+│  Gateway (:8000) ◄──► Memory Service (:8007) ◄──► Milvus        │
+└─────────────────────────────────────────────────────────────────┘
+                       │
+                       ▼ (HTTP to localhost for Docker containers)
+┌─────────────────────────────────────────────────────────────────┐
 │                    Docker Network: webrag-network                │
 └─────────────────────────────────────────────────────────────────┘
 
-External (Port 8000)
-    │
-    ▼
-┌───────────────┐
-│   Gateway     │──────┐
-│   :8000       │      │
-└───────────────┘      │
+Gateway (LOCAL :8000)
     │    │    │        │
     │    │    │        ├─► LLM API (OpenAI/Azure/Anthropic)
     │    │    │        │
-    │    │    └────────┼─► http://mcp-server:8003
+    │    │    └────────┼─► http://localhost:8003 (MCP Server)
     │    │             │
-    │    └─────────────┼─► http://indexer:8002
+    │    └─────────────┼─► http://localhost:8002 (Indexer)
     │                  │        │
-    └──────────────────┼─► http://crawler:8001
+    └──────────────────┼─► http://localhost:8001 (Crawler)
                        │        │
                        │        └─► http://firecrawl:3002
                        │                 │
                        │                 └─► http://redis:6379
                        │
-                       └─► http://qdrant:6333
+                       ├─► http://localhost:6333 (Qdrant)
+                       │
+                       └─► http://localhost:19530 (Milvus for Memory)
 ```
+
+**Note:** Gateway and Memory Service run locally (not in Docker) for direct filesystem access.
+They communicate with Docker services via `localhost:PORT` instead of Docker network names.
 
 ## Data Flow
 
@@ -301,6 +319,9 @@ When prompts exceed context limits, automatic compression is applied.
 | Crawler | HTML cache | Redis | Temporary |
 | Indexer | Embeddings | Qdrant/pgvector | Persistent |
 | MCP Server | File data | Host volume | Persistent |
+| Memory Service | Daily logs | ./memory/daily/*.md | Persistent |
+| Memory Service | Durable facts | ./memory/MEMORY.md | Persistent |
+| Memory Service | Vector index | Milvus container volume | Rebuildable |
 | Qdrant | Vectors | /qdrant/storage | Persistent |
 
 ## Security Boundaries
@@ -381,13 +402,66 @@ When prompts exceed context limits, automatic compression is applied.
 | Gateway | http://localhost:8000 | Main API |
 | Gateway Health | http://localhost:8000/health | Health check |
 | Gateway Chat | http://localhost:8000/agent/chat | Chat endpoint |
+| Gateway Distill | http://localhost:8000/agent/distill | Manual memory save |
 | Crawler | http://localhost:8001 | Crawl service |
 | Indexer | http://localhost:8002 | Index service |
 | MCP Server | http://localhost:8003 | File operations |
+| Memory Service | http://localhost:8007 | Long-term memory |
 | Qdrant Dashboard | http://localhost:6333/dashboard | Vector DB UI |
 | HiChat | http://localhost:8080 | Web client |
 | Grafana | http://localhost:3001 | Monitoring |
 | Prometheus | http://localhost:9090 | Metrics |
+
+## Memory Service Architecture
+
+The Memory Service implements OpenClaw-style auto-memory with two types of persistence:
+
+### Memory Types
+
+| Type | File | Content | Visibility |
+|------|------|---------|------------|
+| **Sessional** | `daily/YYYY-MM-DD.md` | Full conversation logs + summaries | Searched on demand |
+| **Durable** | `MEMORY.md` | Always-true facts and rules | Always in system prompt |
+
+### Memory Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Gateway
+    participant LLM
+    participant Memory as Memory Service
+
+    User->>Gateway: Send message
+    Gateway->>Memory: Log user message (daily log)
+    Gateway->>Gateway: Check token count
+
+    alt Token count >= 80%
+        Gateway->>LLM: Inject distillation prompt
+        LLM-->>Gateway: Response with [SUMMARY] [FACTS]
+        Gateway->>Memory: Save summary to daily log
+        Gateway->>Memory: Save facts to MEMORY.md
+        Gateway->>Gateway: Strip markers from response
+    end
+
+    Gateway->>Memory: Log assistant response
+    Memory-->>Memory: memsearch.watch() auto-indexes
+    Gateway-->>User: Clean response
+```
+
+### File Structure
+
+```
+deploy/memory/
+├── daily/                    # Sessional memory (per-day logs)
+│   ├── 2026-03-05.md        # Full transcript + session summaries
+│   ├── 2026-03-06.md
+│   └── 2026-03-07.md
+└── MEMORY.md                 # Durable facts (always loaded)
+
+# Vector index stored in Milvus container volume (not local file)
+# Milvus v2.5.5+ required (milvus-lite doesn't support Windows)
+```
 
 ## Related Documentation
 
@@ -395,4 +469,5 @@ When prompts exceed context limits, automatic compression is applied.
 - **[CONFIGURATION.md](CONFIGURATION.md)** - Configuration reference
 - **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development setup
 - **[DIAGNOSTICS.md](DIAGNOSTICS.md)** - Troubleshooting
+- **[MEMORY.md](MEMORY.md)** - Memory service details
 - **[MCP_SERVERS.md](MCP_SERVERS.md)** - MCP server details

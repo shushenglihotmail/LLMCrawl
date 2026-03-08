@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from gateway.agents import AgentConfig, convert_mcp_tool_to_openai
 from gateway.agents.unified_workflow import (
@@ -29,7 +30,16 @@ from gateway.routers.tools import get_tool_handler
 from gateway.utils.auth import get_bearer_token
 from gateway.utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from gateway.utils.conversation_store import get_conversation_store
+from gateway.utils.file_store import get_file_store
 from gateway.utils.logging import log_request, log_response
+from gateway.utils.memory_integration import (
+    append_to_daily_log,
+    check_and_get_flush_prompt,
+    get_memory_context,
+    is_memory_enabled,
+    parse_and_save_distillation,
+    read_durable_memory,
+)
 from gateway.utils.metrics import (
     AgentActivityTimer,
     classify_error,
@@ -39,10 +49,10 @@ from gateway.utils.metrics import (
 from gateway.utils.token_context import get_token
 from gateway.utils.tool_constants import (
     DEFAULT_TOOL_LIMITS,
+    TOOL_MEMORY_SEARCH,
     TOOL_QUERY_COMPOSITION_DB,
     TOOL_SAVE_FILE_FOR_DOWNLOAD,
 )
-from gateway.utils.file_store import get_file_store
 
 logger = logging.getLogger(__name__)
 
@@ -1039,6 +1049,39 @@ async def _load_tools(
         )
         logger.info("Exposed Windows Composition tool to LLM")
 
+    # Memory Search Tool - expose if memory service is configured
+    if agent.memory_service_url and expose_to_llm.get("memory", True):
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": TOOL_MEMORY_SEARCH,
+                    "description": (
+                        "Search your long-term memory for relevant context, facts, "
+                        "preferences, or past decisions. Use this when you need to "
+                        "recall information from previous conversations, or when "
+                        "the user asks 'do you remember...', 'what did I tell you "
+                        "about...', or references past context. Returns memories "
+                        "ranked by relevance using hybrid semantic + keyword search."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": (
+                                    "Search query - what are you trying to recall? "
+                                    "Be specific about what information you need."
+                                ),
+                            },
+                        },
+                        "required": ["query"],
+                    },
+                },
+            }
+        )
+        logger.info("Exposed memory_search tool to LLM")
+
     # Always expose save_file_for_download tool when any tools are being loaded
     # This lets the LLM offer file downloads to the user
     if tools:  # Only add if we have at least one other tool
@@ -1380,6 +1423,7 @@ def get_agent_config() -> AgentConfig:
             azure_devops_mcp_url=os.getenv(
                 "AZURE_DEVOPS_MCP_URL", "http://azure-devops-mcp-server:8004"
             ),
+            memory_service_url=os.getenv("MEMORY_SERVICE_URL"),
         )
     return _agent_config
 
@@ -1515,6 +1559,18 @@ async def execute(
         )
 
         system_prompt = _build_system_prompt(request.workflow, effective_expose_to_llm)
+
+        # Memory integration: Inject MEMORY.md for new conversations
+        is_new_conversation = request.clear_history or not request.conversation_id
+        if is_memory_enabled() and is_new_conversation:
+            durable_memory = read_durable_memory()
+            if durable_memory:
+                system_prompt += f"\n\n## Your Long-term Memory\n\n{durable_memory}"
+                logger.info(f"Injected durable memory: {len(durable_memory)} chars")
+
+        # Memory integration: Log user message to daily log
+        append_to_daily_log(request.user_message, "user", conversation_id)
+
         messages = _build_messages(
             system_prompt,
             full_context,
@@ -1526,6 +1582,16 @@ async def execute(
         # Step 4: Load tools (use effective settings with workflow restrictions)
         # Pass seed_urls so LLM knows which URLs to prioritize when crawling
         tools = await _load_tools(agent, effective_expose_to_llm, request.seed_urls)
+
+        # Memory integration: Check for 80% context flush
+        flush_triggered, flush_prompt, token_pct = check_and_get_flush_prompt(
+            messages, provider_type="default"
+        )
+        if flush_triggered and flush_prompt:
+            messages.append({"role": "system", "content": flush_prompt})
+            logger.info(
+                f"Injected distillation prompt at {token_pct:.0%} context usage"
+            )
 
         # Step 5: Execute LLM with tools (with metrics)
         async with AgentActivityTimer("llm_loop") as llm_timer:
@@ -1539,6 +1605,17 @@ async def execute(
                 bearer_token,
             )
             llm_timer.items = tokens_used
+
+        # Memory integration: Parse distillation markers if flush was triggered
+        if flush_triggered:
+            response_text, summary, facts = parse_and_save_distillation(response_text)
+            if summary or facts:
+                logger.info(
+                    f"Distillation complete: summary={len(summary)} chars, facts={len(facts)} chars"
+                )
+
+        # Memory integration: Log assistant response to daily log
+        append_to_daily_log(response_text, "assistant", conversation_id)
 
         # Step 6: Save conversation history
         conversation_store.add_message(conversation_id, "user", request.user_message)
@@ -1660,4 +1737,157 @@ async def health_check() -> Any:
         logger.error(f"Agent health check failed: {e}")
         return JSONResponse(
             status_code=503, content={"status": "unhealthy", "error": str(e)}
+        )
+
+
+# =============================================================================
+# Manual Distillation Endpoint
+# =============================================================================
+
+
+class DistillRequest(BaseModel):
+    """Request for manual memory distillation."""
+
+    conversation_id: str = Field(..., description="Conversation ID to distill")
+    model: Optional[str] = Field(None, description="Model to use for distillation")
+
+
+class DistillResponse(BaseModel):
+    """Response from memory distillation."""
+
+    success: bool
+    conversation_id: str
+    summary_preview: Optional[str] = None
+    facts_preview: Optional[str] = None
+    message: str
+
+
+@router.post("/distill", response_model=DistillResponse)
+async def manual_distill(
+    request: DistillRequest,
+    bearer_token: Optional[str] = Depends(get_bearer_token),
+) -> DistillResponse:
+    """
+    Manual trigger for memory distillation (user-initiated).
+
+    This endpoint allows users to trigger distillation at any time via the
+    HiChat "Save to Memory" button, rather than waiting for the 80% context
+    threshold.
+
+    The distillation process:
+    1. Loads conversation history
+    2. Injects distillation prompt asking LLM to extract [SUMMARY] and [FACTS]
+    3. Calls LLM with conversation context
+    4. Parses response for markers
+    5. Saves summary to daily log (sessional memory)
+    6. Saves facts to MEMORY.md (durable memory)
+
+    Args:
+        request: DistillRequest with conversation_id
+        bearer_token: Optional bearer token for LLM authentication
+
+    Returns:
+        DistillResponse with preview of saved memory
+    """
+    request_id = str(uuid.uuid4())
+    conversation_id = request.conversation_id
+
+    logger.info(f"Manual distill triggered for conversation: {conversation_id}")
+
+    if not is_memory_enabled():
+        return DistillResponse(
+            success=False,
+            conversation_id=conversation_id,
+            message="Memory service is not enabled",
+        )
+
+    # Load conversation history
+    conversation_store = get_conversation_store()
+    history = conversation_store.get_messages(conversation_id)
+
+    if not history:
+        return DistillResponse(
+            success=False,
+            conversation_id=conversation_id,
+            message="No conversation history found",
+        )
+
+    # Build messages with conversation history
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a helpful assistant. The user has requested to save "
+                "important information from this conversation to long-term memory."
+            ),
+        }
+    ]
+
+    # Add conversation history
+    for msg in history:
+        if msg.get("role") in ["user", "assistant"]:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+
+    # Get distillation prompt from memory client
+    from gateway.utils.memory_integration import _get_memory_client
+
+    client = _get_memory_client()
+    if not client:
+        return DistillResponse(
+            success=False,
+            conversation_id=conversation_id,
+            message="Memory client not available",
+        )
+
+    # Inject distillation prompt (use 100% as indicator this is manual trigger)
+    distill_prompt = client.get_distillation_prompt(1.0)
+    messages.append({"role": "system", "content": distill_prompt})
+
+    # Call LLM to generate distillation
+    try:
+        llm_client = LLMClient()
+        response = await llm_client.chat_completion(
+            model=request.model or "gpt-4",
+            messages=messages,
+            tools=None,
+            tool_choice="none",
+            bearer_token=bearer_token,
+        )
+
+        response_text = response.get("content") or ""
+
+        # Parse and save distillation
+        clean_response, summary, facts = parse_and_save_distillation(response_text)
+
+        # Build response message
+        saved_items = []
+        if summary:
+            saved_items.append("session summary")
+        if facts:
+            saved_items.append("durable facts")
+
+        if saved_items:
+            message = f"Saved {' and '.join(saved_items)} to memory"
+        else:
+            message = "No distillation markers found in LLM response"
+
+        logger.info(
+            f"Manual distill complete for {conversation_id}: "
+            f"summary={len(summary)} chars, facts={len(facts)} chars"
+        )
+
+        return DistillResponse(
+            success=bool(summary or facts),
+            conversation_id=conversation_id,
+            summary_preview=summary[:200] + "..." if len(summary) > 200 else summary,
+            facts_preview=facts[:200] + "..." if len(facts) > 200 else facts,
+            message=message,
+        )
+
+    except Exception as e:
+        logger.error(f"Manual distill failed: {e}", exc_info=True)
+        return DistillResponse(
+            success=False,
+            conversation_id=conversation_id,
+            message=f"Distillation failed: {str(e)}",
         )

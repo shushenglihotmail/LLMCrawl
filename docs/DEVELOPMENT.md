@@ -130,15 +130,26 @@ The project has two Docker Compose files for different use cases:
 
 ### 1. Start Development Environment
 
-```bash
-make dev-up
+**Windows (PowerShell):**
+```powershell
+# Start all services (Docker containers + local Python services)
+.\scripts\start-services.ps1
 ```
 
-This starts all services in development mode with:
-- Hot reload enabled
-- Debug logging
-- Volume mounts for code changes
-- All dependencies running
+**Linux/Mac:**
+```bash
+# Start Docker containers only
+make dev-up
+
+# Start local services manually
+python -m uvicorn gateway.main:app --host 0.0.0.0 --port 8000 &
+python -m uvicorn services.memory_service.main:app --host 0.0.0.0 --port 8007 &
+```
+
+This starts:
+- **Docker containers**: Crawler, Indexer, MCP servers, Milvus, Qdrant, Redis, PostgreSQL
+- **Local Python services**: Gateway (8000), Memory Service (8007)
+- Debug logging and health checks
 
 ### 2. Verify Services
 
@@ -147,9 +158,11 @@ make health
 ```
 
 Check that all services are responding:
-- Gateway: http://localhost:8000
-- Crawler: http://localhost:8001
-- Indexer: http://localhost:8002
+- Gateway (local): http://localhost:8000
+- Memory Service (local): http://localhost:8007
+- Crawler (Docker): http://localhost:8001
+- Indexer (Docker): http://localhost:8002
+- Milvus (Docker): http://localhost:19530
 - Qdrant Dashboard: http://localhost:6333/dashboard
 
 ### 3. Development Commands
@@ -222,25 +235,44 @@ mypy .                    # Type checking
 
 ## Architecture Overview
 
+### Hybrid Architecture
+
+LLMCrawl uses a **hybrid architecture** with local Python services and Docker containers:
+
+**Local Python Services** (for direct filesystem access):
+- Gateway (8000) - Main API orchestrator
+- Memory Service (8007) - Long-term memory with memsearch
+
+**Docker Containers** (for isolated services):
+- Crawler (8001), Indexer (8002), MCP servers
+- Milvus (19530), Qdrant (6333), PostgreSQL, Redis
+
 ### Services
 
-1. **Gateway Service** (Port 8000)
+1. **Gateway Service** (Port 8000) - **LOCAL**
    - FastAPI app handling chat requests
-   - OpenAI/Azure integration
+   - OpenAI/Azure/Anthropic/Claude Bridge integration
    - Tool calling orchestration
+   - Memory integration for auto-logging and distillation
 
-2. **Crawler Service** (Port 8001)
+2. **Memory Service** (Port 8007) - **LOCAL**
+   - OpenClaw-style auto-memory with memsearch
+   - Semantic search across conversation history
+   - Requires Milvus container for vector storage
+
+3. **Crawler Service** (Port 8001) - **DOCKER**
    - Web crawling with Firecrawl + Playwright
    - Content extraction with Trafilatura
    - Respects robots.txt
 
-3. **Indexer Service** (Port 8002)
+4. **Indexer Service** (Port 8002) - **DOCKER**
    - Document indexing with LlamaIndex
    - Vector storage (Qdrant/pgvector)
    - Semantic search and retrieval
 
-4. **Supporting Services**
-   - **Qdrant** (Port 6333) - Vector database
+5. **Supporting Services** - **DOCKER**
+   - **Milvus** (Port 19530) - Vector database for memory service
+   - **Qdrant** (Port 6333) - Vector database for RAG
    - **PostgreSQL** (Port 5432) - Alternative vector storage
    - **Redis** (Port 6379) - Caching
    - **Firecrawl** (Port 3002) - Web crawling API
@@ -264,6 +296,19 @@ mypy .                    # Type checking
 
 ### Reset Environment
 
+**Windows (PowerShell):**
+```powershell
+# Stop all services (local + Docker)
+.\scripts\stop-services.ps1
+
+# Clean up Docker volumes and networks
+make clean
+
+# Restart fresh
+.\scripts\start-services.ps1
+```
+
+**Linux/Mac:**
 ```bash
 # Stop and remove all containers
 make dev-down
@@ -278,13 +323,36 @@ make dev-up
 ### View Logs
 
 ```bash
-# All services
+# Docker service logs
 make dev-logs
 
-# Specific service
-docker-compose logs -f gateway
+# Specific Docker service
 docker-compose logs -f crawler
 docker-compose logs -f indexer
+
+# Local service logs (Windows)
+cat deploy/logs/gateway.log
+cat deploy/logs/memory.log
+```
+
+### Service Management Scripts (Windows)
+
+```powershell
+# Start all services
+.\scripts\start-services.ps1
+
+# Stop all services
+.\scripts\stop-services.ps1
+
+# Stop specific service
+.\scripts\stop-services.ps1 -Service gateway
+.\scripts\stop-services.ps1 -Service memory
+
+# Restart all services
+.\scripts\restart-services.ps1
+
+# Restart specific service
+.\scripts\restart-services.ps1 -Service gateway
 ```
 
 ## API Testing

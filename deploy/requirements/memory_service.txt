@@ -1,0 +1,18 @@
+# Memory Service Dependencies
+# OpenClaw-style auto-memory with memsearch
+
+# Core memory library with local embeddings (sentence-transformers)
+# Requires Milvus container for vector storage (Milvus Lite doesn't support Windows)
+# See docker-compose.dev.yml for Milvus v2.5.5+ container setup
+memsearch[local]>=0.1.15
+# Note: memsearch pulls pymilvus>=2.5.0 which requires Milvus server 2.5+
+
+# Web framework
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# Data validation
+pydantic>=2.0.0
+
+# Token counting
+tiktoken>=0.5.0

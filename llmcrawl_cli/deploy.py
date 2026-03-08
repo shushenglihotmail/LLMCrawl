@@ -15,7 +15,7 @@ Usage:
     llmcrawl deploy --logs              # View service logs
     llmcrawl deploy --status            # Check service status
 
-Services: gateway, crawler, indexer, mcp-server, azure-devops-mcp-server
+Services: gateway, crawler, indexer, mcp-server, azure-devops-mcp-server, memory-service
 Monitoring: prometheus, grafana (use --profile monitoring)
 """
 
@@ -204,7 +204,7 @@ def init_deployment(target_dir: Path, force: bool = False) -> bool:
 
     # Copy service source code from package root (for Docker builds)
     package_root = get_package_root_dir()
-    for service_dir in ["gateway", "crawler", "indexer", "mcp_servers"]:
+    for service_dir in ["gateway", "crawler", "indexer", "mcp_servers", "services"]:
         src = package_root / service_dir
         dst = target_dir / service_dir
         if src.exists():
@@ -228,6 +228,11 @@ def init_deployment(target_dir: Path, force: bool = False) -> bool:
     if src_readme.exists():
         shutil.copy2(src_readme, data_files_dir / "README.md")
     print("   ✓ Created data/files/")
+
+    # Create memory directory for OpenClaw-style memory service
+    memory_dir = target_dir / "memory" / "daily"
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    print("   ✓ Created memory/daily/")
 
     # Copy documentation files from deploy folder (included in wheel)
     # Copy README.md to root of deployment
@@ -414,7 +419,7 @@ def upgrade_deployment(target_dir: Path, restart: bool = True) -> bool:
 
     # Update service source code from package root
     package_root = get_package_root_dir()
-    for service_dir in ["gateway", "crawler", "indexer", "mcp_servers"]:
+    for service_dir in ["gateway", "crawler", "indexer", "mcp_servers", "services"]:
         src = package_root / service_dir
         dst = target_dir / service_dir
         if src.exists():
@@ -578,6 +583,7 @@ def cmd_up(
         print("  • HiChat Web UI:    http://localhost:8080")
         print("  • Gateway API:      http://localhost:8000")
         print("  • Gateway Docs:     http://localhost:8000/docs")
+        print("  • Memory Service:   http://localhost:8007")
         print("  • Qdrant Dashboard: http://localhost:6333/dashboard")
         if profile == "monitoring":
             print("  • Prometheus:       http://localhost:9090")
@@ -721,6 +727,7 @@ def cmd_health() -> int:
         ("Indexer", "http://localhost:8002/health", 8002),
         ("MCP Server", "http://localhost:8003/health", 8003),
         ("Azure DevOps MCP", "http://localhost:8004/health", 8004),
+        ("Memory Service", "http://localhost:8007/health", 8007),
         ("Qdrant", "http://localhost:6333/healthz", 6333),
         ("Playwright", "http://localhost:3003/health", 3003),
     ]
@@ -835,7 +842,7 @@ Local Development (use --dev to use docker-compose.dev.yml):
   llmcrawl deploy --status --dev --dir ./deploy
 
 Services: gateway, crawler, indexer, mcp-server, azure-devops-mcp-server,
-          redis, postgres, qdrant, playwright, firecrawl
+          memory-service, redis, postgres, qdrant, playwright, firecrawl
 Monitoring: prometheus, grafana (use --profile monitoring)
 """,
     )

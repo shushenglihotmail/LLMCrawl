@@ -11,6 +11,7 @@ services=(
     "Crawler:http://localhost:8001/health"
     "Indexer:http://localhost:8002/health"
     "MCP Server:http://localhost:8003/health"
+    "Memory Service:http://localhost:8007/health"
     "Qdrant:http://localhost:6333/healthz"
     "Playwright:http://localhost:3003/health"
     "Firecrawl:http://localhost:3002/v1/scrape"

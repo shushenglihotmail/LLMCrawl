@@ -332,6 +332,41 @@ async def get_agent_status(conversation_id: str) -> JSONResponse:
         raise HTTPException(status_code=502, detail=f"Status request failed: {str(e)}")
 
 
+@app.post("/api/agent/distill")
+async def distill_memory(request: Request) -> JSONResponse:
+    """Trigger manual memory distillation for a conversation."""
+    try:
+        body = await request.json()
+        conversation_id = body.get("conversation_id")
+        model = body.get("model")
+
+        if not conversation_id:
+            raise HTTPException(status_code=400, detail="conversation_id is required")
+
+        logger.info(f"Sending distill request for conversation: {conversation_id}")
+
+        # Prepare headers with bearer token if authenticated
+        headers = {}
+        if config.get("access_token"):
+            headers["Authorization"] = f"Bearer {config['access_token']}"
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{config['gateway_url']}/agent/distill",
+                json={"conversation_id": conversation_id, "model": model},
+                headers=headers,
+            )
+            return JSONResponse(
+                status_code=response.status_code, content=response.json()
+            )
+    except httpx.HTTPError as e:
+        logger.error(f"Distill request failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Distill request failed: {str(e)}")
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in distill request: {e}")
+        raise HTTPException(status_code=400, detail="Invalid JSON in request body")
+
+
 @app.get("/api/files/{file_id}")
 async def download_file(file_id: str):
     """Proxy file download from gateway's in-memory file store."""

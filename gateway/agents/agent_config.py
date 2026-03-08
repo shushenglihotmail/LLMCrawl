@@ -16,6 +16,7 @@ class AgentConfig:
     crawler_url: str
     indexer_url: str
     azure_devops_mcp_url: Optional[str] = None
+    memory_service_url: Optional[str] = None
 
 
 def convert_mcp_tool_to_openai(mcp_tool: Dict[str, Any]) -> Dict[str, Any]:

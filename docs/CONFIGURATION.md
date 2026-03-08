@@ -20,6 +20,7 @@ Complete reference for all LLMCrawl environment variables and settings.
   - [Local File Access MCP](#local-file-access-mcp)
   - [Windows Composition Database](#windows-composition-database)
   - [Tool Call Limits](#tool-call-limits)
+- [Memory Service](#memory-service)
 - [Web Crawling](#web-crawling)
   - [Domain Allowlist](#domain-allowlist)
   - [Internal Site Authentication](#internal-site-authentication)
@@ -115,9 +116,11 @@ For routing requests through the locally installed Claude Code CLI:
 
 ```bash
 # Claude Bridge URL (host-side service)
-# Use host.docker.internal to reach host from Docker
-CLAUDE_BRIDGE_URL=http://host.docker.internal:8006
+# Since gateway runs locally, use localhost (not host.docker.internal)
+CLAUDE_BRIDGE_URL=http://localhost:8006
 ```
+
+**Note:** The `start-services.ps1` script automatically sets this to `localhost:8006` for local gateway.
 
 **Setup:**
 1. Install Claude Code CLI: `npm install -g @anthropic-ai/claude-code`
@@ -293,6 +296,48 @@ MAX_INPUT_TOKENS=100000
 
 ---
 
+## Memory Service
+
+OpenClaw-style long-term memory with auto-distillation:
+
+```bash
+# Memory service URL (local service, not Docker)
+# Since both gateway and memory-service run locally, use localhost
+MEMORY_SERVICE_URL=http://localhost:8007
+
+# Memory data path (local folder for both gateway and memory service)
+MEMORY_DATA_PATH=deploy/memory
+
+# Milvus URL (Docker container for vector storage)
+# Required: Milvus v2.5.5+ (milvus-lite doesn't support Windows)
+MILVUS_URI=http://localhost:19530
+
+# Enable auto-logging of all messages to daily logs
+MEMORY_AUTO_LOG=true
+
+# Enable automatic 80% context flush with distillation
+MEMORY_AUTO_FLUSH=true
+
+# Context threshold for triggering distillation (0.0-1.0)
+MEMORY_FLUSH_THRESHOLD=0.8
+```
+
+**Architecture Note:** Gateway and Memory Service run as local Python processes (not Docker containers) for direct filesystem access. Only Milvus runs in Docker for vector storage.
+
+**How it works:**
+1. Every message is logged to `memory/daily/YYYY-MM-DD.md`
+2. When context reaches 80%, a hidden distillation prompt is injected
+3. LLM responds with `[SUMMARY]` (session summary) and `[FACTS]` (durable facts)
+4. Summary goes to daily log, facts go to `MEMORY.md`
+5. `MEMORY.md` is always loaded into the system prompt for new conversations
+
+**Manual Trigger:**
+Users can click "Save to Memory" in HiChat to trigger distillation at any time.
+
+See [MEMORY.md](MEMORY.md) for detailed memory service documentation.
+
+---
+
 ## Web Crawling
 
 ### Domain Allowlist
@@ -364,16 +409,34 @@ CRAWLER_PORT=8001
 INDEXER_PORT=8002
 ```
 
-### Internal Service URLs
+### Service URLs
 
-Container-to-container communication (usually don't change):
+**Local Services** (gateway runs locally, uses localhost to reach Docker):
 
 ```bash
-CRAWLER_URL=http://crawler:8001
-INDEXER_URL=http://indexer:8002
-MCP_SERVER_URL=http://mcp-server:8003
-AZURE_DEVOPS_MCP_URL=http://azure-devops-mcp-server:8004
+# Docker services accessed from local gateway
+CRAWLER_URL=http://localhost:8001
+INDEXER_URL=http://localhost:8002
+MCP_SERVER_URL=http://localhost:8003
+AZURE_DEVOPS_MCP_URL=http://localhost:8004
+MEMORY_SERVICE_URL=http://localhost:8007
+MILVUS_URI=http://localhost:19530
+
+# Host-side bridge services
+CLAUDE_BRIDGE_URL=http://localhost:8006
+WIN_COMP_BRIDGE_URL=http://localhost:8005
+```
+
+**Note:** Since gateway runs locally (not in Docker), it uses `localhost:PORT` to reach Docker services, not Docker network names like `http://crawler:8001`.
+
+### Container-to-Container URLs
+
+For Docker services communicating with each other:
+
+```bash
+# Inside Docker network (used by crawler, indexer, etc.)
 FIRECRAWL_URL=http://firecrawl:3002
+REDIS_URL=redis://redis:6379/0
 ```
 
 ---
@@ -460,6 +523,13 @@ docker compose up -d --force-recreate
 | `MCP_HOST_FOLDER` | `./data/files` | Host folder to mount |
 | `MCP_ROOT_FOLDER` | `/data/files` | Container mount point |
 | `MCP_VECTOR_DB_PATH` | `/data/mcp_vector_db` | MCP vector DB path |
+| **Memory Service** |||
+| `MEMORY_SERVICE_URL` | `http://localhost:8007` | Memory service URL (local service) |
+| `MEMORY_DATA_PATH` | `deploy/memory` | Memory data path (local folder) |
+| `MILVUS_URI` | `http://localhost:19530` | Milvus vector DB URL |
+| `MEMORY_AUTO_LOG` | `true` | Auto-log messages to daily log |
+| `MEMORY_AUTO_FLUSH` | `true` | Auto-distill at 80% context |
+| `MEMORY_FLUSH_THRESHOLD` | `0.8` | Context threshold for distillation |
 | **Web Crawling** |||
 | `ALLOWED_DOMAINS` | - | Comma-separated domain allowlist |
 | `RESPECT_ROBOTS` | `true` | Respect robots.txt |

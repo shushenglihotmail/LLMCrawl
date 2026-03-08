@@ -1,0 +1,9 @@
+# Memory storage folder for OpenClaw-style auto-memory
+# This folder is mounted as /data/memory in both gateway and memory-service containers
+#
+# Contents:
+#   daily/          - Daily conversation logs (sessional memory)
+#   MEMORY.md       - Durable facts (always loaded in system prompt)
+#   milvus.db       - Vector index (auto-rebuilt by memsearch.watch())
+#
+# Note: This folder is shared between containers via Docker volume mount
