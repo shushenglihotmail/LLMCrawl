@@ -43,7 +43,7 @@
 #>
 
 param(
-    [string]$Service,
+    [string[]]$Service,
     [switch]$Build,
     [switch]$Full,
     [switch]$Logs,
@@ -68,10 +68,13 @@ $DockerServices = @("crawler", "indexer", "mcp-server", "azure-devops-mcp-server
 Push-Location $DeployPath
 
 try {
-    # Parse services
+    # Parse services - handle both array and comma-separated string
     $Services = @()
     if ($Service) {
-        $Services = $Service -split ',' | ForEach-Object { $_.Trim() }
+        foreach ($s in $Service) {
+            # Split each element by comma in case of "gateway,memory" format
+            $Services += ($s -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        }
     }
 
     # Separate local and Docker services
@@ -139,8 +142,28 @@ try {
             New-Item -ItemType Directory -Path $LogsDir -Force | Out-Null
         }
 
+        # Load .env file first to get MEMORY_DATA_PATH and other settings
+        $EnvFile = Join-Path $DeployPath ".env"
+        if (Test-Path $EnvFile) {
+            Get-Content $EnvFile | ForEach-Object {
+                if ($_ -match "^([^#][^=]+)=(.*)$") {
+                    Set-Item -Path "env:$($matches[1].Trim())" -Value $matches[2].Trim()
+                }
+            }
+        }
+
+        # Determine memory data path (from .env or default)
+        $MemoryDataPath = $env:MEMORY_DATA_PATH
+        if (-not $MemoryDataPath) {
+            $MemoryDataPath = "./memory"
+        }
+        # Resolve relative paths (relative to deploy folder)
+        if (-not [System.IO.Path]::IsPathRooted($MemoryDataPath)) {
+            $MemoryDataPath = [System.IO.Path]::GetFullPath((Join-Path $DeployPath $MemoryDataPath))
+        }
+        Write-Host "  Memory data path: $MemoryDataPath" -ForegroundColor Gray
+
         # Create memory directory if needed
-        $MemoryDataPath = Join-Path $DeployPath "memory"
         if (-not (Test-Path $MemoryDataPath)) {
             New-Item -ItemType Directory -Path $MemoryDataPath -Force | Out-Null
             New-Item -ItemType Directory -Path (Join-Path $MemoryDataPath "daily") -Force | Out-Null
@@ -149,16 +172,6 @@ try {
         Push-Location $ProjectRoot
 
         try {
-            # Load .env file (for API keys, etc.)
-            $EnvFile = Join-Path $DeployPath ".env"
-            if (Test-Path $EnvFile) {
-                Get-Content $EnvFile | ForEach-Object {
-                    if ($_ -match "^([^#][^=]+)=(.*)$") {
-                        Set-Item -Path "env:$($matches[1].Trim())" -Value $matches[2].Trim()
-                    }
-                }
-            }
-
             # Determine Python executable (prefer venv)
             $PythonExe = if (Test-Path "$ProjectRoot\venv\Scripts\python.exe") {
                 "$ProjectRoot\venv\Scripts\python.exe"

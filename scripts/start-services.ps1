@@ -107,8 +107,28 @@ try {
                 New-Item -ItemType Directory -Path $LogsDir -Force | Out-Null
             }
 
+            # Load .env file first to get MEMORY_DATA_PATH and other settings
+            $EnvFile = Join-Path $DeployPath ".env"
+            if (Test-Path $EnvFile) {
+                Get-Content $EnvFile | ForEach-Object {
+                    if ($_ -match "^([^#][^=]+)=(.*)$") {
+                        Set-Item -Path "env:$($matches[1].Trim())" -Value $matches[2].Trim()
+                    }
+                }
+            }
+
+            # Determine memory data path (from .env or default)
+            $MemoryDataPath = $env:MEMORY_DATA_PATH
+            if (-not $MemoryDataPath) {
+                $MemoryDataPath = "./memory"
+            }
+            # Resolve relative paths (relative to deploy folder)
+            if (-not [System.IO.Path]::IsPathRooted($MemoryDataPath)) {
+                $MemoryDataPath = [System.IO.Path]::GetFullPath((Join-Path $DeployPath $MemoryDataPath))
+            }
+            Write-Host "  Memory data path: $MemoryDataPath" -ForegroundColor Gray
+
             # Create memory directory if needed
-            $MemoryDataPath = Join-Path $DeployPath "memory"
             if (-not (Test-Path $MemoryDataPath)) {
                 New-Item -ItemType Directory -Path $MemoryDataPath -Force | Out-Null
                 New-Item -ItemType Directory -Path (Join-Path $MemoryDataPath "daily") -Force | Out-Null
@@ -146,17 +166,7 @@ try {
             Write-Host "  Starting Gateway (port 8000)..." -ForegroundColor White
             $GatewayLogFile = Join-Path $LogsDir "gateway.log"
 
-            # Load .env file if exists (for API keys, etc.)
-            $EnvFile = Join-Path $DeployPath ".env"
-            if (Test-Path $EnvFile) {
-                Get-Content $EnvFile | ForEach-Object {
-                    if ($_ -match "^([^#][^=]+)=(.*)$") {
-                        Set-Item -Path "env:$($matches[1].Trim())" -Value $matches[2].Trim()
-                    }
-                }
-            }
-
-            # Set gateway environment variables
+            # .env already loaded above, set gateway-specific overrides
             $env:GATEWAY_HOST = "0.0.0.0"
             $env:GATEWAY_PORT = "8000"
             $env:CRAWLER_URL = "http://localhost:8001"

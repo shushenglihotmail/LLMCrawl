@@ -20,12 +20,14 @@ Monitoring: prometheus, grafana (use --profile monitoring)
 """
 
 import argparse
+import json
+import os
 import shutil
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 def get_package_root_dir() -> Path:
@@ -337,6 +339,318 @@ def merge_env_files(old_env: dict, new_example: Path) -> str:
     return "\n".join(result_lines)
 
 
+# --- Local Service Management ---
+
+
+def get_pid_file(deploy_dir: Path) -> Path:
+    """Get path to PID file for local services."""
+    return deploy_dir / "local-services.pid"
+
+
+def read_pids(deploy_dir: Path) -> Dict[str, int]:
+    """Read PIDs from the PID file."""
+    pid_file = get_pid_file(deploy_dir)
+    if not pid_file.exists():
+        return {}
+    try:
+        with open(pid_file, "r") as f:
+            data: Dict[str, int] = json.load(f)
+            return data
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+
+def save_pids(deploy_dir: Path, pids: Dict[str, int]) -> None:
+    """Save PIDs to the PID file."""
+    pid_file = get_pid_file(deploy_dir)
+    with open(pid_file, "w") as f:
+        json.dump(pids, f, indent=2)
+
+
+def is_process_running(pid: int) -> bool:
+    """Check if a process with the given PID is running."""
+    if sys.platform == "win32":
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return str(pid) in result.stdout
+        except Exception:
+            return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+
+def stop_process(pid: int) -> bool:
+    """Stop a process by PID."""
+    if not is_process_running(pid):
+        return True
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True,
+                timeout=10,
+            )
+        else:
+            os.kill(pid, 15)  # SIGTERM
+        return True
+    except Exception:
+        return False
+
+
+def get_python_executable(deploy_dir: Path) -> str:
+    """Get Python executable, preferring venv."""
+    # Check for venv in project root (parent of deploy_dir)
+    project_root = deploy_dir.parent
+    venv_python = project_root / "venv" / "Scripts" / "python.exe"
+    if venv_python.exists():
+        return str(venv_python)
+
+    # Also check in deploy_dir itself (for wheel deployments)
+    venv_python = deploy_dir / "venv" / "Scripts" / "python.exe"
+    if venv_python.exists():
+        return str(venv_python)
+
+    # Fallback to system Python
+    return sys.executable
+
+
+def resolve_memory_data_path(deploy_dir: Path, env_vars: Dict[str, str]) -> Path:
+    """Resolve MEMORY_DATA_PATH from env vars, handling relative paths."""
+    memory_path = env_vars.get("MEMORY_DATA_PATH", "./memory")
+
+    # Handle relative paths (relative to deploy_dir)
+    if not os.path.isabs(memory_path):
+        # Remove leading ./ if present
+        if memory_path.startswith("./"):
+            memory_path = memory_path[2:]
+        memory_path = str((deploy_dir / memory_path).resolve())
+
+    return Path(memory_path)
+
+
+def start_local_services(
+    deploy_dir: Path,
+    services: Optional[List[str]] = None,
+) -> Tuple[bool, Dict[str, int]]:
+    """Start local services (gateway, memory-service).
+
+    Args:
+        deploy_dir: Deployment directory
+        services: Optional list of services to start. Defaults to all.
+
+    Returns:
+        Tuple of (success, pids dict)
+    """
+    if services is None:
+        services = ["gateway", "memory"]
+
+    # Load environment from .env
+    env_file = deploy_dir / ".env"
+    env_vars = parse_env_file(env_file)
+
+    # Resolve memory data path
+    memory_data_path = resolve_memory_data_path(deploy_dir, env_vars)
+
+    # Ensure memory directory exists
+    memory_data_path.mkdir(parents=True, exist_ok=True)
+    (memory_data_path / "daily").mkdir(parents=True, exist_ok=True)
+
+    # Create logs directory
+    logs_dir = deploy_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Get Python executable
+    python_exe = get_python_executable(deploy_dir)
+
+    # Read existing PIDs
+    pids = read_pids(deploy_dir)
+
+    # Stop existing services first
+    for svc in services:
+        if svc in pids and is_process_running(pids[svc]):
+            print(f"   Stopping existing {svc} (PID: {pids[svc]})...")
+            stop_process(pids[svc])
+
+    # Determine working directory (project root or deploy_dir for wheel)
+    project_root = deploy_dir.parent
+    if (project_root / "gateway").exists():
+        work_dir = project_root
+    else:
+        work_dir = deploy_dir
+
+    # Build environment for child processes
+    child_env = os.environ.copy()
+    child_env.update(env_vars)
+    child_env["MEMORY_DATA_PATH"] = str(memory_data_path)
+    child_env["EMBEDDING_PROVIDER"] = "local"
+    child_env["MILVUS_URI"] = env_vars.get("MILVUS_URI", "http://localhost:19530")
+
+    print(f"   Memory data path: {memory_data_path}")
+
+    success = True
+
+    # Start Memory Service
+    if "memory" in services:
+        print("   Starting Memory Service (port 8007)...")
+        memory_log = logs_dir / "memory-service.log"
+
+        try:
+            with open(memory_log, "a") as log_file:
+                proc = subprocess.Popen(
+                    [
+                        python_exe,
+                        "-m",
+                        "uvicorn",
+                        "services.memory_service.main:app",
+                        "--host",
+                        "0.0.0.0",
+                        "--port",
+                        "8007",
+                    ],
+                    cwd=work_dir,
+                    env=child_env,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    creationflags=(
+                        subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                    ),
+                )
+                pids["memory"] = proc.pid
+                print(f"     PID: {proc.pid}")
+        except Exception as e:
+            print(f"     Failed to start: {e}")
+            success = False
+
+    # Start Gateway
+    if "gateway" in services:
+        print("   Starting Gateway (port 8000)...")
+        gateway_log = logs_dir / "gateway.log"
+
+        # Set gateway-specific environment
+        child_env["GATEWAY_HOST"] = "0.0.0.0"
+        child_env["GATEWAY_PORT"] = "8000"
+        child_env["CRAWLER_URL"] = env_vars.get("CRAWLER_URL", "http://localhost:8001")
+        child_env["INDEXER_URL"] = env_vars.get("INDEXER_URL", "http://localhost:8002")
+        child_env["MCP_SERVER_URL"] = env_vars.get(
+            "MCP_SERVER_URL", "http://localhost:8003"
+        )
+        child_env["AZURE_DEVOPS_MCP_URL"] = env_vars.get(
+            "AZURE_DEVOPS_MCP_URL", "http://localhost:8004"
+        )
+        child_env["MEMORY_SERVICE_URL"] = env_vars.get(
+            "MEMORY_SERVICE_URL", "http://localhost:8007"
+        )
+        child_env["MEMORY_AUTO_LOG"] = env_vars.get("MEMORY_AUTO_LOG", "true")
+        child_env["MEMORY_AUTO_FLUSH"] = env_vars.get("MEMORY_AUTO_FLUSH", "true")
+        child_env["ENVIRONMENT"] = "development"
+        child_env["LOG_LEVEL"] = env_vars.get("LOG_LEVEL", "INFO")
+        # Override bridge URLs for local gateway
+        child_env["CLAUDE_BRIDGE_URL"] = env_vars.get(
+            "CLAUDE_BRIDGE_URL", "http://localhost:8006"
+        ).replace("host.docker.internal", "localhost")
+        child_env["WIN_COMP_BRIDGE_URL"] = env_vars.get(
+            "WIN_COMP_BRIDGE_URL", "http://localhost:8005"
+        ).replace("host.docker.internal", "localhost")
+
+        try:
+            with open(gateway_log, "a") as log_file:
+                proc = subprocess.Popen(
+                    [
+                        python_exe,
+                        "-m",
+                        "uvicorn",
+                        "gateway.main:app",
+                        "--host",
+                        "0.0.0.0",
+                        "--port",
+                        "8000",
+                    ],
+                    cwd=work_dir,
+                    env=child_env,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    creationflags=(
+                        subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                    ),
+                )
+                pids["gateway"] = proc.pid
+                print(f"     PID: {proc.pid}")
+        except Exception as e:
+            print(f"     Failed to start: {e}")
+            success = False
+
+    # Save PIDs
+    save_pids(deploy_dir, pids)
+
+    return success, pids
+
+
+def stop_local_services(
+    deploy_dir: Path,
+    services: Optional[List[str]] = None,
+) -> bool:
+    """Stop local services.
+
+    Args:
+        deploy_dir: Deployment directory
+        services: Optional list of services to stop. If None, stops all.
+
+    Returns:
+        True if all services stopped successfully
+    """
+    pids = read_pids(deploy_dir)
+
+    if services is None:
+        services = list(pids.keys())
+
+    success = True
+    for svc in services:
+        if svc in pids:
+            pid = pids[svc]
+            if is_process_running(pid):
+                print(f"   Stopping {svc} (PID: {pid})...")
+                if stop_process(pid):
+                    print("     Stopped")
+                else:
+                    print("     Failed to stop")
+                    success = False
+            del pids[svc]
+
+    save_pids(deploy_dir, pids)
+    return success
+
+
+def get_local_service_status(deploy_dir: Path) -> Dict[str, str]:
+    """Get status of local services.
+
+    Returns:
+        Dict mapping service name to status string
+    """
+    pids = read_pids(deploy_dir)
+    status = {}
+
+    for svc in ["gateway", "memory"]:
+        if svc in pids:
+            pid = pids[svc]
+            if is_process_running(pid):
+                status[svc] = f"running (PID: {pid})"
+            else:
+                status[svc] = f"stopped (stale PID: {pid})"
+        else:
+            status[svc] = "not started"
+
+    return status
+
+
 def upgrade_deployment(target_dir: Path, restart: bool = True) -> bool:
     """Upgrade deployment files while preserving user configuration."""
     source_dir = get_package_deploy_dir()
@@ -553,6 +867,7 @@ def cmd_up(
     detach: bool = True,
     profile: Optional[str] = None,
     use_dev: bool = False,
+    docker_only: bool = False,
 ) -> int:
     """Start all services."""
     if not check_docker():
@@ -572,6 +887,17 @@ def cmd_up(
         args.append("-d")
 
     result = run_compose(args, deploy_dir, use_dev=use_dev)
+
+    # Start local services (gateway, memory) unless docker_only
+    local_success = True
+    if result == 0 and detach and not docker_only:
+        print()
+        print("🖥️  Starting local services...")
+        local_success, _ = start_local_services(deploy_dir)
+        if local_success:
+            print("   Local services started.")
+        else:
+            print("   ⚠️  Some local services failed to start.")
 
     if result == 0 and detach:
         print()
@@ -595,23 +921,55 @@ def cmd_up(
         print("  • Status:      llmcrawl deploy --status")
         print()
 
-    return result
+    return result if local_success else 1
 
 
 def cmd_down(
-    deploy_dir: Path, services: Optional[list] = None, use_dev: bool = False
+    deploy_dir: Path,
+    services: Optional[list] = None,
+    use_dev: bool = False,
+    docker_only: bool = False,
 ) -> int:
     """Stop all services or specific services."""
+    local_services = ["gateway", "memory"]
+    docker_services = []
+    local_to_stop = []
+
     if services:
-        print(f"🛑 Stopping services: {', '.join(services)}...")
-        # Use 'stop' + 'rm' for specific services (down doesn't support service args)
-        result = run_compose(["stop"] + services, deploy_dir, use_dev=use_dev)
-        if result == 0:
-            result = run_compose(["rm", "-f"] + services, deploy_dir, use_dev=use_dev)
-        return result
+        # Separate local and Docker services
+        for svc in services:
+            if svc in local_services:
+                local_to_stop.append(svc)
+            else:
+                docker_services.append(svc)
     else:
-        print("🛑 Stopping all LLMCrawl services...")
-        return run_compose(["down"], deploy_dir, use_dev=use_dev)
+        # Stop all
+        local_to_stop = local_services
+        docker_services = []  # Empty means all Docker services
+
+    result = 0
+
+    # Stop local services first (unless docker_only)
+    if local_to_stop and not docker_only:
+        print(f"🖥️  Stopping local services: {', '.join(local_to_stop)}...")
+        stop_local_services(deploy_dir, local_to_stop)
+
+    # Stop Docker services
+    if services and docker_services:
+        print(f"🛑 Stopping Docker services: {', '.join(docker_services)}...")
+        result = run_compose(["stop"] + docker_services, deploy_dir, use_dev=use_dev)
+        if result == 0:
+            result = run_compose(
+                ["rm", "-f"] + docker_services, deploy_dir, use_dev=use_dev
+            )
+    elif not services:
+        print("🛑 Stopping all Docker services...")
+        # Also stop local services if not already done
+        if not docker_only and not local_to_stop:
+            stop_local_services(deploy_dir)
+        result = run_compose(["down"], deploy_dir, use_dev=use_dev)
+
+    return result
 
 
 def cmd_stop(
@@ -658,6 +1016,19 @@ def cmd_status(deploy_dir: Path, use_dev: bool = False) -> int:
     """Check service status."""
     print("📊 LLMCrawl Service Status")
     print("=" * 60)
+
+    # Show local service status
+    print()
+    print("Local Services:")
+    print("-" * 40)
+    local_status = get_local_service_status(deploy_dir)
+    for svc, status in local_status.items():
+        icon = "✅" if "running" in status else "⚪"
+        print(f"  {icon} {svc}: {status}")
+
+    print()
+    print("Docker Services:")
+    print("-" * 40)
     return run_compose(["ps"], deploy_dir, use_dev=use_dev)
 
 
@@ -667,35 +1038,62 @@ def cmd_restart(
     build: bool = False,
     profile: Optional[str] = None,
     use_dev: bool = False,
+    docker_only: bool = False,
 ) -> int:
     """Restart services with optional rebuild."""
-    if not check_docker():
-        print("❌ Error: Docker is not running or not installed.")
-        return 1
+    local_services_list = ["gateway", "memory"]
+    docker_services = []
+    local_to_restart = []
+
+    if services:
+        # Separate local and Docker services
+        for svc in services:
+            if svc in local_services_list:
+                local_to_restart.append(svc)
+            else:
+                docker_services.append(svc)
+    else:
+        # Restart all
+        local_to_restart = local_services_list
+        docker_services = []  # Empty means all Docker services
 
     service_names = services if services else ["all services"]
     print(f"🔄 Restarting: {', '.join(service_names)}...")
 
-    if build:
-        # Use 'up --build --force-recreate' for rebuild
-        args = []
-        if profile:
-            args.extend(["--profile", profile])
-        args.extend(["up", "-d", "--build", "--force-recreate"])
-        if services:
-            args.extend(services)
-        print("   Mode: Rebuild images and recreate containers")
-    else:
-        # Simple restart (no rebuild)
-        args = []
-        if profile:
-            args.extend(["--profile", profile])
-        args.append("restart")
-        if services:
-            args.extend(services)
-        print("   Mode: Restart containers (no rebuild)")
+    result = 0
 
-    result = run_compose(args, deploy_dir, use_dev=use_dev)
+    # Restart Docker services if any
+    if not services or docker_services:
+        if not check_docker():
+            print("❌ Error: Docker is not running or not installed.")
+            return 1
+
+        if build:
+            args = []
+            if profile:
+                args.extend(["--profile", profile])
+            args.extend(["up", "-d", "--build", "--force-recreate"])
+            if docker_services:
+                args.extend(docker_services)
+            print("   Mode: Rebuild images and recreate containers")
+        else:
+            args = []
+            if profile:
+                args.extend(["--profile", profile])
+            args.append("restart")
+            if docker_services:
+                args.extend(docker_services)
+            print("   Mode: Restart containers (no rebuild)")
+
+        result = run_compose(args, deploy_dir, use_dev=use_dev)
+
+    # Restart local services (unless docker_only)
+    if local_to_restart and not docker_only:
+        print()
+        print(f"🖥️  Restarting local services: {', '.join(local_to_restart)}...")
+        success, _ = start_local_services(deploy_dir, local_to_restart)
+        if not success:
+            result = 1
 
     if result == 0:
         print()
@@ -749,10 +1147,10 @@ def cmd_health() -> int:
                     status = result.get("status", "unknown")
 
                     if status == "healthy":
-                        print(f"   Status: ✅ HEALTHY")
+                        print("   Status: ✅ HEALTHY")
                         healthy += 1
                     else:
-                        print(f"   Status: ⚠️  {status}")
+                        print(f"   Status: ⚠️ {status}")
                         healthy += 1  # Still reachable
 
                     # Show service name if available
@@ -764,7 +1162,7 @@ def cmd_health() -> int:
                         print("   Components:")
                         for comp_name, comp_info in result["components"].items():
                             comp_status = comp_info.get("status", "unknown")
-                            icon = "✅" if comp_status == "healthy" else "⚠️"
+                            icon = "✅" if comp_status == "healthy" else "⚠"
                             print(f"     - {comp_name}: {icon} {comp_status}")
 
                     # Show vector store info (indexer)
@@ -785,16 +1183,16 @@ def cmd_health() -> int:
 
                 except json.JSONDecodeError:
                     # Non-JSON response (like Playwright's /json/version)
-                    print(f"   Status: ✅ HEALTHY (reachable)")
+                    print("   Status: ✅ HEALTHY (reachable)")
                     healthy += 1
 
         except urllib.error.URLError as e:
-            print(f"   Status: ❌ UNREACHABLE")
+            print("   Status: ❌ UNREACHABLE")
             print(f"   Error: {e.reason}")
         except TimeoutError:
-            print(f"   Status: ❌ TIMEOUT")
+            print("   Status: ❌ TIMEOUT")
         except Exception as e:
-            print(f"   Status: ❌ ERROR")
+            print("   Status: ❌ ERROR")
             print(f"   Error: {e}")
 
     # Summary
@@ -922,6 +1320,11 @@ Monitoring: prometheus, grafana (use --profile monitoring)
         help="Use docker-compose.dev.yml for local development (uses ../ paths)",
     )
     parser.add_argument(
+        "--docker-only",
+        action="store_true",
+        help="Only manage Docker services, skip local services (gateway, memory)",
+    )
+    parser.add_argument(
         "--profile",
         type=str,
         default=None,
@@ -942,9 +1345,17 @@ Monitoring: prometheus, grafana (use --profile monitoring)
     else:
         deploy_dir = get_local_deploy_dir()
 
-    # Parse services (convert empty list to None)
-    services = args.service if args.service else None
+    # Parse services - handle both space-separated and comma-separated
+    services: Optional[List[str]] = None
+    if args.service:
+        parsed: List[str] = []
+        for s in args.service:
+            # Split by comma in case of "gateway,memory" format
+            parsed.extend([x.strip() for x in s.split(",") if x.strip()])
+        if parsed:
+            services = parsed
     use_dev = args.dev
+    docker_only = args.docker_only
 
     # Execute action
     exit_code = 0
@@ -961,9 +1372,15 @@ Monitoring: prometheus, grafana (use --profile monitoring)
             detach=not args.no_detach,
             profile=args.profile,
             use_dev=use_dev,
+            docker_only=docker_only,
         )
     elif args.down:
-        exit_code = cmd_down(deploy_dir, services=services, use_dev=use_dev)
+        exit_code = cmd_down(
+            deploy_dir,
+            services=services,
+            use_dev=use_dev,
+            docker_only=docker_only,
+        )
     elif args.stop:
         exit_code = cmd_stop(
             deploy_dir, services=services, profile=args.profile, use_dev=use_dev
@@ -983,6 +1400,7 @@ Monitoring: prometheus, grafana (use --profile monitoring)
             build=args.build,
             profile=args.profile,
             use_dev=use_dev,
+            docker_only=docker_only,
         )
     elif args.pull:
         exit_code = cmd_pull(deploy_dir, use_dev=use_dev)

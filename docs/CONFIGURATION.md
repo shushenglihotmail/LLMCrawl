@@ -305,8 +305,9 @@ OpenClaw-style long-term memory with auto-distillation:
 # Since both gateway and memory-service run locally, use localhost
 MEMORY_SERVICE_URL=http://localhost:8007
 
-# Memory data path (local folder for both gateway and memory service)
-MEMORY_DATA_PATH=deploy/memory
+# Memory data path - where daily logs and MEMORY.md are stored
+# Both gateway and memory-service must access this same folder
+MEMORY_DATA_PATH=./memory
 
 # Milvus URL (Docker container for vector storage)
 # Required: Milvus v2.5.5+ (milvus-lite doesn't support Windows)
@@ -320,6 +321,35 @@ MEMORY_AUTO_FLUSH=true
 
 # Context threshold for triggering distillation (0.0-1.0)
 MEMORY_FLUSH_THRESHOLD=0.8
+```
+
+### Memory Data Path Configuration
+
+`MEMORY_DATA_PATH` supports both relative and absolute paths:
+
+**Relative path** (resolved relative to `deploy/` folder):
+```bash
+# Stores in deploy/memory/
+MEMORY_DATA_PATH=./memory
+
+# Stores in deploy/custom-logs/
+MEMORY_DATA_PATH=./custom-logs
+```
+
+**Absolute path** (recommended for custom locations):
+```bash
+# Windows
+MEMORY_DATA_PATH=C:\src\projects\my-app\logs\memory
+
+# Linux/Mac
+MEMORY_DATA_PATH=/home/user/projects/my-app/logs/memory
+```
+
+**Important:** Both gateway and memory-service read this setting from `.env`. After changing `MEMORY_DATA_PATH`, restart both services:
+```bash
+.\scripts\restart-services.ps1 -Service gateway,memory
+# or
+llmcrawl deploy --restart -s gateway,memory
 ```
 
 **Architecture Note:** Gateway and Memory Service run as local Python processes (not Docker containers) for direct filesystem access. Only Milvus runs in Docker for vector storage.

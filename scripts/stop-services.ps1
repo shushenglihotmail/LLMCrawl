@@ -40,7 +40,7 @@
 param(
     [switch]$Remove,
     [switch]$Volumes,
-    [string]$Service,
+    [string[]]$Service,
     [switch]$DockerOnly
 )
 
@@ -63,10 +63,12 @@ if (-not (Test-Path $DeployPath)) {
 $LocalServices = @("gateway", "memory")
 $DockerServices = @("crawler", "indexer", "mcp-server", "azure-devops-mcp-server", "firecrawl", "playwright", "redis", "postgres", "qdrant", "milvus")
 
-# Parse services
+# Parse services - handle both array and comma-separated string
 $RequestedServices = @()
 if ($Service) {
-    $RequestedServices = $Service -split ',' | ForEach-Object { $_.Trim() }
+    foreach ($s in $Service) {
+        $RequestedServices += ($s -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
 }
 
 # Separate local and Docker services

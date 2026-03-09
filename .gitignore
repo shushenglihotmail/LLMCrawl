@@ -103,3 +103,8 @@ grafana_data/
 
 # Claude setting
 settings.local.json
+
+# Runtime files (local services)
+deploy/local-services.pid
+deploy/memory/
+deploy/logs/

@@ -61,11 +61,11 @@ OpenClaw-style auto-memory using [memsearch](https://github.com/zilliztech/memse
 | 80% flush | Gateway triggers → LLM writes | Hidden prompt → LLM summarizes to `MEMORY.md` |
 | Indexing | Memory Service (memsearch) | Milvus 2.5+ container + sentence-transformers |
 
-**Storage layout:**
+**Storage layout (configurable via `MEMORY_DATA_PATH`):**
 ```
-deploy/memory/
-├── daily/            # Daily logs (YYYY-MM-DD.md)
-├── MEMORY.md         # Distilled long-term facts (LLM writes)
+{MEMORY_DATA_PATH}/       # Default: deploy/memory/
+├── daily/                # Daily logs (YYYY-MM-DD.md)
+├── MEMORY.md             # Distilled long-term facts (LLM writes)
 ```
 Note: Vector index stored in Milvus container volume (milvus-lite doesn't support Windows)
 
@@ -129,7 +129,8 @@ Environment in `deploy/.env`:
 - `LLM_MODELS`: JSON array with `name`, `deployment_name`, `provider_type`, `max_output_tokens`
 - `VECTOR_DB`: qdrant | pgvector
 - `CLAUDE_BRIDGE_URL`: http://host.docker.internal:8006 (optional)
-- `MEMORY_SERVICE_URL`: http://memory-service:8007 (auto-memory)
+- `MEMORY_DATA_PATH`: ./memory (path to memory folder, relative to deploy/ or absolute)
+- `MEMORY_SERVICE_URL`: http://localhost:8007 (memory service endpoint)
 - `MEMORY_AUTO_LOG`: true | false (auto-append to daily logs)
 - `MEMORY_AUTO_FLUSH`: true | false (80% context flush trigger)
 - `MEMORY_FLUSH_THRESHOLD`: 0.8 (context % to trigger flush)
