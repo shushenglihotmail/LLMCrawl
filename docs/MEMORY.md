@@ -1,543 +1,676 @@
-# LLMCrawl Memory Service
+# Memory Service
 
-OpenClaw-style auto-memory with semantic search for long-term conversation persistence.
+Standalone containerized service for conversation memory with semantic search.
 
-**Requirements:** Milvus v2.5.5+ container for vector storage (milvus-lite doesn't support Windows).
+**Key principle:** All operations via HTTP REST API. Gateway is a pure HTTP client.
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Architecture](#architecture)
+- [Standalone Deployment](#standalone-deployment)
+- [API Reference](#api-reference)
+- [Integration Guide](#integration-guide)
 - [Memory Types](#memory-types)
 - [How It Works](#how-it-works)
-  - [Auto-Logging](#auto-logging)
-  - [80% Context Flush](#80-context-flush)
-  - [Manual Distillation](#manual-distillation)
 - [Configuration](#configuration)
-- [File Structure](#file-structure)
-- [API Endpoints](#api-endpoints)
-- [HiChat Integration](#hichat-integration)
-- [Portability](#portability)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Overview
 
-The Memory Service provides persistent, searchable memory across conversations. Unlike the in-memory conversation store (24-hour TTL), the memory service:
+The Memory Service provides persistent, searchable memory across conversations:
 
-- **Persists forever** - Markdown files on disk
+- **All operations via HTTP** - Write, search, and read through REST API
 - **Semantic search** - Find relevant past conversations by meaning
-- **Auto-distillation** - Extracts key information when context fills up
-- **Always-loaded facts** - Important rules injected into every conversation
-
-**Key Principle**: Markdown is the source of truth. The vector index is a rebuildable cache.
+- **Auto-indexing** - File changes automatically indexed (1.5s debounce)
+- **Format consistency** - All clients share same file structure and format
+- **Standalone deployment** - Can be used by any application
 
 ---
 
 ## Architecture
 
-Both Gateway and Memory Service run as **local Python processes** (not Docker containers) for direct filesystem access.
+```
+┌─────────────────┐           ┌──────────────────────────────────┐
+│                 │           │      Memory Service (8007)       │
+│   Your App      │───HTTP───▶│                                  │
+│   (Gateway)     │           │  POST /write_daily  (log msgs)   │
+│                 │           │  POST /write_memory (save facts) │
+└─────────────────┘           │  POST /search       (find)       │
+                              │  GET  /context      (load)       │
+                              │  POST /reindex      (rebuild)    │
+                              └────────────┬───────────────────────┘
+                                           │
+                              ┌────────────▼───────────────────────┐
+                              │     Storage (MEMORY_DATA_PATH)     │
+                              │  ├── daily/YYYY-MM-DD.md           │
+                              │  └── MEMORY.md                     │
+                              └────────────┬───────────────────────┘
+                                           │
+                              ┌────────────▼───────────────────────┐
+                              │     Milvus (Vector DB)             │
+                              │     localhost:19530                │
+                              └────────────────────────────────────┘
+```
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ Gateway / Agent (LOCAL PYTHON SERVICE)                           │
-│                                                                  │
-│  1. On each message:                                            │
-│     └── Write directly to deploy/memory/daily/YYYY-MM-DD.md    │
-│                                                                  │
-│  2. Before LLM call, check token count:                         │
-│     └── If >= 80%: inject distillation prompt                   │
-│                                                                  │
-│  3. After LLM response:                                         │
-│     └── Parse for [SUMMARY] → append to daily log               │
-│     └── Parse for [FACTS] → append to MEMORY.md                 │
-│                                                                  │
-│  4. LLM can call memory_search tool ───► Memory Service         │
-└─────────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ Memory Service (Port 8007) - LOCAL PYTHON SERVICE                │
-│                                                                  │
-│  Endpoints:                                                      │
-│    POST /search    ← Semantic search (LLM tool)                 │
-│    GET  /context   ← Get memory for conversation start          │
-│    POST /reindex   ← Rebuild vector index                       │
-│    GET  /health    ← Health check                               │
-│                                                                  │
-│  Background:                                                     │
-│    memsearch.watch() ← Auto-indexes file changes (1.5s debounce)│
-│                                                                  │
-│  Vector Storage: ─────────────────────► Milvus Container        │
-│                                         (localhost:19530)        │
-└─────────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ deploy/memory/ (Markdown files - source of truth)               │
-│                                                                  │
-│  ├── daily/                                                     │
-│  │   ├── 2026-03-05.md   # Full conversation transcript         │
-│  │   ├── 2026-03-06.md   # Includes session summaries           │
-│  │   └── 2026-03-07.md                                          │
-│  └── MEMORY.md           # Durable facts (always loaded)        │
-│                                                                  │
-│  Vector index stored in Milvus container volume (not local file)│
-└─────────────────────────────────────────────────────────────────┘
-```
+**Key points:**
+- Gateway does NOT access files directly - all via HTTP
+- Memory service manages file format consistency
+- Milvus stores vector embeddings for semantic search
 
 ---
 
-## Memory Types
+## Standalone Deployment
 
-The system maintains two distinct types of memory:
+The memory service can be deployed independently for use by any application.
 
-| Type | File | Analogy | Content | When Loaded |
-|------|------|---------|---------|-------------|
-| **Sessional** | `daily/YYYY-MM-DD.md` | Daily Journal | "What happened today" | Searched on demand |
-| **Durable** | `MEMORY.md` | Cheat Sheet | "Always-true rules" | Every conversation start |
-
-### Sessional Memory (Daily Logs)
-
-- Full conversation transcripts with timestamps
-- Session summaries extracted at 80% flush
-- Automatically indexed for semantic search
-- One file per day
-
-**Example daily log entry:**
-```markdown
-### [10:15:32] user
-How do I configure the Go proxy for SSO?
-
-### [10:15:45] assistant
-To configure the Go proxy for SSO, you need to...
-
----
-## Session Summary (10:45)
-We debugged the Go SSO proxy and fixed a 403 error by updating header parsing.
-The solution involved base64 encoding the X-Auth-Token header.
----
-```
-
-### Durable Memory (MEMORY.md)
-
-- Permanent facts, rules, and preferences
-- Injected into system prompt for every new conversation
-- User preferences, project constraints, technical details
-
-**Example MEMORY.md entry:**
-```markdown
-## 2026-03-07 10:45
-- The Go SSO proxy requires X-Auth-Token header to be base64 encoded
-- User prefers Python over Go for new services
-- Project uses PostgreSQL 16 with pgvector extension
-```
-
----
-
-## How It Works
-
-### Auto-Logging
-
-Every user and assistant message is automatically written to the daily log:
-
-```
-User sends message
-    │
-    ▼
-Gateway writes to daily/2026-03-07.md
-    │
-    ▼
-memsearch.watch() detects change
-    │
-    ▼
-Auto-indexes content (1.5s debounce)
-```
-
-**Format:**
-```markdown
-### [HH:MM:SS] role
-Message content here...
-```
-
-### 80% Context Flush
-
-When the conversation context reaches 80% of the model's limit:
-
-1. **Detection**: Gateway calculates token count before LLM call
-2. **Injection**: Hidden distillation prompt added to messages
-3. **Response**: LLM includes `[SUMMARY]` and `[FACTS]` markers
-4. **Parsing**: Gateway extracts and saves to appropriate files
-5. **Cleanup**: Markers stripped before showing response to user
-
-**Distillation Prompt:**
-```
-### MEMORY CHECKPOINT (80% context used)
-
-Before continuing, extract important information:
-
-[SUMMARY]
-(2-3 sentence recap of what was accomplished)
-[/SUMMARY]
-
-[FACTS]
-- Any permanent rules or preferences discovered
-- Important decisions that should be remembered
-[/FACTS]
-
-After the markers, continue with your normal response.
-```
-
-**LLM Response Example:**
-```
-[SUMMARY]
-We configured the authentication proxy and fixed CORS issues.
-The solution involved updating the nginx config and adding proper headers.
-[/SUMMARY]
-
-[FACTS]
-- CORS requires explicit origin in production (no wildcards)
-- Auth proxy timeout must be > 30s for large file uploads
-[/FACTS]
-
-Now, to continue with your question about...
-```
-
-### Manual Distillation
-
-Users can trigger distillation at any time via:
-
-1. **HiChat Button**: Click "Save to Memory" in the UI
-2. **API Call**: `POST /agent/distill` with conversation ID
-
-This is useful for:
-- Saving important information before ending a session
-- Capturing key decisions mid-conversation
-- User-initiated memory checkpoints
-
----
-
-## Configuration
-
-Add these to your `.env` file:
+### Using Pre-built Image (Recommended)
 
 ```bash
-# Memory service URL (local service, not Docker)
-MEMORY_SERVICE_URL=http://localhost:8007
+# Pull from GitHub Container Registry
+docker pull ghcr.io/shushenglihotmail/memory-service:latest
 
-# Memory data path (local folder accessible by both gateway and memory-service)
-MEMORY_DATA_PATH=deploy/memory
-
-# Milvus URL (Docker container for vector storage)
-# Required: Milvus v2.5.5+ (milvus-lite doesn't support Windows)
-MILVUS_URI=http://localhost:19530
-
-# Enable auto-logging of all messages to daily logs
-MEMORY_AUTO_LOG=true
-
-# Enable automatic 80% context flush with distillation
-MEMORY_AUTO_FLUSH=true
-
-# Context threshold for triggering distillation (0.0-1.0)
-MEMORY_FLUSH_THRESHOLD=0.8
+# Or specific version
+docker pull ghcr.io/shushenglihotmail/memory-service:1.2.0
 ```
 
-### Milvus Container
+### Build Docker Image Locally
 
-The memory service requires a Milvus v2.5.5+ container for vector storage:
-
-```yaml
-# docker-compose.dev.yml
-milvus:
-  image: milvusdb/milvus:v2.5.5
-  container_name: web-rag-milvus
-  command: ["milvus", "run", "standalone"]
-  ports:
-    - "19530:19530"
-    - "9091:9091"
-  environment:
-    - ETCD_USE_EMBED=true
-    - ETCD_DATA_DIR=/var/lib/milvus/etcd
-    - COMMON_STORAGETYPE=local
-  volumes:
-    - milvus_data:/var/lib/milvus
-```
-
-**Note:** Gateway and Memory Service run locally (not in Docker containers) for direct filesystem access. Only Milvus runs in Docker.
-
----
-
-## File Structure
-
-```
-deploy/memory/
-├── daily/                    # Sessional memory (one file per day)
-│   ├── 2026-03-05.md
-│   ├── 2026-03-06.md
-│   └── 2026-03-07.md
-└── MEMORY.md                 # Durable facts (always loaded)
-
-# Vector index stored in Milvus container volume (milvus_data)
-# NOT a local file - Milvus Lite doesn't support Windows
-```
-
-### Daily Log Format
-
-```markdown
-# Conversation Log - 2026-03-07
-
-### [09:15:00] user
-First message of the day...
-
-### [09:15:12] assistant
-Response to first message...
-
-### [10:30:00] user
-Another conversation...
-
----
-## Session Summary (10:45)
-Summary of the session extracted at 80% flush...
----
-
-### [14:00:00] user
-Afternoon conversation...
-```
-
-### MEMORY.md Format
-
-```markdown
-# Long-term Memory
-
-## 2026-03-05 14:30
-- User prefers concise responses
-- Project uses TypeScript 5.0+
-
-## 2026-03-06 10:15
-- Database is PostgreSQL 16 with pgvector
-- Deployment target is Azure Kubernetes Service
-```
-
----
-
-## API Endpoints
-
-### Health Check
 ```bash
+cd services/memory_service
+docker build -t memory-service:latest .
+```
+
+### Transfer Image to Another Machine (No Registry)
+
+If you don't want to push to a container registry, you can transfer the image directly:
+
+**On source machine (save image to file):**
+```bash
+# Save image to tar file
+docker save memory-service:latest -o memory-service.tar
+
+# Or with compression (smaller file)
+docker save memory-service:latest | gzip > memory-service.tar.gz
+```
+
+**Transfer the file** (scp, USB drive, network share, etc.):
+```bash
+scp memory-service.tar.gz user@target-machine:/path/to/
+```
+
+**On target machine (load image from file):**
+```bash
+# Load from tar file
+docker load -i memory-service.tar
+
+# Or from compressed file
+gunzip -c memory-service.tar.gz | docker load
+
+# Verify image is loaded
+docker images | grep memory-service
+```
+
+### Deploy with docker-compose
+
+```bash
+cd memory-service
+
+# Set your data path
+export MEMORY_DATA_PATH=/path/to/your/logs
+
+# Start services (memory-service + Milvus)
+docker compose up -d
+
+# Service available at http://localhost:8007
+```
+
+### Deploy Standalone (bring your own Milvus)
+
+```bash
+# Start Milvus first
+docker run -d --name milvus \
+  -p 19530:19530 \
+  -e ETCD_USE_EMBED=true \
+  -e ETCD_DATA_DIR=/var/lib/milvus/etcd \
+  milvusdb/milvus:v2.5.5 milvus run standalone
+
+# Start memory service
+docker run -d \
+  --name memory-service \
+  -p 8007:8007 \
+  -v /path/to/your/logs:/data \
+  -e MEMORY_DATA_PATH=/data \
+  -e MILVUS_URI=host.docker.internal:19530 \
+  memory-service:latest
+```
+
+### Verify Deployment
+
+```bash
+# Health check
 curl http://localhost:8007/health
+
+# Expected response:
+{
+  "status": "healthy",
+  "service": "memory-service",
+  "memory_file_exists": false,
+  "daily_log_count": 0,
+  "watcher_running": true
+}
 ```
 
-Response:
+---
+
+## API Reference
+
+### POST /write_daily
+
+Write a conversation message to today's daily log.
+
+**Request:**
+```http
+POST /write_daily
+Content-Type: application/json
+
+{
+  "role": "user",
+  "content": "Hello, how are you?",
+  "session_id": "conv-abc123"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "file_path": "/data/daily/2024-01-15.md",
+  "message": "Appended user message to daily log"
+}
+```
+
+**Parameters:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `role` | string | Yes | Message role: "user", "assistant", or "system" |
+| `content` | string | Yes | Message content |
+| `session_id` | string | No | Session/conversation ID for grouping messages |
+
+**Session Grouping:**
+When `session_id` is provided, messages are grouped under session headers. A new session header is written when a new `session_id` is first seen in today's log. This allows clear separation between different conversation sessions (e.g., when user clicks "Clear Context").
+
+---
+
+### POST /write_memory
+
+Write facts to MEMORY.md (durable long-term memory).
+
+**Request:**
+```http
+POST /write_memory
+Content-Type: application/json
+
+{
+  "content": "- User prefers dark mode\n- Project uses Python 3.10",
+  "section": "User Preferences",
+  "replace": false
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "file_path": "/data/MEMORY.md",
+  "message": "Written 45 chars to MEMORY.md"
+}
+```
+
+**Parameters:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `content` | string | Yes | Content to write |
+| `section` | string | No | Section header (creates `## Section` heading) |
+| `replace` | boolean | No | If true, replace entire file (default: false) |
+
+---
+
+### POST /search
+
+Semantic search across all indexed memories.
+
+**Request:**
+```http
+POST /search
+Content-Type: application/json
+
+{
+  "query": "user preferences",
+  "limit": 5
+}
+```
+
+**Response:**
+```json
+{
+  "results": [
+    {
+      "content": "User prefers dark mode",
+      "source": "MEMORY.md",
+      "heading": "User Preferences",
+      "score": 0.95
+    },
+    {
+      "content": "User asked about Python setup...",
+      "source": "daily/2024-01-15.md",
+      "heading": "[10:30:00] user",
+      "score": 0.82
+    }
+  ],
+  "query": "user preferences"
+}
+```
+
+**Parameters:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `query` | string | Yes | Search query |
+| `limit` | integer | No | Max results (default: 5, max: 50) |
+
+---
+
+### GET /context
+
+Get memory context for conversation start.
+
+**Request:**
+```http
+GET /context?max_tokens=2000&query=optional+focus
+```
+
+**Response:**
+```json
+{
+  "context": "## Long-term Memory\n\n- User prefers dark mode\n...",
+  "sources": ["MEMORY.md", "daily/2024-01-15.md"],
+  "token_count": 450
+}
+```
+
+**Parameters:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `max_tokens` | integer | No | Max tokens to return (default: 2000) |
+| `query` | string | No | Optional query to focus context |
+
+---
+
+### POST /reindex
+
+Rebuild the vector index from markdown files.
+
+**Request:**
+```http
+POST /reindex?force=true
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "chunks_indexed": 42,
+  "message": "Indexed 42 chunks"
+}
+```
+
+**Parameters:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `force` | boolean | No | Re-embed all chunks even if unchanged |
+
+---
+
+### GET /health
+
+Health check endpoint.
+
+**Request:**
+```http
+GET /health
+```
+
+**Response:**
 ```json
 {
   "status": "healthy",
   "service": "memory-service",
+  "version": "1.0.0",
   "memory_file_exists": true,
   "daily_log_count": 5,
   "watcher_running": true
 }
 ```
 
-### Semantic Search
-```bash
-curl -X POST http://localhost:8007/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "SSO proxy configuration", "limit": 5}'
-```
-
-Response:
-```json
-{
-  "results": [
-    {
-      "content": "To configure the Go proxy for SSO...",
-      "source": "daily/2026-03-07.md",
-      "heading": "[10:15:45] assistant",
-      "score": 0.85
-    }
-  ],
-  "query": "SSO proxy configuration"
-}
-```
-
-### Get Context
-```bash
-curl "http://localhost:8007/context?max_tokens=2000"
-```
-
-Returns MEMORY.md content plus relevant recent memories.
-
-### Manual Distillation (via Gateway)
-```bash
-curl -X POST http://localhost:8000/agent/distill \
-  -H "Content-Type: application/json" \
-  -d '{"conversation_id": "your-conversation-id"}'
-```
-
-Response:
-```json
-{
-  "success": true,
-  "conversation_id": "your-conversation-id",
-  "summary_preview": "We configured the proxy...",
-  "facts_preview": "- CORS requires explicit origin...",
-  "message": "Saved session summary and durable facts to memory"
-}
-```
-
-### Reindex
-```bash
-curl -X POST http://localhost:8007/reindex
-```
-
-Rebuilds the vector index from all markdown files.
-
 ---
 
-## HiChat Integration
-
-### Save to Memory Button
-
-HiChat includes a "Save to Memory" button that:
-
-1. Triggers manual distillation for the current conversation
-2. Shows preview of saved summary and facts
-3. Confirms successful save with a system message
-
-### How to Use
-
-1. Have a conversation with important information
-2. Click "Save to Memory" button (next to Send)
-3. LLM extracts summary and facts
-4. Confirmation message shows what was saved
-
----
-
-## Portability
-
-The `MemoryClient` class (`services/memory_service/client.py`) is designed to be portable to other languages:
+## Integration Guide
 
 ### Python
-```python
-from memory_service.client import MemoryClient
 
-client = MemoryClient("/data/memory")
-client.append_to_daily_log("user", "Hello!")
-client.append_durable_facts("User prefers Python")
+```python
+import httpx
+
+MEMORY_URL = "http://localhost:8007"
+
+async def log_message(role: str, content: str):
+    """Log a conversation message."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{MEMORY_URL}/write_daily",
+            json={"role": role, "content": content}
+        )
+        return resp.json()
+
+async def search_memory(query: str, limit: int = 5):
+    """Search memories."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{MEMORY_URL}/search",
+            json={"query": query, "limit": limit}
+        )
+        return resp.json()["results"]
+
+async def get_context(max_tokens: int = 2000):
+    """Get memory context for conversation start."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{MEMORY_URL}/context",
+            params={"max_tokens": max_tokens}
+        )
+        return resp.json()["context"]
+
+async def save_facts(facts: str):
+    """Save durable facts to MEMORY.md."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{MEMORY_URL}/write_memory",
+            json={"content": facts}
+        )
+        return resp.json()
 ```
 
 ### Go
+
 ```go
-func (c *MemoryClient) AppendToDailyLog(role, content string) {
-    today := time.Now().Format("2006-01-02")
-    filename := filepath.Join(c.DailyFolder, today+".md")
+package memory
 
-    timestamp := time.Now().Format("15:04:05")
-    entry := fmt.Sprintf("\n### [%s] %s\n%s\n", timestamp, role, content)
+import (
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "io"
+    "net/http"
+)
 
-    f, _ := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-    defer f.Close()
-    f.WriteString(entry)
+const memoryURL = "http://localhost:8007"
+
+func LogMessage(role, content string) error {
+    body := map[string]string{"role": role, "content": content}
+    jsonBody, _ := json.Marshal(body)
+
+    resp, err := http.Post(
+        memoryURL+"/write_daily",
+        "application/json",
+        bytes.NewBuffer(jsonBody),
+    )
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != 200 {
+        body, _ := io.ReadAll(resp.Body)
+        return fmt.Errorf("failed: %s", body)
+    }
+    return nil
+}
+
+func Search(query string, limit int) ([]map[string]interface{}, error) {
+    body := map[string]interface{}{"query": query, "limit": limit}
+    jsonBody, _ := json.Marshal(body)
+
+    resp, err := http.Post(
+        memoryURL+"/search",
+        "application/json",
+        bytes.NewBuffer(jsonBody),
+    )
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+
+    var result struct {
+        Results []map[string]interface{} `json:"results"`
+    }
+    json.NewDecoder(resp.Body).Decode(&result)
+    return result.Results, nil
 }
 ```
 
-### C#
-```csharp
-public void AppendToDailyLog(string role, string content) {
-    var today = DateTime.Now.ToString("yyyy-MM-dd");
-    var filename = Path.Combine(DailyFolder, $"{today}.md");
+### curl
 
-    var timestamp = DateTime.Now.ToString("HH:mm:ss");
-    var entry = $"\n### [{timestamp}] {role}\n{content}\n";
+```bash
+# Log a user message
+curl -X POST http://localhost:8007/write_daily \
+  -H "Content-Type: application/json" \
+  -d '{"role": "user", "content": "Hello world!"}'
 
-    File.AppendAllText(filename, entry);
-}
+# Log an assistant response
+curl -X POST http://localhost:8007/write_daily \
+  -H "Content-Type: application/json" \
+  -d '{"role": "assistant", "content": "Hi there!"}'
+
+# Save durable facts
+curl -X POST http://localhost:8007/write_memory \
+  -H "Content-Type: application/json" \
+  -d '{"content": "- User prefers Python\n- Project deadline is March"}'
+
+# Search memories
+curl -X POST http://localhost:8007/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "user preferences", "limit": 5}'
+
+# Get context for new conversation
+curl "http://localhost:8007/context?max_tokens=2000"
+
+# Force reindex
+curl -X POST "http://localhost:8007/reindex?force=true"
+
+# Health check
+curl http://localhost:8007/health
 ```
 
-The HTTP API (`/search`, `/context`) is language-agnostic for semantic search.
+---
+
+## Memory Types
+
+| Type | File | Content | When Loaded |
+|------|------|---------|-------------|
+| **Sessional** | `daily/YYYY-MM-DD.md` | Conversation transcripts | Searched on demand |
+| **Durable** | `MEMORY.md` | Always-true facts | Every conversation start |
+
+### Daily Logs (Sessional Memory)
+
+Auto-generated format with session grouping:
+```markdown
+# 2024-01-15
+
+## Session 10:15 [ID: conv-abc123]
+
+### [10:15:32] user
+How do I configure the proxy?
+
+### [10:15:45] assistant
+To configure the proxy, you need to...
+
+---
+
+## Session 14:30 [ID: conv-def456]
+
+### [14:30:12] user
+New question after Clear Context
+
+### [14:30:25] assistant
+Here's the answer...
+
+---
+## Session Summary (15:00)
+We configured the proxy and answered questions about deployment.
+---
+```
+
+**Session headers** are automatically written when:
+- A new `session_id` is first seen in today's log
+- User clicks "Clear Context" in HiChat (creates new conversation_id)
+
+### MEMORY.md (Durable Memory)
+
+```markdown
+## 2024-01-15 10:45
+- CORS requires explicit origin in production
+- User prefers Python over Go
+
+## 2024-01-16 14:30
+- Project uses PostgreSQL 16 with pgvector
+- Deployment target is Azure Kubernetes
+```
+
+---
+
+## How It Works
+
+### Auto-Logging Flow
+
+```
+App sends message
+    │
+    ▼
+POST /write_daily {"role": "user", "content": "..."}
+    │
+    ▼
+Memory service writes to daily/YYYY-MM-DD.md
+    │
+    ▼
+memsearch.watch() detects file change
+    │
+    ▼
+Auto-indexes content (1.5s debounce)
+    │
+    ▼
+Content searchable via POST /search
+```
+
+### 80% Context Flush (Gateway Feature)
+
+When conversation context reaches 80% capacity:
+
+1. **Gateway** injects distillation prompt into LLM call
+2. **LLM** responds with `[SUMMARY]` and `[FACTS]` markers
+3. **Gateway** parses response and calls memory service:
+   - `POST /write_daily` with summary
+   - `POST /write_memory` with facts
+4. **Gateway** strips markers before showing response to user
+
+---
+
+## Configuration
+
+### Memory Service Environment
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `MEMORY_DATA_PATH` | Yes | `/data/memory` | Path to markdown files |
+| `PORT` | No | `8007` | HTTP listening port |
+| `MILVUS_URI` | No | `./milvus.db` | Milvus connection URI |
+| `EMBEDDING_PROVIDER` | No | `local` | Embedding provider |
+| `LOG_LEVEL` | No | `INFO` | Logging verbosity |
+
+### Gateway Environment
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `MEMORY_SERVICE_URL` | Yes* | - | Memory service URL (e.g., `http://localhost:8007`) |
+| `MEMORY_AUTO_LOG` | No | `true` | Auto-log messages to daily logs |
+| `MEMORY_AUTO_FLUSH` | No | `true` | Enable 80% context flush |
+| `MEMORY_FLUSH_THRESHOLD` | No | `0.8` | Context % to trigger flush |
+
+*Required if memory features are enabled
 
 ---
 
 ## Troubleshooting
 
-### Memory Service Not Starting
+### Service Not Starting
 
 ```bash
-# Check if memory service is running (local process)
+# Check health
 curl http://localhost:8007/health
 
-# Check if Milvus container is running
-docker ps | grep milvus
-docker logs web-rag-milvus
+# Check logs
+docker logs memory-service
 
-# Start services with PowerShell script
-.\scripts\start-services.ps1
-```
-
-### Milvus Connection Issues
-
-```bash
-# Verify Milvus is accessible
+# Check Milvus
+docker logs memory-milvus
 curl http://localhost:19530/health
-
-# Check Milvus logs
-docker logs web-rag-milvus
-
-# Restart Milvus container
-docker restart web-rag-milvus
 ```
 
-### Files Not Being Indexed
+### Search Returns Empty Results
 
 ```bash
-# Check if watcher is running
-curl http://localhost:8007/health
-# Look for: "watcher_running": true
+# Check if files exist
+ls -la /path/to/memory/
 
 # Force reindex
-curl -X POST http://localhost:8007/reindex
+curl -X POST http://localhost:8007/reindex?force=true
+
+# Check watcher status
+curl http://localhost:8007/health
+# Look for: "watcher_running": true
 ```
 
-### MEMORY.md Not Loading
+### Connection Refused
 
 ```bash
-# Check if file exists
-cat deploy/memory/MEMORY.md
+# Check if service is running
+docker ps | grep memory
 
-# Check gateway logs for memory loading
-# Gateway runs locally, check terminal output or log files
-cat deploy/logs/gateway.log | grep "memory"
+# Check port binding
+netstat -an | grep 8007
+
+# Restart service
+docker restart memory-service
 ```
 
-### Distillation Not Triggering
-
-1. Check `MEMORY_AUTO_FLUSH=true` in `.env`
-2. Check `MEMORY_FLUSH_THRESHOLD=0.8` (or your desired threshold)
-3. Verify context is actually reaching the threshold
-4. Check gateway logs for "triggering memory flush"
-
-### Permission Issues
+### Milvus Issues
 
 ```bash
-# Ensure memory folder is writable
-chmod -R 777 deploy/memory/
-```
+# Check Milvus health
+curl http://localhost:9091/healthz
 
-### Stopping/Starting Services
+# Restart Milvus
+docker restart memory-milvus
 
-```powershell
-# Windows: Use the service management scripts
-.\scripts\stop-services.ps1           # Stop all services
-.\scripts\stop-services.ps1 -Service memory   # Stop only memory service
-.\scripts\start-services.ps1          # Start all services
-.\scripts\restart-services.ps1        # Restart all services
+# Check Milvus logs
+docker logs memory-milvus --tail 50
 ```
 
 ---
 
 ## Related Documentation
 
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and data flows
-- **[CONFIGURATION.md](CONFIGURATION.md)** - Environment variable reference
-- **[DIAGNOSTICS.md](DIAGNOSTICS.md)** - Troubleshooting guide
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture
+- **[CONFIGURATION.md](CONFIGURATION.md)** - Environment variables
+- **[memory-service/README.md](../memory-service/README.md)** - Standalone deployment

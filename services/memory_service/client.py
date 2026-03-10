@@ -43,16 +43,22 @@ class MemoryClient:
         # Ensure directories exist
         self.daily_folder.mkdir(parents=True, exist_ok=True)
 
-    def append_to_daily_log(self, role: str, content: str) -> str:
+    def append_to_daily_log(
+        self, role: str, content: str, session_id: Optional[str] = None
+    ) -> str:
         """
         Append a message to today's daily log.
 
         This is called for EVERY user/assistant message to maintain
         the full conversation transcript.
 
+        Messages are grouped by session_id. When a new session starts,
+        a session header is written to separate conversation sessions.
+
         Args:
             role: Message role (user, assistant, system)
             content: Message content
+            session_id: Session/conversation ID for grouping messages
 
         Returns:
             Path to the daily log file
@@ -60,11 +66,37 @@ class MemoryClient:
         today = datetime.now().strftime("%Y-%m-%d")
         log_file = self.daily_folder / f"{today}.md"
 
+        entries = []
+        is_new_file = not log_file.exists() or log_file.stat().st_size == 0
+
+        # Add day header for new files
+        if is_new_file:
+            entries.append(f"# {today}\n")
+
+        # Check if we need to write a session header
+        if session_id:
+            needs_header = True
+            if not is_new_file:
+                # Check if this session already has a header in today's log
+                existing_content = log_file.read_text(encoding="utf-8")
+                session_marker = f"[ID: {session_id}]"
+                if session_marker in existing_content:
+                    needs_header = False
+
+            if needs_header:
+                # Write session header
+                session_time = datetime.now().strftime("%H:%M")
+                # Add separator if file already has content
+                if not is_new_file:
+                    entries.append("\n---\n")
+                entries.append(f"\n## Session {session_time} [ID: {session_id}]\n")
+
+        # Write the message entry
         timestamp = datetime.now().strftime("%H:%M:%S")
-        entry = f"\n### [{timestamp}] {role}\n{content}\n"
+        entries.append(f"\n### [{timestamp}] {role}\n{content}\n")
 
         with open(log_file, "a", encoding="utf-8") as f:
-            f.write(entry)
+            f.writelines(entries)
 
         return str(log_file)
 

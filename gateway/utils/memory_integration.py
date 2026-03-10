@@ -1,21 +1,20 @@
 """
 Memory service integration utilities for gateway.
 
-Uses MemoryClient for direct file writes (fast, reliable).
-Uses HTTP calls to memory service for search and context.
+All operations use HTTP calls to memory service. Requires MEMORY_SERVICE_URL.
+Gateway is a pure HTTP client - no direct file access to memory storage.
 
 Handles:
-- Auto-logging messages to daily logs (direct file write)
-- 80% context flush trigger with distillation
-- Memory context injection at conversation start
-- Parsing distillation markers from LLM response
+- Auto-logging messages to daily logs (via HTTP to /write_daily)
+- 80% context flush trigger with distillation (writes via HTTP)
+- Memory context injection at conversation start (via HTTP to /context)
+- Parsing distillation markers from LLM response (inline regex)
 """
 
 import logging
 import os
-import sys
+import re
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -28,32 +27,6 @@ logger = logging.getLogger(__name__)
 MEMORY_AUTO_LOG = os.getenv("MEMORY_AUTO_LOG", "true").lower() == "true"
 MEMORY_AUTO_FLUSH = os.getenv("MEMORY_AUTO_FLUSH", "true").lower() == "true"
 MEMORY_FLUSH_THRESHOLD = float(os.getenv("MEMORY_FLUSH_THRESHOLD", "0.8"))
-MEMORY_DATA_PATH = os.getenv("MEMORY_DATA_PATH", "/data/memory")
-
-# Add memory_service to path for importing MemoryClient
-_memory_service_path = (
-    Path(__file__).parent.parent.parent / "services" / "memory_service"
-)
-if str(_memory_service_path) not in sys.path:
-    sys.path.insert(0, str(_memory_service_path))
-
-# Import MemoryClient (lazy import to avoid circular deps)
-_memory_client = None
-
-
-def _get_memory_client():
-    """Get or create MemoryClient instance."""
-    global _memory_client
-    if _memory_client is None:
-        try:
-            from client import MemoryClient
-
-            _memory_client = MemoryClient(MEMORY_DATA_PATH)
-            logger.info(f"MemoryClient initialized with path: {MEMORY_DATA_PATH}")
-        except ImportError as e:
-            logger.warning(f"Could not import MemoryClient: {e}")
-            return None
-    return _memory_client
 
 
 def get_memory_service_url() -> Optional[str]:
@@ -63,37 +36,34 @@ def get_memory_service_url() -> Optional[str]:
 
 def is_memory_enabled() -> bool:
     """Check if memory service is enabled and configured."""
-    return get_memory_service_url() is not None or _get_memory_client() is not None
+    return get_memory_service_url() is not None
 
 
 def get_memory_config() -> Dict[str, Any]:
     """Get current memory configuration."""
-    client = _get_memory_client()
     return {
         "enabled": is_memory_enabled(),
         "service_url": get_memory_service_url(),
-        "data_path": MEMORY_DATA_PATH,
         "auto_log": MEMORY_AUTO_LOG,
         "auto_flush": MEMORY_AUTO_FLUSH,
         "flush_threshold": MEMORY_FLUSH_THRESHOLD,
-        "client_enabled": client is not None,
     }
 
 
-def append_to_daily_log(
+async def append_to_daily_log_async(
     content: str,
     role: str = "user",
     conversation_id: Optional[str] = None,
 ) -> bool:
     """
-    Append a message to the daily log.
+    Append a message to the daily log via HTTP API.
 
-    Writes directly to filesystem - memsearch.watch() will auto-index.
+    Requires MEMORY_SERVICE_URL to be configured.
 
     Args:
         content: Message content
         role: Message role (user/assistant)
-        conversation_id: Optional conversation ID (for future use)
+        conversation_id: Session/conversation ID for grouping messages
 
     Returns:
         True if successful, False otherwise
@@ -101,18 +71,113 @@ def append_to_daily_log(
     if not MEMORY_AUTO_LOG:
         return False
 
-    client = _get_memory_client()
-    if not client:
-        logger.debug("MemoryClient not available, skipping daily log")
+    memory_url = get_memory_service_url()
+    if not memory_url:
+        logger.debug("MEMORY_SERVICE_URL not configured, skipping daily log")
         return False
 
     try:
-        log_path = client.append_to_daily_log(role, content)
-        logger.debug(f"Logged {role} message to {log_path}: {len(content)} chars")
-        return True
+        payload = {"role": role, "content": content}
+        if conversation_id:
+            payload["session_id"] = conversation_id
+
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            response = await http_client.post(
+                f"{memory_url}/write_daily",
+                json=payload,
+            )
+            response.raise_for_status()
+            logger.debug(
+                f"Logged {role} message via API: {len(content)} chars (session: {conversation_id})"
+            )
+            return True
     except Exception as e:
-        logger.warning(f"Failed to write to daily log: {e}")
+        logger.warning(f"Failed to write daily log via API: {e}")
         return False
+
+
+def _get_distillation_prompt(token_usage_pct: float) -> str:
+    """Generate distillation prompt for 80% context flush."""
+    return f"""
+### MEMORY CHECKPOINT ({token_usage_pct:.0%} context used)
+
+Before continuing with your response, please extract important information from this conversation.
+
+**Format your extraction with these exact markers:**
+
+[SUMMARY]
+(2-3 sentence recap of what was accomplished in this session)
+[/SUMMARY]
+
+[FACTS]
+- Any permanent rules, preferences, or constraints discovered
+- Important decisions that should be remembered
+- Technical details that will be true in future sessions
+(Leave empty if no durable facts to save)
+[/FACTS]
+
+After the markers, continue with your normal response to the user.
+The user will NOT see the [SUMMARY] and [FACTS] sections - they are for memory only.
+"""
+
+
+def _parse_distillation_response(response: str) -> Tuple[str, str]:
+    """
+    Parse LLM response for summary and facts markers.
+
+    Args:
+        response: Full LLM response text
+
+    Returns:
+        Tuple of (summary, facts) - both may be empty strings
+    """
+    summary = ""
+    facts = ""
+
+    # Extract [SUMMARY]...[/SUMMARY]
+    summary_match = re.search(
+        r"\[SUMMARY\](.*?)\[/SUMMARY\]", response, re.DOTALL | re.IGNORECASE
+    )
+    if summary_match:
+        summary = summary_match.group(1).strip()
+
+    # Extract [FACTS]...[/FACTS]
+    facts_match = re.search(
+        r"\[FACTS\](.*?)\[/FACTS\]", response, re.DOTALL | re.IGNORECASE
+    )
+    if facts_match:
+        facts = facts_match.group(1).strip()
+        # Filter out "none" or "empty" responses
+        if facts.lower() in ("none", "n/a", "-", ""):
+            facts = ""
+
+    return summary, facts
+
+
+def _strip_distillation_markers(response: str) -> str:
+    """
+    Remove distillation markers from response before showing to user.
+
+    Args:
+        response: Full LLM response with markers
+
+    Returns:
+        Clean response without [SUMMARY] and [FACTS] sections
+    """
+    # Remove [SUMMARY]...[/SUMMARY] block
+    clean = re.sub(
+        r"\[SUMMARY\].*?\[/SUMMARY\]\s*",
+        "",
+        response,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+
+    # Remove [FACTS]...[/FACTS] block
+    clean = re.sub(
+        r"\[FACTS\].*?\[/FACTS\]\s*", "", clean, flags=re.DOTALL | re.IGNORECASE
+    )
+
+    return clean.strip()
 
 
 def check_and_get_flush_prompt(
@@ -148,44 +213,13 @@ def check_and_get_flush_prompt(
         f"triggering memory flush"
     )
 
-    client = _get_memory_client()
-    if client:
-        flush_prompt = client.get_distillation_prompt(usage_ratio)
-    else:
-        # Fallback prompt if client not available
-        flush_prompt = _get_fallback_distillation_prompt(usage_ratio)
-
+    flush_prompt = _get_distillation_prompt(usage_ratio)
     return True, flush_prompt, usage_ratio
 
 
-def _get_fallback_distillation_prompt(token_usage_pct: float) -> str:
-    """Fallback distillation prompt if MemoryClient not available."""
-    return f"""
-### MEMORY CHECKPOINT ({token_usage_pct:.0%} context used)
-
-Before continuing with your response, please extract important information from this conversation.
-
-**Format your extraction with these exact markers:**
-
-[SUMMARY]
-(2-3 sentence recap of what was accomplished in this session)
-[/SUMMARY]
-
-[FACTS]
-- Any permanent rules, preferences, or constraints discovered
-- Important decisions that should be remembered
-- Technical details that will be true in future sessions
-(Leave empty if no durable facts to save)
-[/FACTS]
-
-After the markers, continue with your normal response to the user.
-The user will NOT see the [SUMMARY] and [FACTS] sections - they are for memory only.
-"""
-
-
-def parse_and_save_distillation(response: str) -> Tuple[str, str, str]:
+async def parse_and_save_distillation_async(response: str) -> Tuple[str, str, str]:
     """
-    Parse LLM response for distillation markers and save to files.
+    Parse LLM response for distillation markers and save via HTTP API.
 
     Args:
         response: Full LLM response text
@@ -196,25 +230,43 @@ def parse_and_save_distillation(response: str) -> Tuple[str, str, str]:
         - summary: Extracted summary (empty if none)
         - facts: Extracted facts (empty if none)
     """
-    client = _get_memory_client()
-    if not client:
+    memory_url = get_memory_service_url()
+    if not memory_url:
         return response, "", ""
 
     try:
-        # Parse markers
-        summary, facts = client.parse_distillation_response(response)
+        # Parse markers (local regex operation)
+        summary, facts = _parse_distillation_response(response)
 
-        # Save if found
+        # Save summary to daily log via HTTP
         if summary:
-            client.append_session_summary(summary)
-            logger.info(f"Saved session summary: {len(summary)} chars")
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as http_client:
+                    await http_client.post(
+                        f"{memory_url}/write_daily",
+                        json={
+                            "role": "system",
+                            "content": f"## Session Summary\n{summary}",
+                        },
+                    )
+                logger.info(f"Saved session summary via API: {len(summary)} chars")
+            except Exception as e:
+                logger.warning(f"Failed to save session summary via API: {e}")
 
+        # Save facts to MEMORY.md via HTTP
         if facts:
-            client.append_durable_facts(facts)
-            logger.info(f"Saved durable facts: {len(facts)} chars")
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as http_client:
+                    await http_client.post(
+                        f"{memory_url}/write_memory",
+                        json={"content": facts, "replace": False},
+                    )
+                logger.info(f"Saved durable facts via API: {len(facts)} chars")
+            except Exception as e:
+                logger.warning(f"Failed to save durable facts via API: {e}")
 
-        # Remove markers from response for user
-        clean_response = client.strip_distillation_markers(response)
+        # Remove markers from response for user (local regex operation)
+        clean_response = _strip_distillation_markers(response)
 
         return clean_response, summary, facts
 
@@ -231,7 +283,7 @@ async def get_memory_context(
     """
     Get relevant memory context to inject at conversation start.
 
-    Uses HTTP call to memory service for search functionality.
+    Uses HTTP call to memory service /context endpoint.
 
     Args:
         conversation_id: Optional conversation ID
@@ -243,12 +295,7 @@ async def get_memory_context(
     """
     memory_url = get_memory_service_url()
     if not memory_url:
-        # Fallback: just read MEMORY.md directly
-        client = _get_memory_client()
-        if client:
-            memory_content = client.read_memory_md()
-            if memory_content:
-                return f"## Your Long-term Memory\n\n{memory_content}"
+        logger.debug("MEMORY_SERVICE_URL not configured, skipping memory context")
         return None
 
     try:
@@ -283,7 +330,9 @@ async def get_memory_context(
 
 async def save_memory_via_api(content: str, section: Optional[str] = None) -> bool:
     """
-    Save content to MEMORY.md via API (for LLM tool calls).
+    Save content to MEMORY.md via HTTP API.
+
+    Requires MEMORY_SERVICE_URL to be configured.
 
     Args:
         content: Content to save
@@ -294,14 +343,7 @@ async def save_memory_via_api(content: str, section: Optional[str] = None) -> bo
     """
     memory_url = get_memory_service_url()
     if not memory_url:
-        # Fallback: write directly
-        client = _get_memory_client()
-        if client:
-            try:
-                client.append_durable_facts(content)
-                return True
-            except Exception as e:
-                logger.warning(f"Failed to write memory directly: {e}")
+        logger.debug("MEMORY_SERVICE_URL not configured, skipping memory save")
         return False
 
     try:
@@ -324,19 +366,14 @@ async def save_memory_via_api(content: str, section: Optional[str] = None) -> bo
         return False
 
 
-def read_durable_memory() -> str:
+async def read_durable_memory_async() -> str:
     """
-    Read MEMORY.md content for injection into system prompt.
+    Read MEMORY.md content via HTTP API for injection into system prompt.
+
+    Uses /context endpoint to get long-term memory.
 
     Returns:
         Contents of MEMORY.md, or empty string if not available
     """
-    client = _get_memory_client()
-    if not client:
-        return ""
-
-    try:
-        return client.read_memory_md()
-    except Exception as e:
-        logger.warning(f"Failed to read MEMORY.md: {e}")
-        return ""
+    context = await get_memory_context(max_tokens=4000)
+    return context or ""

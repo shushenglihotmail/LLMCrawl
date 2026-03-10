@@ -33,12 +33,11 @@ from gateway.utils.conversation_store import get_conversation_store
 from gateway.utils.file_store import get_file_store
 from gateway.utils.logging import log_request, log_response
 from gateway.utils.memory_integration import (
-    append_to_daily_log,
+    append_to_daily_log_async,
     check_and_get_flush_prompt,
-    get_memory_context,
     is_memory_enabled,
-    parse_and_save_distillation,
-    read_durable_memory,
+    parse_and_save_distillation_async,
+    read_durable_memory_async,
 )
 from gateway.utils.metrics import (
     AgentActivityTimer,
@@ -1563,13 +1562,13 @@ async def execute(
         # Memory integration: Inject MEMORY.md for new conversations
         is_new_conversation = request.clear_history or not request.conversation_id
         if is_memory_enabled() and is_new_conversation:
-            durable_memory = read_durable_memory()
+            durable_memory = await read_durable_memory_async()
             if durable_memory:
                 system_prompt += f"\n\n## Your Long-term Memory\n\n{durable_memory}"
                 logger.info(f"Injected durable memory: {len(durable_memory)} chars")
 
         # Memory integration: Log user message to daily log
-        append_to_daily_log(request.user_message, "user", conversation_id)
+        await append_to_daily_log_async(request.user_message, "user", conversation_id)
 
         messages = _build_messages(
             system_prompt,
@@ -1608,14 +1607,16 @@ async def execute(
 
         # Memory integration: Parse distillation markers if flush was triggered
         if flush_triggered:
-            response_text, summary, facts = parse_and_save_distillation(response_text)
+            response_text, summary, facts = await parse_and_save_distillation_async(
+                response_text
+            )
             if summary or facts:
                 logger.info(
                     f"Distillation complete: summary={len(summary)} chars, facts={len(facts)} chars"
                 )
 
         # Memory integration: Log assistant response to daily log
-        append_to_daily_log(response_text, "assistant", conversation_id)
+        await append_to_daily_log_async(response_text, "assistant", conversation_id)
 
         # Step 6: Save conversation history
         conversation_store.add_message(conversation_id, "user", request.user_message)
@@ -1828,19 +1829,17 @@ async def manual_distill(
         if msg.get("role") in ["user", "assistant"]:
             messages.append({"role": msg["role"], "content": msg["content"]})
 
-    # Get distillation prompt from memory client
-    from gateway.utils.memory_integration import _get_memory_client
+    # Get distillation prompt (use 100% as indicator this is manual trigger)
+    from gateway.utils.memory_integration import _get_distillation_prompt
 
-    client = _get_memory_client()
-    if not client:
+    if not is_memory_enabled():
         return DistillResponse(
             success=False,
             conversation_id=conversation_id,
-            message="Memory client not available",
+            message="Memory service not configured (MEMORY_SERVICE_URL not set)",
         )
 
-    # Inject distillation prompt (use 100% as indicator this is manual trigger)
-    distill_prompt = client.get_distillation_prompt(1.0)
+    distill_prompt = _get_distillation_prompt(1.0)
     messages.append({"role": "system", "content": distill_prompt})
 
     # Call LLM to generate distillation
@@ -1857,7 +1856,9 @@ async def manual_distill(
         response_text = response.get("content") or ""
 
         # Parse and save distillation
-        clean_response, summary, facts = parse_and_save_distillation(response_text)
+        clean_response, summary, facts = await parse_and_save_distillation_async(
+            response_text
+        )
 
         # Build response message
         saved_items = []

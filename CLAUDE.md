@@ -51,25 +51,33 @@ Local paths: `*.cpp` (wildcard), `folder/` (non-recursive), `folder/**` (recursi
 Tools defined in `gateway/utils/tool_constants.py`. Gateway fetches MCP tool schemas at startup via `/tools` endpoint, converts to OpenAI format with `convert_mcp_tool_to_openai()`.
 
 ### Memory Service Architecture
-OpenClaw-style auto-memory using [memsearch](https://github.com/zilliztech/memsearch) library:
+Standalone containerized service using [memsearch](https://github.com/zilliztech/memsearch) library.
+Gateway is a pure HTTP client - all memory operations via REST API.
 
-**Division of labor:**
-| Task | Who | How |
-|------|-----|-----|
-| Search | LLM (via `memory_search` tool) | Calls memory service when needed |
-| Daily logging | Gateway (automatic) | Auto-append messages to `memory/YYYY-MM-DD.md` |
-| 80% flush | Gateway triggers → LLM writes | Hidden prompt → LLM summarizes to `MEMORY.md` |
-| Indexing | Memory Service (memsearch) | Milvus 2.5+ container + sentence-transformers |
+**All operations via HTTP:**
+| Operation | HTTP Endpoint | Description |
+|-----------|---------------|-------------|
+| Write daily log | `POST /write_daily` | Log conversation messages |
+| Write facts | `POST /write_memory` | Save durable facts to MEMORY.md |
+| Search | `POST /search` | Semantic search memories |
+| Get context | `GET /context` | Load memory for conversation start |
+| Reindex | `POST /reindex` | Rebuild vector index |
 
-**Storage layout (configurable via `MEMORY_DATA_PATH`):**
+**Architecture:**
 ```
-{MEMORY_DATA_PATH}/       # Default: deploy/memory/
-├── daily/                # Daily logs (YYYY-MM-DD.md)
-├── MEMORY.md             # Distilled long-term facts (LLM writes)
+Gateway ──HTTP──> Memory Service ──> Storage (MEMORY_DATA_PATH)
+                       │
+                       └──> Milvus (vector DB)
 ```
-Note: Vector index stored in Milvus container volume (milvus-lite doesn't support Windows)
 
-**Key features:** Markdown as source of truth, semantic search, SHA-256 deduplication
+**Storage layout (managed by memory service):**
+```
+{MEMORY_DATA_PATH}/
+├── daily/YYYY-MM-DD.md   # Daily conversation logs
+└── MEMORY.md             # Durable long-term facts
+```
+
+**Key features:** Markdown as source of truth, semantic search, all apps share same format
 
 ## Docker Compose Files
 
@@ -129,8 +137,12 @@ Environment in `deploy/.env`:
 - `LLM_MODELS`: JSON array with `name`, `deployment_name`, `provider_type`, `max_output_tokens`
 - `VECTOR_DB`: qdrant | pgvector
 - `CLAUDE_BRIDGE_URL`: http://host.docker.internal:8006 (optional)
-- `MEMORY_DATA_PATH`: ./memory (path to memory folder, relative to deploy/ or absolute)
-- `MEMORY_SERVICE_URL`: http://localhost:8007 (memory service endpoint)
-- `MEMORY_AUTO_LOG`: true | false (auto-append to daily logs)
+- `MEMORY_SERVICE_URL`: http://localhost:8007 (required for memory features)
+- `MEMORY_AUTO_LOG`: true | false (auto-append to daily logs via HTTP)
 - `MEMORY_AUTO_FLUSH`: true | false (80% context flush trigger)
 - `MEMORY_FLUSH_THRESHOLD`: 0.8 (context % to trigger flush)
+
+**Memory Service config** (in memory-service/.env):
+- `MEMORY_DATA_PATH`: /path/to/logs (where markdown files are stored)
+- `PORT`: 8007 (HTTP listening port)
+- `MILVUS_URI`: milvus:19530 (vector database)

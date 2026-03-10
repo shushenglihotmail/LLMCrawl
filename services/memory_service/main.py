@@ -4,13 +4,14 @@ Memory Service - FastAPI HTTP wrapper around memsearch library.
 Provides OpenClaw-style auto-memory with HTTP endpoints for cross-language access.
 Uses memsearch for markdown-first memory with semantic search.
 
-Agent writes daily logs directly to filesystem (no API call).
+All operations via HTTP REST API - no direct filesystem access needed by clients.
 memsearch.watch() auto-indexes file changes in background.
 
 Endpoints:
     GET  /health        - Health check
-    POST /search        - Semantic search memories (LLM tool)
-    POST /write_memory  - Write to MEMORY.md (LLM tool)
+    POST /write_daily   - Write to daily log (auto-indexes)
+    POST /write_memory  - Write to MEMORY.md
+    POST /search        - Semantic search memories
     GET  /context       - Get context for conversation start
     POST /reindex       - Rebuild index from markdown
 """
@@ -27,6 +28,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from memsearch import MemSearch
 from pydantic import BaseModel, Field
+
+from . import __version__
+from .client import MemoryClient
 
 # Configure logging
 logging.basicConfig(
@@ -92,6 +96,24 @@ class WriteMemoryResponse(BaseModel):
     message: str
 
 
+class WriteDailyRequest(BaseModel):
+    """Request to write to daily log."""
+
+    role: str = Field(..., description="Role: 'user' or 'assistant'")
+    content: str = Field(..., description="Message content")
+    session_id: Optional[str] = Field(
+        None, description="Session/conversation ID for grouping messages"
+    )
+
+
+class WriteDailyResponse(BaseModel):
+    """Response from write daily."""
+
+    success: bool
+    file_path: str
+    message: str
+
+
 class ContextResponse(BaseModel):
     """Response with relevant context."""
 
@@ -113,7 +135,7 @@ class HealthResponse(BaseModel):
 
     status: str
     service: str = "memory-service"
-    version: str = "1.0.0"
+    version: str = __version__
     memory_file_exists: bool
     daily_log_count: int
     watcher_running: bool = False
@@ -240,7 +262,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Memory Service",
     description="OpenClaw-style auto-memory with memsearch",
-    version="1.0.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -266,8 +288,41 @@ async def health_check():
     )
 
 
-# NOTE: POST /log endpoint removed - agent writes directly to filesystem
-# memsearch.watch() auto-indexes file changes
+@app.post("/write_daily", response_model=WriteDailyResponse)
+async def write_daily(request: WriteDailyRequest):
+    """
+    Write a message to today's daily log.
+
+    Apps call this to log conversation messages. The file is auto-indexed
+    by memsearch.watch() for semantic search.
+
+    Messages are grouped by session_id. When a new session_id is seen,
+    a session header is written to separate conversation sessions.
+
+    Args:
+        request: Contains role (user/assistant), content, and optional session_id
+    """
+    try:
+        client = MemoryClient(str(MEMORY_DATA_PATH))
+        file_path = client.append_to_daily_log(
+            role=request.role,
+            content=request.content,
+            session_id=request.session_id,
+        )
+        today = datetime.now().strftime("%Y-%m-%d")
+        logger.info(
+            f"Wrote {request.role} message to daily log: {today} (session: {request.session_id})"
+        )
+
+        return WriteDailyResponse(
+            success=True,
+            file_path=file_path,
+            message=f"Appended {request.role} message to daily log",
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to write daily log: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/search", response_model=SearchResponse)

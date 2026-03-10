@@ -1,0 +1,52 @@
+# Standalone Memory Service Deployment
+# Bundles memory-service + Milvus for easy local deployment
+#
+# Usage:
+#   MEMORY_DATA_PATH=/path/to/your/logs docker compose up -d
+#
+# Service available at http://localhost:8007 (or custom PORT)
+
+services:
+  milvus:
+    image: milvusdb/milvus:v2.5.5
+    container_name: memory-milvus
+    command: ["milvus", "run", "standalone"]
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    environment:
+      - ETCD_USE_EMBED=true
+      - ETCD_DATA_DIR=/var/lib/milvus/etcd
+      - COMMON_STORAGETYPE=local
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9091/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  memory-service:
+    build:
+      context: ../services/memory_service
+    container_name: memory-service
+    ports:
+      - "${PORT:-8007}:${PORT:-8007}"
+    environment:
+      - MEMORY_DATA_PATH=/data
+      - MILVUS_URI=milvus:19530
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PORT=${PORT:-8007}
+    volumes:
+      - ${MEMORY_DATA_PATH:?MEMORY_DATA_PATH environment variable is required}:/data
+    depends_on:
+      milvus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-8007}/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  milvus_data:
