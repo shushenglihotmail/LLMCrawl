@@ -2,8 +2,7 @@
 Unified workflow model for Code Intelligence Agent.
 
 Simplified single workflow that handles all use cases:
-- Target file analysis (Azure DevOps MCP)
-- Reference file context (Local MCP)
+- Reference file context (read directly from local filesystem)
 - Web crawling for additional context
 - Direct LLM interaction with user message
 """
@@ -20,7 +19,6 @@ class WorkflowType(str, Enum):
 
     GENERAL_CHAT: Casual conversation with informational consultant.
         - System role: Informational consultant
-        - Target files: Disabled
         - Reference files: Disabled
         - Azure DevOps in expose_to_llm: Disabled
         - Use case: General questions, casual chat
@@ -52,23 +50,19 @@ class UnifiedWorkflowRequest(BaseModel):
     Unified workflow request combining all previous templates.
 
     Flow:
-    1. Agent gathers context from target_paths (if provided) via Azure DevOps MCP
-    2. Agent gathers context from reference_files (if provided) via Local MCP
-    3. Agent crawls seed_urls (if provided) via crawler
-    4. Agent crawls seed_urls if provided
-    5. Agent combines all context with user_message and sends to LLM
-    6. LLM can use exposed tools (if any) for additional operations
+    1. Agent gathers context from reference_files (if provided) from local filesystem
+    2. Agent crawls seed_urls (if provided) via crawler
+    3. Agent combines all context with user_message and sends to LLM
+    4. LLM can use exposed tools (if any) for additional operations
 
     Example:
     {
         "workflow": "code_analysis",
         "user_message": "Explain how Windows runlevels work",
-        "target_paths": ["src/windows/runlevels/*.cpp"],  # Optional
-        "reference_files": ["/docs/architecture.md"],  # Optional
+        "reference_files": ["C:/docs/architecture.md"],  # Optional
         "seed_urls": ["https://www.osgwiki.com/wiki/Windows_Runlevels"],  # Optional
         "enable_embedding": false,  # Index crawled content
         "expose_to_llm": {
-            "local_mcp": false,  # Expose local file MCP tools to LLM
             "azure_devops_mcp": false,  # Expose Azure DevOps MCP tools to LLM
             "crawler": false  # Expose crawler tool to LLM
         },
@@ -88,11 +82,6 @@ class UnifiedWorkflowRequest(BaseModel):
     user_message: str = Field(..., description="User's question or request")
 
     # Optional context sources
-    target_paths: Optional[List[str]] = Field(
-        None,
-        description="Azure DevOps file paths to analyze (supports wildcards like *.cpp)",
-    )
-
     reference_files: Optional[List[str]] = Field(
         None, description="Local reference file paths for additional context"
     )
@@ -112,7 +101,6 @@ class UnifiedWorkflowRequest(BaseModel):
 
     expose_to_llm: dict = Field(
         default_factory=lambda: {
-            "local_mcp": False,
             "azure_devops_mcp": False,
             "crawler": False,
         },

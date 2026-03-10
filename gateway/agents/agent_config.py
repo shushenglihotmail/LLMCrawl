@@ -12,7 +12,6 @@ from typing import Any, Dict, Optional
 class AgentConfig:
     """Configuration for Code Intelligence Agent services."""
 
-    mcp_url: str
     crawler_url: str
     indexer_url: str
     azure_devops_mcp_url: Optional[str] = None

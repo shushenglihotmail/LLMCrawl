@@ -477,24 +477,11 @@ docker-compose up -d qdrant postgres redis
 docker-compose up -d firecrawl
 docker-compose up -d indexer
 docker-compose up -d crawler
-docker-compose up -d mcp-server
+docker-compose up -d azure-devops-mcp-server
 docker-compose up -d gateway
 
 # Verify all services
 docker-compose ps
-```
-
-#### 4. MCP Server Volume Configuration
-
-```yaml
-services:
-  mcp-server:
-    volumes:
-      - C:/your/local/folder:/data/files  # Windows
-      # - /path/to/your/folder:/data/files  # Linux/Mac
-    environment:
-      - MCP_ROOT_FOLDER=/data/files
-      - OPENAI_API_KEY=${OPENAI_API_KEY}  # Optional, for semantic search
 ```
 
 ---

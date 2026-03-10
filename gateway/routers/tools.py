@@ -24,15 +24,10 @@ from ..utils.metrics import (
 from ..utils.token_context import get_token
 from ..utils.tool_constants import (
     AZURE_DEVOPS_TOOLS,
-    TOOL_AZURE_DEVOPS_GET_FILE,
     TOOL_CRAWL_AND_REFRESH,
-    TOOL_INDEX_FILES,
-    TOOL_LIST_FILES,
     TOOL_MEMORY_SEARCH,
     TOOL_QUERY_COMPOSITION_DB,
-    TOOL_READ_LOCAL_FILE,
     TOOL_SAVE_FILE_FOR_DOWNLOAD,
-    TOOL_SEARCH_FILE_CONTENT,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,17 +39,10 @@ class ToolHandler:
     def __init__(self) -> None:
         self.crawler_url = "http://crawler:8001"
         self.indexer_url = "http://indexer:8002"
-        self.mcp_server_url = os.getenv("MCP_SERVER_URL", "http://mcp-server:8003")
         self.memory_service_url = os.getenv("MEMORY_SERVICE_URL")
         # Increased to 90s to allow for depth crawling with Playwright
         # which can take 60-70s for depth=2 with authentication
         self.timeout = 90.0
-        self.mcp_tools = [
-            TOOL_READ_LOCAL_FILE,
-            TOOL_LIST_FILES,
-            TOOL_SEARCH_FILE_CONTENT,
-            TOOL_INDEX_FILES,
-        ]
 
     async def handle_tool_call(
         self,
@@ -87,10 +75,6 @@ class ToolHandler:
             if tool_name == TOOL_CRAWL_AND_REFRESH:
                 result = await self._handle_crawl_and_refresh(
                     arguments, request_id, skip_embedding, initiator
-                )
-            elif tool_name in self.mcp_tools:
-                result = await self._handle_mcp_tool(
-                    tool_name, arguments, request_id, initiator
                 )
             elif tool_name in AZURE_DEVOPS_TOOLS:
                 result = await self._handle_azure_devops_tool(
@@ -435,47 +419,6 @@ class ToolHandler:
             except Exception as e:
                 logger.error(f"Retrieval failed: {e}")
                 return {"error": f"Retrieval failed: {e}"}
-
-    async def _handle_mcp_tool(
-        self,
-        tool_name: str,
-        arguments: Dict[str, Any],
-        request_id: str,
-        initiator: str = "llm",
-    ) -> Dict[str, Any]:
-        """
-        Handle MCP server tool calls for local file operations.
-
-        Args:
-            tool_name: Name of the MCP tool
-            arguments: Tool arguments
-            request_id: Request tracking ID
-            initiator: Who initiated the call (llm, agent, user)
-
-        Returns:
-            Tool result
-        """
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                response = await client.post(
-                    f"{self.mcp_server_url}/invoke",
-                    json={"tool_name": tool_name, "arguments": arguments},
-                    headers={"X-Request-ID": request_id},
-                )
-                response.raise_for_status()
-                result = response.json()
-
-                if not result.get("success"):
-                    return {"error": result.get("error", "MCP tool execution failed")}
-
-                return result.get("result", {})
-
-            except httpx.RequestError as e:
-                logger.error(f"MCP server request failed: {e}")
-                return {"error": f"MCP server unavailable: {e}"}
-            except httpx.HTTPStatusError as e:
-                logger.error(f"MCP server HTTP error: {e.response.status_code}")
-                return {"error": f"MCP server error: {e.response.status_code}"}
 
     async def _handle_azure_devops_tool(
         self,

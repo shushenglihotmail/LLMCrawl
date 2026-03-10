@@ -17,7 +17,6 @@ Complete reference for all LLMCrawl environment variables and settings.
 - [Entra ID Authentication](#entra-id-authentication)
 - [Tool Configuration](#tool-configuration)
   - [Azure DevOps MCP](#azure-devops-mcp)
-  - [Local File Access MCP](#local-file-access-mcp)
   - [Windows Composition Database](#windows-composition-database)
   - [Tool Call Limits](#tool-call-limits)
 - [Memory Service](#memory-service)
@@ -234,21 +233,6 @@ AZURE_DEVOPS_BRANCH=main
 2. Create token with **Code (Read)** and **Code (Search)** scopes
 3. Copy token to `.env`
 
-### Local File Access MCP
-
-Allow the agent to read files on your local machine:
-
-```bash
-# Host folder to mount (use forward slashes on Windows)
-MCP_HOST_FOLDER=C:/src
-
-# Container mount point (don't change)
-MCP_ROOT_FOLDER=/data/files
-
-# Vector database for file indexing
-MCP_VECTOR_DB_PATH=/data/mcp_vector_db
-```
-
 ### Windows Composition Database
 
 For querying Windows build component information:
@@ -447,7 +431,6 @@ INDEXER_PORT=8002
 # Docker services accessed from local gateway
 CRAWLER_URL=http://localhost:8001
 INDEXER_URL=http://localhost:8002
-MCP_SERVER_URL=http://localhost:8003
 AZURE_DEVOPS_MCP_URL=http://localhost:8004
 MEMORY_SERVICE_URL=http://localhost:8007
 MILVUS_URI=http://localhost:19530
@@ -549,10 +532,6 @@ docker compose up -d --force-recreate
 | `MAX_TOOL_ROUNDS` | `5` | Default tool call limit |
 | `MAX_FILES_PER_REQUEST` | `80` | Max files for code analysis |
 | `MAX_INPUT_TOKENS` | `100000` | Max input tokens |
-| **MCP Server** |||
-| `MCP_HOST_FOLDER` | `./data/files` | Host folder to mount |
-| `MCP_ROOT_FOLDER` | `/data/files` | Container mount point |
-| `MCP_VECTOR_DB_PATH` | `/data/mcp_vector_db` | MCP vector DB path |
 | **Memory Service** |||
 | `MEMORY_SERVICE_URL` | `http://localhost:8007` | Memory service URL (local service) |
 | `MEMORY_DATA_PATH` | `deploy/memory` | Memory data path (local folder) |

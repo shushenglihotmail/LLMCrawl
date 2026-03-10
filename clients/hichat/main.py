@@ -30,9 +30,9 @@ from fastapi.staticfiles import StaticFiles
 
 # Handle both direct execution and module import
 try:
-    from .msal_auth import MSALAuthClient, create_auth_client_from_env
+    from .msal_auth import create_auth_client_from_env
 except ImportError:
-    from msal_auth import MSALAuthClient, create_auth_client_from_env
+    from msal_auth import create_auth_client_from_env
 
 # Configure logging
 logging.basicConfig(
@@ -398,6 +398,92 @@ async def download_file(file_id: str):
         raise HTTPException(status_code=502, detail=f"File download failed: {str(e)}")
 
 
+@app.post("/api/files/browse")
+async def browse_files(request: Request) -> JSONResponse:
+    """Browse local filesystem for reference file selection.
+
+    Args:
+        request: JSON body with 'path' field specifying directory to browse
+
+    Returns:
+        JSON with 'items' list containing file/folder info
+    """
+    try:
+        body = await request.json()
+        path_str = body.get("path", "")
+
+        # Normalize path for Windows vs Unix
+        if os.name == "nt":
+            # Windows handling
+            if not path_str or path_str == "/":
+                # List available drives
+                import string
+
+                drives = []
+                for letter in string.ascii_uppercase:
+                    drive_path = f"{letter}:\\"
+                    if Path(drive_path).exists():
+                        drives.append(
+                            {
+                                "name": f"{letter}:",
+                                "is_directory": True,
+                            }
+                        )
+                return JSONResponse({"items": drives, "path": "/"})
+            else:
+                # Convert path to proper Windows format
+                # Handle paths like "C:" or "C:/" -> "C:\"
+                if len(path_str) == 2 and path_str[1] == ":":
+                    path_str = path_str + "\\"
+                elif len(path_str) >= 2 and path_str[1] == ":":
+                    # Already a Windows path like "C:/folder" or "C:\folder"
+                    pass
+                path = Path(path_str)
+        else:
+            # Unix handling
+            if not path_str:
+                path_str = "/"
+            path = Path(path_str)
+
+        if not path.exists():
+            raise HTTPException(status_code=404, detail=f"Path not found: {path_str}")
+
+        if not path.is_dir():
+            raise HTTPException(
+                status_code=400, detail=f"Path is not a directory: {path_str}"
+            )
+
+        items = []
+        try:
+            for item in path.iterdir():
+                try:
+                    item_info = {
+                        "name": item.name,
+                        "is_directory": item.is_dir(),
+                    }
+                    if not item.is_dir():
+                        try:
+                            item_info["size"] = item.stat().st_size
+                        except (OSError, PermissionError):
+                            item_info["size"] = 0
+                    items.append(item_info)
+                except (OSError, PermissionError):
+                    # Skip items we can't access
+                    continue
+        except PermissionError:
+            raise HTTPException(
+                status_code=403, detail=f"Permission denied: {path_str}"
+            )
+
+        # Return the actual path (use forward slashes for consistency)
+        actual_path = str(path.resolve()).replace("\\", "/")
+        return JSONResponse({"items": items, "path": actual_path})
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in browse request: {e}")
+        raise HTTPException(status_code=400, detail="Invalid JSON in request body")
+
+
 # Mount static files (CSS, JS)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -538,7 +624,7 @@ def main() -> None:
     print(f"  Gateway URL:  {config['gateway_url']}")
     print(f"  Web UI:       {url}")
     if config["auth_enabled"]:
-        print(f"  Auth:         Enabled (Entra ID)")
+        print("  Auth:         Enabled (Entra ID)")
     print("=" * 60)
     print("\nPress Ctrl+C to stop\n")
 

@@ -15,11 +15,6 @@ Wrapper servers are intentionally thin so the underlying services can keep their
 
 ## Available MCP servers
 
-### Local Access MCP Server
-
-- Folder: `mcp_servers/local_access_mcp_server/`
-- Purpose: local file operations (list/read) for tools and agents.
-
 ### Azure DevOps MCP Server
 
 - Folder: `mcp_servers/azure_devops_mcp_server/`

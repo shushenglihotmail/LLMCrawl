@@ -5,12 +5,12 @@
 
 .DESCRIPTION
     Restarts LLMCrawl services with full control over rebuild behavior.
-    - Docker services: crawler, indexer, mcp-server, azure-devops-mcp-server
+    - Docker services: crawler, indexer, azure-devops-mcp-server
     - Local services: gateway, memory-service (run on host for filesystem access)
 
 .PARAMETER Service
     Optional. Restart only specific service(s). Can be comma-separated.
-    Docker services: crawler, indexer, mcp-server, azure-devops-mcp-server
+    Docker services: crawler, indexer, azure-devops-mcp-server
     Local services: gateway, memory
 
 .PARAMETER Build
@@ -63,7 +63,7 @@ if (-not (Test-Path $DeployPath)) {
 
 # Define which services are local vs Docker
 $LocalServices = @("gateway", "memory")
-$DockerServices = @("crawler", "indexer", "mcp-server", "azure-devops-mcp-server", "firecrawl", "playwright", "redis", "postgres", "qdrant")
+$DockerServices = @("crawler", "indexer", "azure-devops-mcp-server", "firecrawl", "playwright", "redis", "postgres", "qdrant")
 
 Push-Location $DeployPath
 
@@ -212,7 +212,6 @@ try {
                 $env:GATEWAY_PORT = "8000"
                 $env:CRAWLER_URL = "http://localhost:8001"
                 $env:INDEXER_URL = "http://localhost:8002"
-                $env:MCP_SERVER_URL = "http://localhost:8003"
                 $env:AZURE_DEVOPS_MCP_URL = "http://localhost:8004"
                 $env:MEMORY_SERVICE_URL = "http://localhost:8007"
                 $env:MEMORY_DATA_PATH = $MemoryDataPath
@@ -304,7 +303,6 @@ try {
     Write-Host "  Memory Service (local): http://localhost:8007" -ForegroundColor White
     Write-Host "  Crawler:              http://localhost:8001" -ForegroundColor White
     Write-Host "  Indexer:              http://localhost:8002" -ForegroundColor White
-    Write-Host "  MCP Server:           http://localhost:8003" -ForegroundColor White
     Write-Host "  Azure DevOps MCP:     http://localhost:8004" -ForegroundColor White
 
     Write-Host "`nHealth Check:" -ForegroundColor Cyan
@@ -316,7 +314,7 @@ try {
         if ($DockerToRestart.Count -gt 0) {
             docker compose -f docker-compose.dev.yml logs -f @DockerToRestart
         } else {
-            docker compose -f docker-compose.dev.yml logs -f crawler indexer mcp-server
+            docker compose -f docker-compose.dev.yml logs -f crawler indexer azure-devops-mcp-server
         }
     }
 }

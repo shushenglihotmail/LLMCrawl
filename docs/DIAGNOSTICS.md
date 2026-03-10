@@ -84,7 +84,7 @@ llmcrawl deploy --logs --no-follow
 llmcrawl deploy --logs gateway    # LLM agent, tool calls
 llmcrawl deploy --logs crawler    # Web crawling, auth
 llmcrawl deploy --logs indexer    # Embedding, vector storage
-llmcrawl deploy --logs mcp-server # File access, Azure DevOps
+llmcrawl deploy --logs azure-devops-mcp-server # Azure DevOps code search
 llmcrawl deploy --logs qdrant     # Vector database
 ```
 
@@ -134,7 +134,7 @@ NAME                  STATUS    PORTS
 gateway               Up        0.0.0.0:8000->8000/tcp
 crawler               Up        0.0.0.0:8001->8001/tcp
 indexer               Up        0.0.0.0:8002->8002/tcp
-mcp-server            Up        0.0.0.0:8003->8003/tcp
+azure-devops-mcp      Up        0.0.0.0:8004->8004/tcp
 qdrant                Up        0.0.0.0:6333->6333/tcp
 hichat                Up        0.0.0.0:8080->8080/tcp
 ```
@@ -434,9 +434,9 @@ Invoke-RestMethod -Uri "http://localhost:8002/health"
 docker compose logs gateway | Select-String -Pattern "tool|Tool"
 ```
 
-**Check MCP server:**
+**Check Azure DevOps MCP server:**
 ```powershell
-llmcrawl deploy --logs mcp-server
+llmcrawl deploy --logs azure-devops-mcp-server
 ```
 
 ---
@@ -478,13 +478,13 @@ llmcrawl deploy --logs mcp-server
 | `Collection not found` | No documents indexed | Crawl some content first |
 | `Dimension mismatch` | Wrong embedding model | Ensure consistent model |
 
-### MCP Server Errors
+### Azure DevOps MCP Errors
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `File not found` | Wrong path | Check `MCP_HOST_FOLDER` in `.env` |
-| `Permission denied` | Can't read files | Check file permissions |
 | `Azure DevOps 401` | PAT expired | Generate new PAT |
+| `Azure DevOps 403` | Insufficient permissions | Check PAT scopes |
+| `Repository not found` | Wrong repo/project | Verify AZURE_DEVOPS_* settings |
 
 ---
 

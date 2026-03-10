@@ -116,7 +116,6 @@ $total = 0
 $total++; if (Write-ServiceHealth "Gateway" "http://localhost:8000/health" 8000) { $healthy++ }
 $total++; if (Write-ServiceHealth "Crawler" "http://localhost:8001/health" 8001) { $healthy++ }
 $total++; if (Write-ServiceHealth "Indexer" "http://localhost:8002/health" 8002) { $healthy++ }
-$total++; if (Write-SimpleHealth "MCP Server" "http://localhost:8003/health" 8003) { $healthy++ }
 $total++; if (Write-SimpleHealth "Azure DevOps MCP" "http://localhost:8004/health" 8004) { $healthy++ }
 $total++; if (Write-SimpleHealth "Memory Service" "http://localhost:8007/health" 8007) { $healthy++ }
 $total++; if (Write-SimpleHealth "Qdrant" "http://localhost:6333/healthz" 6333) { $healthy++ }

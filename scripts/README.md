@@ -205,7 +205,6 @@ OPTIONS:
 | Gateway | http://localhost:8000 |
 | Crawler | http://localhost:8001 |
 | Indexer | http://localhost:8002 |
-| MCP Server | http://localhost:8003 |
 | Azure DevOps MCP | http://localhost:8004 |
 | Qdrant | http://localhost:6333 |
 | Redis | localhost:6379 |

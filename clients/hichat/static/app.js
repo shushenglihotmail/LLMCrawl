@@ -44,119 +44,272 @@ async function renderMermaidDiagrams(container) {
     }
 }
 
-// Path validation functions
-function validateAzdoUri(uri) {
-    if (!uri.startsWith('azdo:')) {
-        return { valid: false, error: 'Azure DevOps URI must start with "azdo:"' };
-    }
+// =============================================================================
+// Reference Files Management
+// =============================================================================
 
-    const rest = uri.substring(5);
+// Store selected reference files
+let selectedReferenceFiles = [];
 
-    if (!rest.startsWith('/')) {
-        return { valid: false, error: 'Path must start with "/" after "azdo:"' };
-    }
-
-    const hasSearchText = rest.includes(':');
-    if (!hasSearchText) {
-        return { valid: false, error: 'Azure DevOps URI must include searchText after colon (e.g., azdo:/path:ext:xml)' };
-    }
-
-    const beforeQuery = rest.split('?')[0];
-    const searchTextPart = beforeQuery.substring(beforeQuery.lastIndexOf(':') + 1);
-    if (!searchTextPart || searchTextPart.trim() === '') {
-        return { valid: false, error: 'Search text cannot be empty after colon' };
-    }
-
-    return { valid: true };
+function getSelectedReferenceFiles() {
+    return selectedReferenceFiles;
 }
 
-function validateLocalPath(path) {
-    if (!path.startsWith('/')) {
-        return { valid: false, error: 'Local path must start with "/"' };
+function addReferenceFile(filePath) {
+    if (!selectedReferenceFiles.includes(filePath)) {
+        selectedReferenceFiles.push(filePath);
+        renderReferenceFilesList();
     }
-
-    const invalidChars = /[<>"|?]/;
-    if (invalidChars.test(path)) {
-        return { valid: false, error: 'Path contains invalid characters: < > " |' };
-    }
-
-    if (path === '/') {
-        return { valid: false, error: 'Path cannot be just "/" - specify a file or folder' };
-    }
-
-    return { valid: true };
 }
 
-function validateTargetPath(path) {
-    path = path.trim();
-    if (!path) return { valid: true };
-
-    if (path.startsWith('azdo:')) {
-        return validateAzdoUri(path);
-    }
-
-    if (path.startsWith('/')) {
-        return validateLocalPath(path);
-    }
-
-    return {
-        valid: false,
-        error: 'Path must be a local path starting with "/" or Azure DevOps URI starting with "azdo:"'
-    };
+function removeReferenceFile(filePath) {
+    selectedReferenceFiles = selectedReferenceFiles.filter(f => f !== filePath);
+    renderReferenceFilesList();
 }
 
-function validateReferencePath(path) {
-    path = path.trim();
-    if (!path) return { valid: true };
+function renderReferenceFilesList() {
+    const listContainer = document.getElementById('referenceFilesList');
+    if (!listContainer) return;
 
-    if (path.startsWith('azdo:')) {
-        return validateAzdoUri(path);
-    }
+    listContainer.innerHTML = '';
 
-    if (path.startsWith('/')) {
-        return validateLocalPath(path);
-    }
+    if (selectedReferenceFiles.length === 0) {
+        // Show empty state hint
+        const emptyDiv = document.createElement('div');
+        emptyDiv.className = 'file-list-empty';
+        emptyDiv.textContent = 'No files selected';
+        listContainer.appendChild(emptyDiv);
+    } else {
+        selectedReferenceFiles.forEach(filePath => {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'file-list-item';
 
-    return {
-        valid: false,
-        error: 'Reference path must be a local path starting with "/" or Azure DevOps URI starting with "azdo:"'
-    };
-}
+            const pathSpan = document.createElement('span');
+            pathSpan.className = 'file-path';
+            pathSpan.textContent = filePath;
+            pathSpan.title = filePath;
 
-function validateAllPaths() {
-    const errors = [];
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-btn';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.title = 'Remove file';
+            removeBtn.onclick = () => removeReferenceFile(filePath);
 
-    const targetPathsText = document.getElementById('targetPaths').value.trim();
-    if (targetPathsText) {
-        const targetPaths = targetPathsText.split('\n').map(p => p.trim()).filter(p => p);
-        targetPaths.forEach((path, index) => {
-            const result = validateTargetPath(path);
-            if (!result.valid) {
-                errors.push(`Target Path line ${index + 1}: ${result.error}\n  → "${path}"`);
-            }
+            itemDiv.appendChild(pathSpan);
+            itemDiv.appendChild(removeBtn);
+            listContainer.appendChild(itemDiv);
         });
     }
-
-    const referenceFilesText = document.getElementById('referenceFiles').value.trim();
-    if (referenceFilesText) {
-        const referenceFiles = referenceFilesText.split('\n').map(p => p.trim()).filter(p => p);
-        referenceFiles.forEach((path, index) => {
-            const result = validateReferencePath(path);
-            if (!result.valid) {
-                errors.push(`Reference File line ${index + 1}: ${result.error}\n  → "${path}"`);
-            }
-        });
-    }
-
-    return errors;
 }
 
-function showValidationError(errors) {
-    const errorMessage = '⚠️ Invalid Path Format\n\n' + errors.join('\n\n') +
-        '\n\n📖 Valid formats:\n' +
-        '• Target Paths: azdo:/path:searchText\n' +
-        '• Reference Files: /local/path or azdo:/path:searchText';
-    alert(errorMessage);
+// =============================================================================
+// File Browser Modal
+// =============================================================================
+
+let currentBrowserPath = '/';
+let lastBrowsedPath = localStorage.getItem('hichat_lastBrowsedPath') || '/';
+let tempSelectedFiles = [];
+
+function openFileBrowser() {
+    const modal = document.getElementById('fileBrowserModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        tempSelectedFiles = [];
+        updateModalSelectionInfo();
+        // Navigate to last browsed path, or root if not set
+        navigateToPath(lastBrowsedPath);
+    }
+}
+
+function closeFileBrowser() {
+    const modal = document.getElementById('fileBrowserModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function handlePathInputKeypress(event) {
+    if (event.key === 'Enter') {
+        navigateToPath(document.getElementById('currentPathInput').value);
+    }
+}
+
+async function navigateToPath(path) {
+    currentBrowserPath = path || '/';
+    document.getElementById('currentPathInput').value = currentBrowserPath;
+
+    const content = document.getElementById('fileBrowserContent');
+    content.innerHTML = '<div class="loading-files">Loading...</div>';
+
+    try {
+        const response = await fetch('/api/files/browse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: currentBrowserPath })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to browse directory');
+        }
+
+        const data = await response.json();
+        // Update currentBrowserPath with the actual resolved path from server
+        if (data.path) {
+            currentBrowserPath = data.path;
+            document.getElementById('currentPathInput').value = currentBrowserPath;
+            // Remember last browsed path (only for actual directories, not root drive list)
+            if (currentBrowserPath !== '/') {
+                lastBrowsedPath = currentBrowserPath;
+                localStorage.setItem('hichat_lastBrowsedPath', lastBrowsedPath);
+            }
+        }
+        renderBrowserContent(data.items || []);
+    } catch (error) {
+        console.error('Browse error:', error);
+        content.innerHTML = '<div class="loading-files">Error: ' + error.message + '</div>';
+    }
+}
+
+function navigateToParent() {
+    if (currentBrowserPath === '/' || currentBrowserPath === '') {
+        return;
+    }
+
+    // Handle Windows paths like "C:/folder" -> "C:/" -> "/"
+    const parts = currentBrowserPath.split('/').filter(p => p);
+
+    if (parts.length === 1 && parts[0].length === 2 && parts[0][1] === ':') {
+        // At drive root like "C:/", go back to drive list
+        navigateToPath('/');
+        return;
+    }
+
+    parts.pop();
+    if (parts.length === 1 && parts[0].length === 2 && parts[0][1] === ':') {
+        // Going to drive root
+        navigateToPath(parts[0] + '/');
+    } else if (parts.length === 0) {
+        navigateToPath('/');
+    } else {
+        navigateToPath(parts.join('/'));
+    }
+}
+
+function renderBrowserContent(items) {
+    const content = document.getElementById('fileBrowserContent');
+    content.innerHTML = '';
+
+    if (items.length === 0) {
+        content.innerHTML = '<div class="loading-files">Empty directory</div>';
+        return;
+    }
+
+    // Sort: folders first, then files
+    items.sort((a, b) => {
+        if (a.is_directory && !b.is_directory) return -1;
+        if (!a.is_directory && b.is_directory) return 1;
+        return a.name.localeCompare(b.name);
+    });
+
+    items.forEach(item => {
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'browser-item' + (item.is_directory ? ' folder' : ' file');
+
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'item-icon';
+        iconSpan.textContent = item.is_directory ? '📁' : '📄';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'item-name';
+        nameSpan.textContent = item.name;
+
+        itemDiv.appendChild(iconSpan);
+        itemDiv.appendChild(nameSpan);
+
+        if (item.is_directory) {
+            // Folders: click to navigate
+            itemDiv.onclick = () => {
+                let newPath;
+                if (currentBrowserPath === '/') {
+                    // At root, item.name is like "C:" for drives
+                    newPath = item.name + '/';
+                } else if (currentBrowserPath.endsWith('/')) {
+                    newPath = currentBrowserPath + item.name;
+                } else {
+                    newPath = currentBrowserPath + '/' + item.name;
+                }
+                navigateToPath(newPath);
+            };
+        } else {
+            // Files: click to toggle selection
+            let fullPath;
+            if (currentBrowserPath.endsWith('/')) {
+                fullPath = currentBrowserPath + item.name;
+            } else {
+                fullPath = currentBrowserPath + '/' + item.name;
+            }
+
+            if (tempSelectedFiles.includes(fullPath)) {
+                itemDiv.classList.add('selected');
+            }
+
+            if (item.size !== undefined) {
+                const sizeSpan = document.createElement('span');
+                sizeSpan.className = 'item-size';
+                sizeSpan.textContent = formatFileSize(item.size);
+                itemDiv.appendChild(sizeSpan);
+            }
+
+            // Single click to toggle selection
+            itemDiv.onclick = () => {
+                toggleFileSelection(fullPath, itemDiv);
+            };
+
+            // Double click to add file directly and keep browsing
+            itemDiv.ondblclick = () => {
+                addReferenceFile(fullPath);
+                // Visual feedback - briefly highlight
+                itemDiv.style.backgroundColor = '#d4edda';
+                setTimeout(() => {
+                    itemDiv.style.backgroundColor = '';
+                }, 300);
+            };
+        }
+
+        content.appendChild(itemDiv);
+    });
+}
+
+function toggleFileSelection(filePath, itemDiv) {
+    const index = tempSelectedFiles.indexOf(filePath);
+    if (index === -1) {
+        tempSelectedFiles.push(filePath);
+        itemDiv.classList.add('selected');
+    } else {
+        tempSelectedFiles.splice(index, 1);
+        itemDiv.classList.remove('selected');
+    }
+    updateModalSelectionInfo();
+}
+
+function updateModalSelectionInfo() {
+    const info = document.getElementById('modalSelectionInfo');
+    if (info) {
+        info.textContent = tempSelectedFiles.length + ' file(s) selected';
+    }
+}
+
+function confirmFileSelection() {
+    tempSelectedFiles.forEach(filePath => {
+        addReferenceFile(filePath);
+    });
+    closeFileBrowser();
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
 // Dynamic tooltip positioning
@@ -202,99 +355,9 @@ let currentWorkflow = 'general_chat';
 let currentAbortController = null;
 let isRequestInProgress = false;
 
-// Workflow UI configuration
-const WORKFLOW_UI_CONFIG = {
-    general_chat: {
-        targetFilesEnabled: false,
-        referenceFilesEnabled: false,
-        azureDevOpsExposable: false,
-        localMcpExposable: true,
-        crawlerExposable: true,
-        windowsCompositionExposable: false,
-        seedUrlsEnabled: true
-    },
-    code_analysis: {
-        targetFilesEnabled: true,
-        referenceFilesEnabled: true,
-        azureDevOpsExposable: true,
-        localMcpExposable: true,
-        crawlerExposable: true,
-        windowsCompositionExposable: true,
-        seedUrlsEnabled: true
-    },
-    build_system_analysis: {
-        targetFilesEnabled: true,
-        referenceFilesEnabled: true,
-        azureDevOpsExposable: true,
-        localMcpExposable: true,
-        crawlerExposable: true,
-        windowsCompositionExposable: true,
-        seedUrlsEnabled: true
-    },
-    file_explorer: {
-        targetFilesEnabled: true,
-        referenceFilesEnabled: true,
-        azureDevOpsExposable: true,
-        localMcpExposable: true,
-        crawlerExposable: true,
-        windowsCompositionExposable: false,
-        seedUrlsEnabled: true
-    }
-};
-
-// Apply workflow UI restrictions
-function applyWorkflowRestrictions(workflow) {
-    const config = WORKFLOW_UI_CONFIG[workflow] || WORKFLOW_UI_CONFIG.general_chat;
-
-    // Target Paths
-    const targetPathsTextarea = document.getElementById('targetPaths');
-    const targetPathsLabel = targetPathsTextarea.closest('.form-group').querySelector('label');
-    targetPathsTextarea.disabled = !config.targetFilesEnabled;
-    targetPathsTextarea.style.opacity = config.targetFilesEnabled ? '1' : '0.5';
-    if (!config.targetFilesEnabled) {
-        targetPathsTextarea.value = '';
-        targetPathsLabel.style.opacity = '0.5';
-    } else {
-        targetPathsLabel.style.opacity = '1';
-    }
-
-    // Reference Files
-    const referenceFilesTextarea = document.getElementById('referenceFiles');
-    const referenceFilesLabel = referenceFilesTextarea.closest('.form-group').querySelector('label');
-    referenceFilesTextarea.disabled = !config.referenceFilesEnabled;
-    referenceFilesTextarea.style.opacity = config.referenceFilesEnabled ? '1' : '0.5';
-    if (!config.referenceFilesEnabled) {
-        referenceFilesTextarea.value = '';
-        referenceFilesLabel.style.opacity = '0.5';
-    } else {
-        referenceFilesLabel.style.opacity = '1';
-    }
-
-    // Azure DevOps MCP checkbox
-    const azureMcpCheckbox = document.getElementById('exposeAzureMcp');
-    const azureMcpLabel = azureMcpCheckbox.closest('.switch-item');
-    azureMcpCheckbox.disabled = !config.azureDevOpsExposable;
-    azureMcpLabel.style.opacity = config.azureDevOpsExposable ? '1' : '0.5';
-    if (!config.azureDevOpsExposable) {
-        azureMcpCheckbox.checked = false;
-    }
-
-    // Windows Composition checkbox
-    const winCompCheckbox = document.getElementById('exposeWindowsComposition');
-    const winCompLabel = winCompCheckbox.closest('.switch-item');
-    winCompCheckbox.disabled = !config.windowsCompositionExposable;
-    winCompLabel.style.opacity = config.windowsCompositionExposable ? '1' : '0.5';
-    if (!config.windowsCompositionExposable) {
-        winCompCheckbox.checked = false;
-    }
-
-    console.log('Applied workflow restrictions for:', workflow, config);
-}
-
 // Workflow selector change handler
 document.getElementById('workflowSelector').addEventListener('change', function () {
     currentWorkflow = this.value;
-    applyWorkflowRestrictions(currentWorkflow);
     console.log('Workflow changed to:', currentWorkflow);
 });
 
@@ -355,7 +418,6 @@ async function loadConfig() {
         const response = await fetch('/api/config');
         currentConfig = await response.json();
         await loadModels();
-        applyWorkflowRestrictions(currentWorkflow);
     } catch (error) {
         console.error('Failed to load config:', error);
     }
@@ -398,12 +460,6 @@ async function submitRequest() {
 
     if (!message) {
         alert('Please enter a message.');
-        return;
-    }
-
-    const validationErrors = validateAllPaths();
-    if (validationErrors.length > 0) {
-        showValidationError(validationErrors);
         return;
     }
 
@@ -454,13 +510,7 @@ async function submitRequest() {
         console.log('New conversation:', conversationId);
     }
 
-    const targetPaths = document.getElementById('targetPaths').value.trim()
-        ? document.getElementById('targetPaths').value.split('\n').map(p => p.trim()).filter(p => p)
-        : null;
-
-    const referenceFiles = document.getElementById('referenceFiles').value.trim()
-        ? document.getElementById('referenceFiles').value.split('\n').map(p => p.trim()).filter(p => p)
-        : null;
+    const referenceFiles = selectedReferenceFiles.length > 0 ? selectedReferenceFiles : null;
 
     const seedUrls = document.getElementById('seedUrlsInput').value.trim()
         ? document.getElementById('seedUrlsInput').value.split(',').map(url => url.trim()).filter(url => url)
@@ -470,7 +520,6 @@ async function submitRequest() {
     const crawlDepth = parseInt(document.getElementById('crawlDepth').value) || 1;
 
     const exposeToLlm = {
-        local_mcp: document.getElementById('exposeLocalMcp').checked,
         azure_devops_mcp: document.getElementById('exposeAzureMcp').checked,
         crawler: document.getElementById('exposeCrawler').checked,
         windows_composition: document.getElementById('exposeWindowsComposition').checked
@@ -482,7 +531,6 @@ async function submitRequest() {
             user_message: message,
             model: document.getElementById('modelSelector').value,
             conversation_id: conversationId,
-            target_paths: targetPaths,
             reference_files: referenceFiles,
             seed_urls: seedUrls,
             enable_embedding: enableEmbedding,
@@ -519,7 +567,6 @@ async function submitRequest() {
         if (data.context_gathered) {
             const ctx = data.context_gathered;
             const parts = [];
-            if (ctx.target_files > 0) parts.push(ctx.target_files + ' target files');
             if (ctx.reference_files > 0) parts.push(ctx.reference_files + ' reference files');
             if (ctx.crawled_urls > 0) parts.push(ctx.crawled_urls + ' crawled URLs');
             if (ctx.web_search_results > 0) parts.push(ctx.web_search_results + ' web results');
@@ -857,6 +904,7 @@ async function triggerDistill() {
 
 // Initialize on page load
 loadConfig();
+renderReferenceFilesList();
 
 // =============================================================================
 // Fullscreen Mode

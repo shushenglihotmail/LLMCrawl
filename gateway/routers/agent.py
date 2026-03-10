@@ -15,7 +15,7 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -42,7 +42,6 @@ from gateway.utils.memory_integration import (
 from gateway.utils.metrics import (
     AgentActivityTimer,
     classify_error,
-    record_agent_activity,
     record_agent_request,
 )
 from gateway.utils.token_context import get_token
@@ -181,23 +180,25 @@ async def _expand_paths(agent: AgentConfig, path_list: List[str]) -> List[str]:
 async def _list_local_folder_files(
     agent: AgentConfig, folder_path: str, recursive: bool
 ) -> List[str]:
-    """List files in a local folder via local MCP server."""
+    """List files in a local folder using direct filesystem access."""
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{agent.mcp_url}/invoke",
-                json={
-                    "tool_name": "list_files",
-                    "arguments": {"folder_path": folder_path, "recursive": recursive},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
+        from pathlib import Path
 
-            if result.get("success"):
-                files_data = result["result"].get("files", [])
-                return [f["path"] for f in files_data if f.get("type") == "file"]
+        folder = Path(folder_path)
+        if not folder.exists() or not folder.is_dir():
+            logger.warning(f"Folder does not exist: {folder_path}")
             return []
+
+        files = []
+        if recursive:
+            for f in folder.rglob("*"):
+                if f.is_file():
+                    files.append(str(f).replace("\\", "/"))
+        else:
+            for f in folder.iterdir():
+                if f.is_file():
+                    files.append(str(f).replace("\\", "/"))
+        return files
     except Exception as e:
         logger.error(f"Failed to list local folder {folder_path}: {e}")
         return []
@@ -326,6 +327,9 @@ async def _gather_files(
     """
     Gather content from files (local or Azure DevOps).
 
+    Local files are read directly from the filesystem since Gateway runs on host.
+    Azure DevOps files are fetched via the Azure DevOps MCP server.
+
     Args:
         agent: Agent configuration
         paths: List of file paths (can be local or azdo: URIs)
@@ -336,31 +340,33 @@ async def _gather_files(
     Returns:
         List of formatted file content strings
     """
+    from pathlib import Path as FilePath
+
     if not paths:
         return []
 
     file_content = []
     logger.info(f"Gathering {len(paths)} {context_key.replace('_', ' ')}")
 
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            for file_path in paths:
-                if is_azdo_uri(file_path):
-                    # Azure DevOps file
-                    parsed = parse_azdo_uri(file_path)
-                    if not parsed:
-                        logger.error(f"Failed to parse azdo URI: {file_path}")
-                        continue
+    for file_path in paths:
+        try:
+            if is_azdo_uri(file_path):
+                # Azure DevOps file - fetch via Azure DevOps MCP server
+                parsed = parse_azdo_uri(file_path)
+                if not parsed:
+                    logger.error(f"Failed to parse azdo URI: {file_path}")
+                    continue
 
-                    arguments = {"file_path": parsed.path}
-                    if parsed.project:
-                        arguments["project"] = parsed.project
-                    if parsed.repository:
-                        arguments["repository"] = parsed.repository
-                    if parsed.branch:
-                        arguments["branch"] = parsed.branch
+                arguments = {"file_path": parsed.path}
+                if parsed.project:
+                    arguments["project"] = parsed.project
+                if parsed.repository:
+                    arguments["repository"] = parsed.repository
+                if parsed.branch:
+                    arguments["branch"] = parsed.branch
 
-                    logger.info(f"Fetching Azure DevOps file: {file_path}")
+                logger.info(f"Fetching Azure DevOps file: {file_path}")
+                async with httpx.AsyncClient(timeout=60.0) as client:
                     response = await client.post(
                         f"{agent.azure_devops_mcp_url}/invoke",
                         json={
@@ -368,42 +374,36 @@ async def _gather_files(
                             "arguments": arguments,
                         },
                     )
-                else:
-                    # Local file - normalize path for MCP server
-                    # The MCP server has C:/os mounted as /data/files
-                    # Paths like /tmp/file.md should become tmp/file.md (relative)
-                    # so MCP resolves them as /data/files/tmp/file.md
-                    normalized_path = file_path
-                    if file_path.startswith("/") and not file_path.startswith("/data/"):
-                        # Convert absolute Unix-style path to relative for MCP
-                        normalized_path = file_path.lstrip("/")
-                        logger.info(
-                            f"Normalized path '{file_path}' -> '{normalized_path}' for MCP"
-                        )
-                    logger.info(f"Reading local file via MCP: {normalized_path}")
-                    response = await client.post(
-                        f"{agent.mcp_url}/invoke",
-                        json={
-                            "tool_name": "read_local_file",
-                            "arguments": {"file_path": normalized_path},
-                        },
-                    )
 
-                if response.status_code == 200:
-                    file_data = response.json()
-                    content = _extract_content_from_response(file_data)
-                    if content:
-                        file_content.append(f"{label}: {file_path}\n\n{content}")
-                        context_gathered[context_key] += 1
-                        logger.info(f"Extracted {len(content)} chars from {file_path}")
+                    if response.status_code == 200:
+                        file_data = response.json()
+                        content = _extract_content_from_response(file_data)
+                        if content:
+                            file_content.append(f"{label}: {file_path}\n\n{content}")
+                            context_gathered[context_key] += 1
+                            logger.info(
+                                f"Extracted {len(content)} chars from {file_path}"
+                            )
+                    else:
+                        logger.error(
+                            f"Failed to fetch {file_path}: HTTP {response.status_code}"
+                        )
+            else:
+                # Local file - read directly from filesystem
+                # Gateway runs on host, so it has direct access
+                logger.info(f"Reading local file: {file_path}")
+
+                local_path = FilePath(file_path)
+                if local_path.exists() and local_path.is_file():
+                    content = local_path.read_text(encoding="utf-8")
+                    file_content.append(f"{label}: {file_path}\n\n{content}")
+                    context_gathered[context_key] += 1
+                    logger.info(f"Read {len(content)} chars from {file_path}")
                 else:
-                    logger.error(
-                        f"Failed to fetch {file_path}: HTTP {response.status_code}"
-                    )
-    except Exception as e:
-        logger.error(
-            f"Failed to gather {context_key.replace('_', ' ')}: {e}", exc_info=True
-        )
+                    logger.error(f"File not found: {file_path}")
+
+        except Exception as e:
+            logger.error(f"Failed to read {file_path}: {e}")
 
     return file_content
 
@@ -428,58 +428,6 @@ def _format_path_tree(paths: List[str]) -> str:
             lines.append(f"  📄 {path}")
 
     return "\n".join(lines)
-
-
-async def _gather_target_files_for_file_explorer(
-    agent: AgentConfig,
-    paths: List[str],
-    context_gathered: Dict[str, int],
-) -> List[str]:
-    """
-    Gather target paths for FILE_EXPLORER workflow - NO file content reading.
-
-    For FILE_EXPLORER workflow, target paths serve as EXAMPLES of what to search for.
-    We only list the expanded folder/file tree structure without reading any content.
-    This provides the LLM with path patterns and structure to understand what to look for.
-
-    Args:
-        agent: Agent configuration (unused but kept for interface consistency)
-        paths: List of expanded file/folder paths
-        context_gathered: Dict to track gathered context counts
-
-    Returns:
-        List with single formatted string showing the path tree
-    """
-    if not paths:
-        return []
-
-    logger.info(f"FILE_EXPLORER: Listing {len(paths)} paths (no content reading)")
-
-    # Format the path tree
-    path_tree = _format_path_tree(paths)
-
-    result = (
-        "Target Path Structure (examples of files/folders to search for):\n"
-        f"{path_tree}\n\n"
-        "Use these paths as examples to understand:\n"
-        "- File naming patterns and extensions\n"
-        "- Folder structure and organization\n"
-        "- Where similar files might be located"
-    )
-
-    context_gathered["target_files"] = len(paths)
-    logger.info(f"Listed {len(paths)} paths as structure reference")
-
-    return [result]
-
-
-async def _gather_target_files(
-    agent: AgentConfig,
-    paths: List[str],
-    context_gathered: Dict[str, int],
-) -> List[str]:
-    """Gather content from target files (local or Azure DevOps)."""
-    return await _gather_files(agent, paths, context_gathered, "target_files", "File")
 
 
 async def _gather_reference_files(
@@ -564,18 +512,11 @@ async def _crawl_urls(
 
 
 def _build_context_string(
-    target_content: List[str],
     reference_content: List[str],
     crawled_content: List[str],
 ) -> str:
     """Build combined context string from all sources."""
     context_parts = []
-
-    if target_content:
-        context_parts.append(
-            f"=== TARGET FILES ({len(target_content)}) ===\n\n"
-            + "\n\n---\n\n".join(target_content)
-        )
 
     if reference_content:
         context_parts.append(
@@ -954,19 +895,6 @@ async def _load_tools(
         seed_urls: Optional seed URLs to include in crawler tool description
     """
     tools = []
-
-    if expose_to_llm.get("local_mcp", False):
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{agent.mcp_url}/tools")
-                if response.status_code == 200:
-                    mcp_tools = response.json().get("tools", [])
-                    tools.extend(
-                        [convert_mcp_tool_to_openai(tool) for tool in mcp_tools]
-                    )
-                    logger.info(f"Exposed {len(mcp_tools)} local MCP tools to LLM")
-        except Exception as e:
-            logger.error(f"Failed to load local MCP tools: {e}")
 
     if expose_to_llm.get("azure_devops_mcp", False):
         try:
@@ -1416,7 +1344,6 @@ def get_agent_config() -> AgentConfig:
     global _agent_config
     if _agent_config is None:
         _agent_config = AgentConfig(
-            mcp_url=os.getenv("MCP_SERVER_URL", "http://mcp:8003"),
             crawler_url=os.getenv("CRAWLER_URL", "http://crawler:8001"),
             indexer_url=os.getenv("INDEXER_URL", "http://indexer:8002"),
             azure_devops_mcp_url=os.getenv(
@@ -1441,12 +1368,11 @@ async def execute(
     Execute agent workflow - single endpoint for all use cases.
 
     Workflow:
-    1. Expand and gather context from target_paths (Azure DevOps)
-    2. Expand and gather context from reference_files (Local/Azure DevOps)
-    3. Crawl seed_urls if provided
-    4. Build messages and tools for LLM
-    5. Execute LLM with tool calling loop
-    6. Return response with conversation tracking
+    1. Expand and gather context from reference_files (Local)
+    2. Crawl seed_urls if provided
+    3. Build messages and tools for LLM
+    4. Execute LLM with tool calling loop
+    5. Return response with conversation tracking
 
     Args:
         request: Workflow request with user message and context
@@ -1490,48 +1416,24 @@ async def execute(
     try:
         agent = get_agent_config()
         context_gathered = {
-            "target_files": 0,
             "reference_files": 0,
             "crawled_urls": 0,
             "web_search_results": 0,
         }
 
-        # Step 1: Expand paths (with metrics)
+        # Step 1: Expand reference file paths (with metrics)
         async with AgentActivityTimer("expand_paths") as expand_timer:
-            expanded_target_paths = await _expand_paths(
-                agent, request.target_paths or []
-            )
             expanded_reference_files = await _expand_paths(
                 agent, request.reference_files or []
             )
-            expand_timer.items = len(expanded_target_paths) + len(
-                expanded_reference_files
-            )
+            expand_timer.items = len(expanded_reference_files)
 
-        if request.target_paths:
-            logger.info(
-                f"Expanded {len(request.target_paths)} target paths to {len(expanded_target_paths)} files"
-            )
         if request.reference_files:
             logger.info(
                 f"Expanded {len(request.reference_files)} reference files to {len(expanded_reference_files)} files"
             )
 
         # Step 2: Gather context from all sources (with metrics)
-        # For FILE_EXPLORER workflow, use special gathering that doesn't read folder contents
-        if request.workflow == WorkflowType.FILE_EXPLORER:
-            async with AgentActivityTimer("prefetch_azdo") as prefetch_timer:
-                target_content = await _gather_target_files_for_file_explorer(
-                    agent, expanded_target_paths, context_gathered
-                )
-                prefetch_timer.items = context_gathered.get("target_files", 0)
-        else:
-            async with AgentActivityTimer("prefetch_azdo") as prefetch_timer:
-                target_content = await _gather_target_files(
-                    agent, expanded_target_paths, context_gathered
-                )
-                prefetch_timer.items = context_gathered.get("target_files", 0)
-
         async with AgentActivityTimer("prefetch_local") as local_timer:
             reference_content = await _gather_reference_files(
                 agent, expanded_reference_files, context_gathered
@@ -1547,9 +1449,7 @@ async def execute(
             ) + context_gathered.get("web_search_results", 0)
 
         # Step 3: Build context and messages
-        full_context = _build_context_string(
-            target_content, reference_content, crawled_content
-        )
+        full_context = _build_context_string(reference_content, crawled_content)
         logger.info(f"Full context: {len(full_context)} chars")
 
         # Apply workflow-specific settings
@@ -1730,9 +1630,9 @@ async def health_check() -> Any:
         return {
             "status": "healthy",
             "agent": "AgentConfig",
-            "mcp_url": agent.mcp_url,
             "crawler_url": agent.crawler_url,
             "indexer_url": agent.indexer_url,
+            "azure_devops_mcp_url": agent.azure_devops_mcp_url,
         }
     except Exception as e:
         logger.error(f"Agent health check failed: {e}")

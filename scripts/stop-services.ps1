@@ -61,7 +61,7 @@ if (-not (Test-Path $DeployPath)) {
 
 # Define which services are local vs Docker
 $LocalServices = @("gateway", "memory")
-$DockerServices = @("crawler", "indexer", "mcp-server", "azure-devops-mcp-server", "firecrawl", "playwright", "redis", "postgres", "qdrant", "milvus")
+$DockerServices = @("crawler", "indexer", "azure-devops-mcp-server", "firecrawl", "playwright", "redis", "postgres", "qdrant", "milvus")
 
 # Parse services - handle both array and comma-separated string
 $RequestedServices = @()

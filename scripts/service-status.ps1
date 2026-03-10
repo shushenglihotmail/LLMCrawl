@@ -52,7 +52,6 @@ function Show-Status {
         @{ Name = "Gateway"; Url = "http://localhost:8000/health" }
         @{ Name = "Crawler"; Url = "http://localhost:8001/health" }
         @{ Name = "Indexer"; Url = "http://localhost:8002/health" }
-        @{ Name = "MCP Server"; Url = "http://localhost:8003/health" }
         @{ Name = "Azure DevOps MCP"; Url = "http://localhost:8004/health" }
         @{ Name = "Qdrant"; Url = "http://localhost:6333/healthz" }
     )

@@ -235,7 +235,7 @@ make health
 | Memory Service | http://localhost:8007/health  | Local    | Long-term memory     |
 | Crawler        | http://localhost:8001/health  | Docker   | Web crawling         |
 | Indexer        | http://localhost:8002/health  | Docker   | Vector indexing      |
-| MCP Server     | http://localhost:8003/health  | Docker   | File operations      |
+| Azure DevOps   | http://localhost:8004/health  | Docker   | Code search          |
 | Milvus         | http://localhost:19530        | Docker   | Vector DB (memory)   |
 | HiChat         | http://localhost:8080         | Local    | Web client           |
 | WCD Bridge     | http://localhost:8005         | Local    | WCD query bridge     |

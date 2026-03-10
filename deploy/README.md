@@ -197,7 +197,7 @@ make health
 | Gateway    | http://localhost:8000/health  | API orchestrator  |
 | Crawler    | http://localhost:8001/health  | Web crawling      |
 | Indexer    | http://localhost:8002/health  | Vector indexing   |
-| MCP Server | http://localhost:8003/health  | File operations   |
+| Azure DevOps MCP | http://localhost:8004/health | Code search    |
 | HiChat     | http://localhost:8080         | Web client        |
 
 📖 **See [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md)** for troubleshooting guide.

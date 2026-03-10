@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HiChat - AI Chat Client</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260212">
+    <link rel="stylesheet" href="/static/styles.css?v=20260310">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
@@ -72,63 +72,24 @@
                         <button class="collapse-btn" id="collapseBtn">▼</button>
                     </div>
                     <div class="panel-content">
-                        <!-- Target Paths (Azure DevOps) -->
+                        <!-- Reference Files (Local File Browser) -->
                         <div class="form-group">
                             <label>
-                                Target Paths (optional, one per line)
+                                Reference Files (optional)
                                 <span class="help-icon">?
                                     <span class="help-tooltip">
-                                        <div class="help-tooltip-line"><strong>Azure DevOps Code Search:</strong></div>
-                                        <div class="help-tooltip-line"><code>azdo:/path:searchText</code> - Search in
-                                            path scope</div>
-                                        <div class="help-tooltip-line"><strong>Search Text Syntax (Azure DevOps
-                                                API):</strong></div>
-                                        <div class="help-tooltip-line">• <code>ext:xml</code> - Find by extension</div>
-                                        <div class="help-tooltip-line">• <code>file:*config*.xml</code> - File name
-                                            pattern</div>
-                                        <div class="help-tooltip-line">• <code>myTerm path:Services</code> - Path
-                                            contains</div>
-                                        <div class="help-tooltip-line">• <code>class:MyClass</code> - Code element
-                                            (C#/Java)</div>
-                                        <div class="help-tooltip-line">• <code>(term1 OR term2) ext:xml</code> - Boolean
-                                        </div>
-                                        <div class="help-tooltip-line"><strong>Examples:</strong></div>
-                                        <div class="help-tooltip-line">• <code>azdo:/vm/compute:ext:xml</code></div>
-                                        <div class="help-tooltip-line">• <code>azdo:/:file:*manifest*.xml</code></div>
-                                        <div class="help-tooltip-line">•
-                                            <code>azdo://Project/repo/path:ext:cs?branch=main</code>
-                                        </div>
+                                        <div class="help-tooltip-line"><strong>Browse and select local files:</strong></div>
+                                        <div class="help-tooltip-line">Click "+ Browse..." to add files</div>
+                                        <div class="help-tooltip-line">Click X to remove a file from the list</div>
                                     </span>
                                 </span>
                             </label>
-                            <textarea id="targetPaths" rows="2"
-                                placeholder="azdo:/vm/compute:ext:xml&#10;azdo://OneCore/WindowsCompositionData/path:file:*.config?branch=main"></textarea>
-                        </div>
-
-                        <!-- Reference Files (Local or Azure DevOps) -->
-                        <div class="form-group">
-                            <label>
-                                Reference Files (optional, one per line)
-                                <span class="help-icon">?
-                                    <span class="help-tooltip">
-                                        <div class="help-tooltip-line"><strong>Local files for context:</strong></div>
-                                        <div class="help-tooltip-line">• <code>/docs/ARCHITECTURE.md</code> - Local file
-                                        </div>
-                                        <div class="help-tooltip-line">• <code>/examples/**</code> - Local folder
-                                            (recursive)</div>
-                                        <div class="help-tooltip-line"><strong>Azure DevOps (use search
-                                                syntax):</strong></div>
-                                        <div class="help-tooltip-line">• <code>azdo:/docs:file:readme.md</code></div>
-                                        <div class="help-tooltip-line">• <code>azdo:/src:ext:h</code> - All .h files in
-                                            /src</div>
-                                        <div class="help-tooltip-line">•
-                                            <code>azdo://Project/repo/path:ext:cs?branch=main</code>
-                                        </div>
-                                    </span>
-                                </span>
-                            </label>
-                            <textarea id="referenceFiles" rows="2"
-                                placeholder="/docs/guide.md&#10;azdo:/examples:ext:cpp?branch=main"></textarea>
+                            <div class="file-list-box" id="referenceFilesListBox">
+                                <div class="file-list-items" id="referenceFilesList">
+                                    <!-- Selected files will be added here dynamically -->
+                                </div>
+                                <button type="button" class="browse-add-btn" id="browseFilesBtn" onclick="openFileBrowser()">+ Browse...</button>
+                            </div>
                         </div>
 
                         <!-- Seed URLs for Web Crawling -->
@@ -168,10 +129,6 @@
                     <div class="flags-group">
                         <span class="flags-label">Expose:</span>
                         <label class="switch-item">
-                            <input type="checkbox" id="exposeLocalMcp">
-                            <span>Local MCP</span>
-                        </label>
-                        <label class="switch-item">
                             <input type="checkbox" id="exposeAzureMcp">
                             <span>Azure MCP</span>
                         </label>
@@ -195,7 +152,32 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=20260212"></script>
+    <!-- File Browser Modal -->
+    <div class="modal-overlay" id="fileBrowserModal" style="display: none;">
+        <div class="modal-content file-browser-modal">
+            <div class="modal-header">
+                <h3>Browse Files</h3>
+                <button class="modal-close-btn" onclick="closeFileBrowser()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="file-browser-nav">
+                    <button type="button" class="nav-btn" id="parentDirBtn" onclick="navigateToParent()" title="Go to parent directory">&#8593; Up</button>
+                    <input type="text" class="path-input" id="currentPathInput" placeholder="/" onkeypress="handlePathInputKeypress(event)">
+                    <button type="button" class="nav-btn" onclick="navigateToPath(document.getElementById('currentPathInput').value)">Go</button>
+                </div>
+                <div class="file-browser-content" id="fileBrowserContent">
+                    <div class="loading-files">Loading...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span class="selection-info" id="modalSelectionInfo">0 files selected</span>
+                <button type="button" class="cancel-btn" onclick="closeFileBrowser()">Cancel</button>
+                <button type="button" class="confirm-btn" onclick="confirmFileSelection()">Add Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=20260310f"></script>
 </body>
 
 </html>

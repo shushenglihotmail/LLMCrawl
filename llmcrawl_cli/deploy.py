@@ -15,7 +15,7 @@ Usage:
     llmcrawl deploy --logs              # View service logs
     llmcrawl deploy --status            # Check service status
 
-Services: gateway, crawler, indexer, mcp-server, azure-devops-mcp-server, memory-service
+Services: gateway, crawler, indexer, azure-devops-mcp-server, memory-service
 Monitoring: prometheus, grafana (use --profile monitoring)
 """
 
@@ -540,9 +540,6 @@ def start_local_services(
         child_env["GATEWAY_PORT"] = "8000"
         child_env["CRAWLER_URL"] = env_vars.get("CRAWLER_URL", "http://localhost:8001")
         child_env["INDEXER_URL"] = env_vars.get("INDEXER_URL", "http://localhost:8002")
-        child_env["MCP_SERVER_URL"] = env_vars.get(
-            "MCP_SERVER_URL", "http://localhost:8003"
-        )
         child_env["AZURE_DEVOPS_MCP_URL"] = env_vars.get(
             "AZURE_DEVOPS_MCP_URL", "http://localhost:8004"
         )
@@ -1123,7 +1120,6 @@ def cmd_health() -> int:
         ("Gateway", "http://localhost:8000/health", 8000),
         ("Crawler", "http://localhost:8001/health", 8001),
         ("Indexer", "http://localhost:8002/health", 8002),
-        ("MCP Server", "http://localhost:8003/health", 8003),
         ("Azure DevOps MCP", "http://localhost:8004/health", 8004),
         ("Memory Service", "http://localhost:8007/health", 8007),
         ("Qdrant", "http://localhost:6333/healthz", 6333),
@@ -1239,7 +1235,7 @@ Local Development (use --dev to use docker-compose.dev.yml):
   llmcrawl deploy --stop gateway --dev --dir ./deploy
   llmcrawl deploy --status --dev --dir ./deploy
 
-Services: gateway, crawler, indexer, mcp-server, azure-devops-mcp-server,
+Services: gateway, crawler, indexer, azure-devops-mcp-server,
           memory-service, redis, postgres, qdrant, playwright, firecrawl
 Monitoring: prometheus, grafana (use --profile monitoring)
 """,

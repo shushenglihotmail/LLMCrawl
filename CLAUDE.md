@@ -9,10 +9,9 @@ LLMCrawl is a containerized Python Web RAG system that enables LLMs to trigger w
 ## Architecture
 
 ### Services (Docker)
-- **Gateway (8000)**: FastAPI orchestrator - routes to OpenAI/Azure/Anthropic/Claude Bridge based on `LLM_MODELS` config
+- **Gateway (8000)**: FastAPI orchestrator - routes to OpenAI/Azure/Anthropic/Claude Bridge based on `LLM_MODELS` config (runs on host for local filesystem access)
 - **Crawler (8001)**: FireCrawl + Playwright fallback + Trafilatura extraction
 - **Indexer (8002)**: LlamaIndex + Vector DB (Qdrant/pgvector)
-- **Local Access MCP (8003)**: File operations with semantic search
 - **Azure DevOps MCP (8004)**: Code search with MSAL/PAT auth
 - **Memory Service (8007)**: OpenClaw-style auto-memory with hybrid search
 

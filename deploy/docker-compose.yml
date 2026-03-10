@@ -214,36 +214,6 @@ services:
     command: uvicorn indexer.main:app --host 0.0.0.0 --port 8002 --reload
     restart: unless-stopped
 
-  # MCP Server for local file operations
-  mcp-server:
-    build:
-      context: .
-      dockerfile: Dockerfile.mcp_server
-    container_name: web-rag-mcp-server
-    ports:
-      - "8003:8003"
-    environment:
-      - MCP_ROOT_FOLDER=/data/files
-      - MCP_VECTOR_DB_PATH=/data/mcp_vector_db
-      - ENVIRONMENT=development
-      - LOG_LEVEL=DEBUG
-    env_file:
-      - .env
-    volumes:
-      - ./logs:/app/logs
-      - ${MCP_HOST_FOLDER:-./data/files}:/data/files
-      - mcp_vector_db:/data/mcp_vector_db
-      - ./mcp_servers/local_access_mcp_server:/app/mcp_server:rw
-    command: uvicorn mcp_server.main:app --host 0.0.0.0 --port 8003 --reload
-    networks:
-      - webrag-network
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8003/health')\""]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-
   # Azure DevOps MCP Server
   azure-devops-mcp-server:
     build:
@@ -338,7 +308,6 @@ volumes:
   milvus_data:
   prometheus_data:
   grafana_data:
-  mcp_vector_db:
   azure_devops_cache:
 
 networks:

@@ -4,32 +4,7 @@ This directory contains Model Context Protocol (MCP) servers that extend the cap
 
 ## Available Servers
 
-### 1. Local Access MCP Server (`local_access_mcp_server/`)
-
-MCP server for reading and indexing local files with semantic search capabilities.
-
-**Features:**
-- Secure file reading with path validation
-- File indexing with LlamaIndex
-- Semantic search across indexed files
-- VS Code integration support
-
-**Quick Links:**
-- [Quick Start](local_access_mcp_server/QUICKSTART.md)
-- [Full Documentation](local_access_mcp_server/README.md)
-- [Integration Guide](local_access_mcp_server/INTEGRATION_GUIDE.md)
-
-**Installation:**
-```bash
-# For development
-pip install -e mcp_servers/local_access_mcp_server/
-
-# For VS Code MCP integration
-cd mcp_servers/local_access_mcp_server
-pip install -e .
-```
-
-### 2. Azure DevOps MCP Server (`azure_devops_mcp_server/`)
+### 1. Azure DevOps MCP Server (`azure_devops_mcp_server/`)
 
 MCP server for integrating with Azure DevOps repositories, enabling file reading and search across Azure DevOps projects.
 
@@ -55,7 +30,7 @@ cd mcp_servers/azure_devops_mcp_server
 pip install -e .
 ```
 
-### 3. WCD Bridge MCP Server (`wcd_bridge_mcp_server/`)
+### 2. WCD Bridge MCP Server (`wcd_bridge_mcp_server/`)
 
 MCP stdio server for the **Windows Composition Bridge**.
 
@@ -70,7 +45,7 @@ By default it starts an embedded bridge HTTP service and then runs the MCP serve
 pip install -e mcp_servers/wcd_bridge_mcp_server/
 ```
 
-### 4. Crawler MCP Server (`crawler_mcp_server/`)
+### 3. Crawler MCP Server (`crawler_mcp_server/`)
 
 MCP stdio server that forwards calls to the existing **Crawler** service (default `http://localhost:8001`).
 
@@ -95,30 +70,17 @@ These MCP servers can be deployed:
 
 ## Docker Deployment
 
-Some servers are included in the main docker-compose configuration:
+The Azure DevOps MCP server is included in the main docker-compose configuration:
 
 ```bash
 # Start all services including MCP servers
 docker-compose -f deploy/docker-compose.yml up -d
 
-# Start only local MCP server
-docker-compose -f deploy/docker-compose.yml up -d mcp-server
-
 # Start only Azure DevOps MCP server
 docker-compose -f deploy/docker-compose.yml up -d azure-devops-mcp-server
 ```
 
-## Development
-
-For local development with hot-reload:
-
-```bash
-# Start dev environment
-cd deploy && docker-compose up -d
-
-# The local MCP server is mounted with volume for live updates
-# Hot-reload is enabled by default in docker-compose.yml
-```
+> **Note:** The Gateway service now runs on the host and has direct filesystem access, so the Local Access MCP Server is no longer required for LLMCrawl integration. It remains available for standalone VS Code integration if needed.
 
 ## VS Code Integration
 

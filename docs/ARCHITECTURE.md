@@ -240,7 +240,6 @@ The system supports four workflow types for different use cases:
     "target_paths": ["azdo:/src/myproject/*.cpp"],
     "reference_files": ["/docs/standards.md"],
     "expose_to_llm": {
-        "local_mcp": false,
         "azure_devops_mcp": true,
         "crawler": false
     }
@@ -251,18 +250,12 @@ The system supports four workflow types for different use cases:
 
 | Query Type | Trigger Words | Tools Loaded | LLM Decision |
 |------------|---------------|--------------|--------------|
-| "Latest NVIDIA news" | "latest" | crawl + MCP | crawl_and_refresh |
-| "Read README.md" | "read", filename | MCP only | read_local_file |
-| "List files in src" | "list", "files" | MCP only | list_files |
+| "Latest NVIDIA news" | "latest" | crawl | crawl_and_refresh |
+| "Search for code in repo" | "search", "find" | Azure DevOps MCP | search_azure_devops_code |
+| "Get file from DevOps" | "get", "read", repo path | Azure DevOps MCP | get_azure_devops_file |
 | "What is Python?" | General knowledge | None | Direct LLM |
 
 ## MCP Server Architecture
-
-### Local Access MCP Server (Port 8003)
-- Read files with path validation
-- List directories with filters
-- Semantic search (optional)
-- Security: Path traversal protection
 
 ### Azure DevOps MCP Server (Port 8004)
 - Code search using Azure DevOps Code Search API

@@ -811,3 +811,301 @@ button {
 .auth-button:active {
     transform: translateY(0);
 }
+
+/* ===========================================
+   File List Box & File Browser Modal
+   =========================================== */
+
+/* File List Box - container for selected files */
+.file-list-box {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background: #fff;
+    min-height: 60px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.file-list-items {
+    padding: 0;
+}
+
+/* Individual file item in the list */
+.file-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 13px;
+    font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.file-list-item:last-child {
+    border-bottom: none;
+}
+
+.file-list-item .file-path {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #333;
+}
+
+.file-list-item .remove-btn {
+    background: none;
+    border: none;
+    color: #999;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 2px 6px;
+    margin-left: 8px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.file-list-item .remove-btn:hover {
+    background: #fee;
+    color: #e74c3c;
+}
+
+/* Browse button at bottom of list */
+.browse-add-btn {
+    display: block;
+    width: 100%;
+    padding: 10px 12px;
+    background: #f8f9fa;
+    border: none;
+    border-top: 1px solid #e0e0e0;
+    color: #667eea;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.2s;
+    border-radius: 0 0 8px 8px;
+}
+
+.browse-add-btn:hover {
+    background: #e8f0fe;
+}
+
+/* Empty state for file list */
+.file-list-empty {
+    padding: 15px;
+    text-align: center;
+    color: #999;
+    font-size: 13px;
+    font-style: italic;
+}
+
+/* ===========================================
+   File Browser Modal
+   =========================================== */
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+}
+
+.modal-content.file-browser-modal {
+    background: white;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 700px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    border-bottom: 1px solid #e0e0e0;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px 12px 0 0;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: white;
+    font-size: 18px;
+}
+
+.modal-close-btn {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    opacity: 0.8;
+    transition: opacity 0.2s;
+}
+
+.modal-close-btn:hover {
+    opacity: 1;
+}
+
+.modal-body {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.file-browser-nav {
+    display: flex;
+    gap: 8px;
+    padding: 12px 15px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.file-browser-nav .nav-btn {
+    padding: 8px 12px;
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+
+.file-browser-nav .nav-btn:hover {
+    background: #5a6fd6;
+}
+
+.file-browser-nav .path-input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.file-browser-nav .path-input:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.file-browser-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+    min-height: 300px;
+    max-height: 400px;
+}
+
+.loading-files {
+    padding: 40px;
+    text-align: center;
+    color: #999;
+}
+
+/* File/folder items in browser */
+.browser-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 15px;
+    border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.browser-item:hover {
+    background: #f5f7ff;
+}
+
+.browser-item.selected {
+    background: #e8f0fe;
+}
+
+.browser-item .item-icon {
+    font-size: 18px;
+    margin-right: 10px;
+    width: 24px;
+    text-align: center;
+}
+
+.browser-item .item-name {
+    flex: 1;
+    font-size: 14px;
+    color: #333;
+}
+
+.browser-item.folder .item-name {
+    font-weight: 500;
+}
+
+.browser-item .item-size {
+    font-size: 12px;
+    color: #999;
+    margin-left: 10px;
+}
+
+.browser-item .item-checkbox {
+    margin-left: 10px;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    border-top: 1px solid #e0e0e0;
+    background: #f8f9fa;
+    border-radius: 0 0 12px 12px;
+}
+
+.modal-footer .selection-info {
+    font-size: 13px;
+    color: #666;
+}
+
+.modal-footer .cancel-btn,
+.modal-footer .confirm-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.modal-footer .cancel-btn {
+    background: #e0e0e0;
+    color: #666;
+    margin-right: 10px;
+}
+
+.modal-footer .cancel-btn:hover {
+    background: #d0d0d0;
+}
+
+.modal-footer .confirm-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.modal-footer .confirm-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}

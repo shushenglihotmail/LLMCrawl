@@ -135,8 +135,7 @@ llmcrawl-deploy/
 ├── gateway/                # Gateway service code
 ├── crawler/                # Crawler service code
 ├── indexer/                # Indexer service code
-├── mcp_servers/            # MCP server code
-├── data/files/             # Default MCP file mount point
+├── mcp_servers/            # MCP server code (Azure DevOps)
 ├── logs/                   # Service logs
 └── docs/                   # Documentation
 ```
@@ -214,9 +213,6 @@ HICHAT_PORT=8080
 
 # Logging level
 LOG_LEVEL=INFO              # Options: DEBUG, INFO, WARNING, ERROR
-
-# Local file access (path for MCP server to read)
-MCP_HOST_FOLDER=C:/src      # Windows: Use forward slashes
 ```
 
 ---
@@ -456,21 +452,6 @@ Access points:
 - **Prometheus**: http://localhost:9090
 
 See [DIAGNOSTICS.md](DIAGNOSTICS.md) for monitoring setup.
-
----
-
-### Local File Access (MCP Server)
-
-Allow the agent to read files on your local machine.
-
-**Configuration** in `.env`:
-
-```bash
-# Path to expose (use forward slashes on Windows)
-MCP_HOST_FOLDER=C:/src
-```
-
-The agent can then read, list, and search files within this folder.
 
 ---
 

@@ -171,7 +171,6 @@ try {
             $env:GATEWAY_PORT = "8000"
             $env:CRAWLER_URL = "http://localhost:8001"
             $env:INDEXER_URL = "http://localhost:8002"
-            $env:MCP_SERVER_URL = "http://localhost:8003"
             $env:AZURE_DEVOPS_MCP_URL = "http://localhost:8004"
             $env:MEMORY_SERVICE_URL = "http://localhost:8007"
             $env:MEMORY_DATA_PATH = $MemoryDataPath
@@ -221,7 +220,6 @@ try {
     Write-Host "  Memory Service (local): http://localhost:8007" -ForegroundColor White
     Write-Host "  Crawler:              http://localhost:8001" -ForegroundColor White
     Write-Host "  Indexer:              http://localhost:8002" -ForegroundColor White
-    Write-Host "  MCP Server:           http://localhost:8003" -ForegroundColor White
     Write-Host "  Azure DevOps MCP:     http://localhost:8004" -ForegroundColor White
     Write-Host "  Qdrant:               http://localhost:6333" -ForegroundColor White
     Write-Host "  Redis:                localhost:6379" -ForegroundColor White
@@ -237,7 +235,7 @@ try {
     # Follow logs if requested
     if ($Logs) {
         Write-Host "`nFollowing Docker logs (Ctrl+C to exit)..." -ForegroundColor Yellow
-        docker compose -f docker-compose.dev.yml logs -f crawler indexer mcp-server
+        docker compose -f docker-compose.dev.yml logs -f crawler indexer azure-devops-mcp-server
     }
 }
 finally {
