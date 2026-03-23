@@ -682,8 +682,8 @@ class LLMClient:
             tools_text = (
                 "You have access to the following tools:\n\n"
                 f"{tools_json}\n\n"
-                "IMPORTANT: When you need to call a tool, you MUST respond with "
-                "ONLY a JSON object in this EXACT format (no other text before or after):\n"
+                "IMPORTANT: When you need to call a tool, respond with "
+                "JSON objects in this EXACT format (each in its own ```json block):\n"
                 "```json\n"
                 "{\n"
                 '  "tool_name": "<tool_name>",\n'
@@ -691,11 +691,12 @@ class LLMClient:
                 "}\n"
                 "```\n\n"
                 "Rules for tool calling:\n"
-                "1. Output ONLY the JSON block when calling a tool — no explanation before or after\n"
+                "1. Output ONLY the JSON block(s) when calling tools — no explanation before or after\n"
                 "2. Use the exact tool name from the list above\n"
                 "3. Include all required parameters\n"
                 "4. If you do NOT need to call a tool, respond normally with text\n"
-                "5. Call only ONE tool at a time"
+                "5. You may call multiple tools in one response — use a separate ```json block for each\n"
+                "6. NEVER repeat or echo back tool call arguments (especially file content) in your text responses"
             )
             payload["system_prompt"] = tools_text
 
@@ -722,16 +723,18 @@ class LLMClient:
 
             response_size = len(json.dumps(result))
 
-            # If tools were passed, try to detect JSON tool calls in the text
+            # If tools were passed, try to detect JSON tool calls in the text.
+            # Claude may emit multiple tool calls in one response.
             if tools and not result.get("tool_calls"):
-                converted = self._try_convert_json_to_tool_call(content, tools)
-                if converted:
+                all_calls = self._try_convert_all_json_tool_calls(content, tools)
+                if all_calls:
+                    names = [c["function"]["name"] for c in all_calls]
                     logger.info(
-                        f"Claude bridge: converted JSON to tool call: "
-                        f"{converted['function']['name']}"
+                        f"Claude bridge: converted {len(all_calls)} JSON "
+                        f"tool call(s): {names}"
                     )
-                    result["tool_calls"] = [converted]
-                    result["content"] = self._strip_json_from_content(content)
+                    result["tool_calls"] = all_calls
+                    result["content"] = self._strip_all_json_from_content(content)
 
             return result
 
@@ -956,15 +959,188 @@ class LLMClient:
         Returns:
             Content with JSON stripped out
         """
+        return self._strip_all_json_from_content(content)
+
+    def _strip_all_json_from_content(self, content: str) -> str:
+        """
+        Remove ALL JSON blocks (including nested) from content.
+
+        Handles:
+        - ```json ... ``` code blocks
+        - Bare JSON objects at start of text or after newlines
+        """
         if not content:
             return content
 
-        # Remove JSON at the start
-        content = re.sub(r"^\s*\{[^{}]*\}\s*", "", content)
-        # Remove JSON in code blocks
-        content = re.sub(r"```json?\s*\{[^{}]*\}\s*```\s*", "", content)
+        # Pass 1: Remove JSON in code blocks (including nested braces)
+        content = re.sub(r"```json?\s*\{.*?\}\s*```", "", content, flags=re.DOTALL)
 
-        return content.strip()
+        # Pass 2: Remove bare JSON objects by finding balanced braces
+        result_parts: list[str] = []
+        i = 0
+        while i < len(content):
+            if content[i] == "{":
+                # Try to find balanced closing brace
+                depth = 0
+                j = i
+                in_string = False
+                escape = False
+                while j < len(content):
+                    ch = content[j]
+                    if escape:
+                        escape = False
+                    elif ch == "\\" and in_string:
+                        escape = True
+                    elif ch == '"' and not escape:
+                        in_string = not in_string
+                    elif not in_string:
+                        if ch == "{":
+                            depth += 1
+                        elif ch == "}":
+                            depth -= 1
+                            if depth == 0:
+                                # Check if this was valid JSON
+                                candidate = content[i : j + 1]
+                                try:
+                                    json.loads(candidate)
+                                    # Valid JSON — skip it
+                                    i = j + 1
+                                    break
+                                except json.JSONDecodeError:
+                                    # Not valid JSON, keep the text
+                                    result_parts.append(content[i])
+                                    i += 1
+                                    break
+                    j += 1
+                else:
+                    # Unbalanced braces — keep as text
+                    result_parts.append(content[i])
+                    i += 1
+            else:
+                result_parts.append(content[i])
+                i += 1
+
+        return "".join(result_parts).strip()
+
+    def _try_convert_all_json_tool_calls(
+        self, content: str, tools: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """
+        Extract ALL JSON tool calls from content (Claude may emit several).
+
+        Only recognises the explicit format: {"tool_name": "...", "arguments": {...}}
+        Implicit matching (matching JSON keys to tool schemas) is intentionally
+        disabled — it produced massive false-positive rates (59+ bogus calls).
+
+        Returns a list of tool call dicts (OpenAI format), or empty list.
+        """
+        if not content:
+            return []
+
+        # Cap: no single LLM response should produce more than 10 tool calls
+        MAX_TOOL_CALLS_PER_RESPONSE = 10
+
+        json_objects = self._extract_all_json_from_text(content)
+        if not json_objects:
+            return []
+
+        valid_tool_names = {t.get("function", {}).get("name", "") for t in tools}
+        calls: list[dict[str, Any]] = []
+
+        for parsed_json in json_objects:
+            if len(calls) >= MAX_TOOL_CALLS_PER_RESPONSE:
+                logger.warning(
+                    f"Tool call cap reached ({MAX_TOOL_CALLS_PER_RESPONSE}), "
+                    f"ignoring remaining JSON objects"
+                )
+                break
+
+            # Only accept explicit format: {"tool_name": "...", "arguments": {...}}
+            if (
+                "tool_name" in parsed_json
+                and parsed_json["tool_name"] in valid_tool_names
+            ):
+                arguments = parsed_json.get("arguments", {})
+                calls.append(
+                    {
+                        "id": f"call_{uuid.uuid4().hex[:24]}",
+                        "type": "function",
+                        "function": {
+                            "name": parsed_json["tool_name"],
+                            "arguments": (
+                                json.dumps(arguments)
+                                if isinstance(arguments, dict)
+                                else str(arguments)
+                            ),
+                        },
+                    }
+                )
+
+        # Fall back to single-extraction for backward compat
+        if not calls:
+            single = self._try_convert_json_to_tool_call(content, tools)
+            if single:
+                calls.append(single)
+
+        return calls
+
+    def _extract_all_json_from_text(self, content: str) -> list[dict[str, Any]]:
+        """
+        Extract ALL JSON objects from text content.
+
+        Finds JSON in code blocks and bare JSON objects.
+        """
+        if not content:
+            return []
+
+        results: list[dict[str, Any]] = []
+
+        # Strategy 1: All JSON code blocks
+        for m in re.finditer(r"```json?\s*(\{.*?\})\s*```", content, re.DOTALL):
+            try:
+                results.append(json.loads(m.group(1)))
+            except json.JSONDecodeError:
+                pass
+
+        if results:
+            return results
+
+        # Strategy 2: Bare JSON objects (balanced-brace extraction)
+        i = 0
+        while i < len(content):
+            if content[i] == "{":
+                depth = 0
+                j = i
+                in_string = False
+                escape = False
+                while j < len(content):
+                    ch = content[j]
+                    if escape:
+                        escape = False
+                    elif ch == "\\" and in_string:
+                        escape = True
+                    elif ch == '"' and not escape:
+                        in_string = not in_string
+                    elif not in_string:
+                        if ch == "{":
+                            depth += 1
+                        elif ch == "}":
+                            depth -= 1
+                            if depth == 0:
+                                candidate = content[i : j + 1]
+                                try:
+                                    results.append(json.loads(candidate))
+                                except json.JSONDecodeError:
+                                    pass
+                                i = j + 1
+                                break
+                    j += 1
+                else:
+                    i += 1
+            else:
+                i += 1
+
+        return results
 
     async def create_embeddings(
         self, texts: List[str], model: Optional[str] = None

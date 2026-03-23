@@ -142,6 +142,30 @@ def get_api_key() -> Optional[str]:
     return None
 
 
+def _truncate_tool_args(tool_name: str, args_str: str, max_len: int = 400) -> str:
+    """Truncate tool call arguments for conversation history.
+
+    For tools like save_file_for_download that carry large payloads,
+    replace the bulky fields with a short summary so the prompt stays
+    small and Claude doesn't echo the content back.
+    """
+    if len(args_str) <= max_len:
+        return args_str
+    try:
+        args = json.loads(args_str)
+        # Truncate any string value longer than 120 chars
+        for key in list(args.keys()):
+            val = args[key]
+            if isinstance(val, str) and len(val) > 120:
+                args[key] = val[:80] + f"...[{len(val)} chars truncated]"
+        short = json.dumps(args, ensure_ascii=False)
+        if len(short) <= max_len:
+            return short
+        return short[:max_len] + "...[truncated]"
+    except (json.JSONDecodeError, TypeError):
+        return args_str[:max_len] + "...[truncated]"
+
+
 def build_prompt(messages: List[ChatMessage]) -> tuple[Optional[str], str]:
     """
     Convert an OpenAI-style message list to (system_prompt, prompt_text).
@@ -161,10 +185,13 @@ def build_prompt(messages: List[ChatMessage]) -> tuple[Optional[str], str]:
         elif msg.role == "assistant":
             text = msg.content or ""
             if msg.tool_calls:
-                # Include tool calls as context
+                # Include tool calls as context with truncated arguments
                 for tc in msg.tool_calls:
                     fn = tc.get("function", {})
-                    text += f"\n[Tool call: {fn.get('name', '?')}({fn.get('arguments', '')})]"
+                    args_str = _truncate_tool_args(
+                        fn.get("name", ""), fn.get("arguments", "")
+                    )
+                    text += f"\n[Tool call: {fn.get('name', '?')}({args_str})]"
             conversation_parts.append(f"Assistant: {text}")
         elif msg.role == "tool":
             tid = msg.tool_call_id or "unknown"
@@ -451,9 +478,30 @@ async def chat(request: ChatRequest):
     logger.info(f"Claude CLI finished in {duration:.1f}s (exit={result.returncode})")
 
     if result.returncode != 0:
-        stderr = result.stderr[:500] if result.stderr else "no stderr"
-        logger.error(f"Claude CLI failed: {stderr}")
-        raise HTTPException(502, f"Claude CLI error: {stderr}")
+        stderr = result.stderr[:500] if result.stderr else ""
+        # When stderr is empty, check stdout for stream-json error events
+        stdout_err = ""
+        if not stderr and result.stdout:
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    evt = json.loads(line)
+                    if evt.get("is_error") or evt.get("type") == "error":
+                        stdout_err = (
+                            evt.get("result", "")
+                            or evt.get("error", {}).get("message", "")
+                            or line
+                        )
+                        break
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+            if not stdout_err:
+                stdout_err = result.stdout[:500]
+        detail = stderr or stdout_err or "no output"
+        logger.error(f"Claude CLI failed (exit={result.returncode}): {detail}")
+        raise HTTPException(502, f"Claude CLI error: {detail}")
 
     # Guard against None stdout (e.g. encoding errors)
     stdout = result.stdout or ""

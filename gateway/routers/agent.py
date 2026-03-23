@@ -573,6 +573,11 @@ def _file_download_prompt_section() -> str:
         "- When you generate reports, analysis summaries, code, scripts, "
         "configuration files, or any document the user would want to save, "
         "you MUST call save_file_for_download to offer a download.\n"
+        "- CRITICAL: If you are producing a multi-part deliverable (e.g. Part 1, "
+        "Part 2, Part 3...), you MUST call save_file_for_download for EVERY part, "
+        "including Part 1.  Do NOT write any part as inline text — save ALL parts "
+        "as downloadable files. Your text response should only be a brief summary "
+        "of what you produced, not the file content itself.\n"
         "- CRITICAL: NEVER say 'I have saved the file' or 'a download is available' "
         "unless you have ACTUALLY called the save_file_for_download tool in this "
         "conversation. Claiming a file was saved without calling the tool is "
@@ -1128,30 +1133,24 @@ async def _execute_llm_with_tools(
     context_gathered: Dict[str, int],
     conversation_id: str,
     bearer_token: Optional[str] = None,
-) -> Tuple[str, Optional[int]]:
+) -> Tuple[str, Optional[int], list[str]]:
     """Execute LLM with tool calling loop.
 
-    Checks for cancellation between tool calls and LLM rounds.
-
-    Args:
-        request: Workflow request
-        messages: Chat messages
-        tools: Available tools
-        request_id: Request ID for logging
-        context_gathered: Context gathering stats
-        conversation_id: Conversation ID for cancellation
-        bearer_token: Optional bearer token for LLM authentication
+    Returns:
+        (response_text, tokens_used, saved_file_ids)
     """
     # Check for cancellation at start
     if _is_request_cancelled(conversation_id):
         logger.info(f"Request cancelled before LLM execution: {conversation_id}")
-        return "*Request was cancelled.*", None
+        return "*Request was cancelled.*", None, []
 
     llm_client = LLMClient()
     tool_handler = get_tool_handler()
     tool_round = 0
     # Track per-tool usage
     tool_usage: Dict[str, int] = {}
+    # Track file IDs saved during this request (avoids duplicates from prior messages)
+    saved_file_ids: list[str] = []
     # Track elapsed time for time-budget enforcement
     agent_start_time = time.monotonic()
 
@@ -1184,7 +1183,7 @@ async def _execute_llm_with_tools(
             logger.info(
                 f"Request cancelled during tool round {tool_round}: {conversation_id}"
             )
-            return "*Request was cancelled by user.*", None
+            return "*Request was cancelled by user.*", None, []
 
         # ── Time-budget enforcement ──────────────────────────────────
         elapsed = time.monotonic() - agent_start_time
@@ -1194,6 +1193,40 @@ async def _execute_llm_with_tools(
                 f"{MAX_AGENT_ELAPSED_SECONDS}s) after {tool_round - 1} tool "
                 f"rounds.  Forcing final answer."
             )
+
+            # Still execute any pending save_file_for_download calls —
+            # they are cheap (in-memory only) and losing them is very
+            # visible to the user (broken download buttons).
+            save_calls = [
+                tc
+                for tc in response.get("tool_calls", [])
+                if tc.get("function", {}).get("name") == TOOL_SAVE_FILE_FOR_DOWNLOAD
+            ]
+            if save_calls:
+                logger.info(
+                    f"Executing {len(save_calls)} save_file_for_download "
+                    f"call(s) despite budget exceeded"
+                )
+                for tc in save_calls:
+                    try:
+                        args = json.loads(tc["function"]["arguments"])
+                        args["conversation_id"] = conversation_id
+                        tc["function"]["arguments"] = json.dumps(args)
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+                    tool_result = await tool_handler.handle_tool_call(
+                        tc,
+                        request_id,
+                        skip_embedding=True,
+                    )
+                    messages.append(tool_result)
+                    try:
+                        rd = json.loads(tool_result["content"])
+                        if rd.get("file_id"):
+                            saved_file_ids.append(rd["file_id"])
+                    except Exception:
+                        pass
+
             # Ask the LLM to wrap up with what it has — no more tools
             messages.append(
                 {
@@ -1210,26 +1243,87 @@ async def _execute_llm_with_tools(
                         "tool_call_id": tc.get("id", "budget"),
                         "content": (
                             "⏱️ Time budget exceeded — please provide your "
-                            "best answer now using the information already gathered."
+                            "best answer now using the information already "
+                            "gathered. You still have access to all tools for "
+                            "this final response if needed (e.g. to save "
+                            "files). If the answer is short, just reply in "
+                            "chat."
                         ),
                     }
                 )
-            # Final LLM call with NO tools so it cannot request more
+
+            # Final LLM call — all tools still available so the LLM
+            # can save files, make one last query, or just reply in chat.
             wrap_response = await llm_client.chat_completion(
                 model=request.model or "gpt-4",
                 messages=messages,
-                tools=None,
-                tool_choice="none",
+                tools=tools,
+                tool_choice="auto" if tools else "none",
                 bearer_token=bearer_token,
             )
             wrap_text = wrap_response.get("content") or ""
             wrap_tokens = wrap_response.get("usage", {}).get("total_tokens")
+
+            # Handle formal tool_calls from OpenAI-style providers
+            if wrap_response.get("tool_calls"):
+                for tc in wrap_response["tool_calls"]:
+                    tc_name = tc.get("function", {}).get("name", "")
+                    # Inject conversation_id for save_file calls
+                    if tc_name == TOOL_SAVE_FILE_FOR_DOWNLOAD:
+                        try:
+                            args = json.loads(tc["function"]["arguments"])
+                            args["conversation_id"] = conversation_id
+                            tc["function"]["arguments"] = json.dumps(args)
+                        except (json.JSONDecodeError, KeyError):
+                            pass
+                    result = await tool_handler.handle_tool_call(
+                        tc, request_id, skip_embedding=True
+                    )
+                    try:
+                        rd = json.loads(result["content"])
+                        if rd.get("file_id"):
+                            saved_file_ids.append(rd["file_id"])
+                    except Exception:
+                        pass
+
+            # Claude Bridge may embed tool call JSON blocks in the
+            # wrap-up text. Scan for them and execute any found.
+            if wrap_text and tools:
+                embedded_calls = llm_client._try_convert_all_json_tool_calls(
+                    wrap_text, tools
+                )
+                if embedded_calls:
+                    logger.info(
+                        f"Found {len(embedded_calls)} embedded "
+                        f"tool call(s) in wrap-up text"
+                    )
+                    for tc in embedded_calls:
+                        tc_name = tc.get("function", {}).get("name", "")
+                        if tc_name == TOOL_SAVE_FILE_FOR_DOWNLOAD:
+                            try:
+                                args = json.loads(tc["function"]["arguments"])
+                                args["conversation_id"] = conversation_id
+                                tc["function"]["arguments"] = json.dumps(args)
+                            except (json.JSONDecodeError, KeyError):
+                                pass
+                        result = await tool_handler.handle_tool_call(
+                            tc, request_id, skip_embedding=True
+                        )
+                        try:
+                            rd = json.loads(result["content"])
+                            if rd.get("file_id"):
+                                saved_file_ids.append(rd["file_id"])
+                        except Exception:
+                            pass
+                    # Strip the JSON blocks from the displayed text
+                    wrap_text = llm_client._strip_all_json_from_content(wrap_text)
+
             budget_note = (
                 f"\n\n---\n*⏱️ Response generated under time budget "
                 f"({elapsed:.0f}s elapsed, {tool_round - 1} tool rounds). "
                 f"Some tool calls were skipped.*"
             )
-            return (wrap_text + budget_note), wrap_tokens
+            return (wrap_text + budget_note), wrap_tokens, saved_file_ids
 
         # Check which tools have exceeded their limits
         exceeded_tools = _check_tool_limits(response["tool_calls"], tool_usage)
@@ -1274,7 +1368,7 @@ async def _execute_llm_with_tools(
                 logger.info(
                     f"Request cancelled before tool execution: {conversation_id}"
                 )
-                return "*Request was cancelled by user.*", None
+                return "*Request was cancelled by user.*", None, saved_file_ids
 
             tool_name = tool_call.get("function", {}).get("name", "unknown")
 
@@ -1304,11 +1398,15 @@ async def _execute_llm_with_tools(
             )
             messages.append(tool_result)
 
-            # Update context_gathered
+            # Track saved file IDs and update context_gathered
             try:
                 result_data = json.loads(tool_result["content"])
                 if "hits" in result_data:
                     context_gathered["tool_executed_urls"] = len(result_data["hits"])
+                if tool_name == TOOL_SAVE_FILE_FOR_DOWNLOAD and result_data.get(
+                    "file_id"
+                ):
+                    saved_file_ids.append(result_data["file_id"])
             except Exception:
                 pass
 
@@ -1331,7 +1429,7 @@ async def _execute_llm_with_tools(
     if not response_text and tool_round > 0:
         response_text = "Tool execution completed but no final response generated."
 
-    return response_text, tokens_used
+    return response_text, tokens_used, saved_file_ids
 
 
 # =============================================================================
@@ -1494,7 +1592,7 @@ async def execute(
 
         # Step 5: Execute LLM with tools (with metrics)
         async with AgentActivityTimer("llm_loop") as llm_timer:
-            response_text, tokens_used = await _execute_llm_with_tools(
+            response_text, tokens_used, saved_file_ids = await _execute_llm_with_tools(
                 request,
                 messages,
                 tools,
@@ -1522,18 +1620,25 @@ async def execute(
         conversation_store.add_message(conversation_id, "user", request.user_message)
         conversation_store.add_message(conversation_id, "assistant", response_text)
 
-        # Step 7: Collect downloadable files saved during tool execution
+        # Step 7: Collect downloadable files saved during this request only.
+        # Use the tracked file IDs rather than querying all conversation files,
+        # which would include files from prior messages (duplicates).
         file_store = get_file_store()
-        stored_files = file_store.get_files_for_conversation(conversation_id)
-        downloadable_files = [
-            {
-                "file_id": f.file_id,
-                "filename": f.filename,
-                "size": f.size,
-                "content_type": f.content_type,
-            }
-            for f in stored_files
-        ]
+        if saved_file_ids:
+            # Deduplicate by filename — keep latest version if same name saved twice
+            seen_filenames: dict[str, dict[str, Any]] = {}
+            for fid in saved_file_ids:
+                stored = file_store.get(fid)
+                if stored:
+                    seen_filenames[stored.filename] = {
+                        "file_id": stored.file_id,
+                        "filename": stored.filename,
+                        "size": stored.size,
+                        "content_type": stored.content_type,
+                    }
+            downloadable_files = list(seen_filenames.values())
+        else:
+            downloadable_files = []
 
         result = UnifiedWorkflowResponse(
             response=response_text,

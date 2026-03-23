@@ -82,10 +82,8 @@ async def export_to_markdown(request: ExportRequest):
             response = await client.post(
                 f"{crawler_url}/crawl",
                 json={
-                    "query": "export content",
-                    "seed_urls": request.seed_urls,
+                    "urls": request.seed_urls,
                     "depth": request.depth,
-                    "freshness_days": request.freshness_days,
                     "max_results": 100,  # Allow more results for export
                 },
             )

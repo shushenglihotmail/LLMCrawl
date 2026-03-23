@@ -21,8 +21,8 @@ from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-# Default TTL: 30 minutes
-DEFAULT_TTL_SECONDS = 30 * 60
+# Default TTL: 4 hours (30 min was too aggressive for slow LLM round-trips)
+DEFAULT_TTL_SECONDS = 4 * 60 * 60
 
 # Max file size: 10 MB
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
