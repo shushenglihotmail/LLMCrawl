@@ -436,12 +436,49 @@ async function loadModels() {
         const modelSelector = document.getElementById('modelSelector');
         modelSelector.innerHTML = '';
 
+        // Group models by provider for clear organization
+        const groups = {};
         modelsData.forEach(model => {
-            const option = document.createElement('option');
-            option.value = model.name;
-            option.textContent = model.display_name || model.name;
-            modelSelector.appendChild(option);
+            const provider = model.provider || 'other';
+            if (!groups[provider]) groups[provider] = [];
+            groups[provider].push(model);
         });
+
+        // Provider display order and labels
+        const providerLabels = {
+            'claude': 'Claude CLI',
+            'copilot': 'Copilot CLI',
+            'azure': 'Azure',
+            'openai': 'OpenAI',
+            'anthropic': 'Anthropic',
+            'other': 'Other',
+        };
+        const providerOrder = ['claude', 'copilot', 'azure', 'openai', 'anthropic', 'other'];
+
+        const activeProviders = providerOrder.filter(p => groups[p] && groups[p].length > 0);
+
+        if (activeProviders.length > 1) {
+            // Multiple providers — use optgroups
+            activeProviders.forEach(provider => {
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = providerLabels[provider] || provider;
+                groups[provider].forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.name;
+                    option.textContent = model.display_name || model.name;
+                    optgroup.appendChild(option);
+                });
+                modelSelector.appendChild(optgroup);
+            });
+        } else {
+            // Single provider — flat list
+            modelsData.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.name;
+                option.textContent = model.display_name || model.name;
+                modelSelector.appendChild(option);
+            });
+        }
 
         if (modelsData.length > 0) {
             modelSelector.value = modelsData[0].name;
@@ -526,6 +563,7 @@ async function submitRequest() {
     };
 
     try {
+        const effortValue = document.getElementById('effortSelector').value;
         const requestBody = {
             workflow: currentWorkflow,
             user_message: message,
@@ -536,7 +574,8 @@ async function submitRequest() {
             enable_embedding: enableEmbedding,
             crawl_depth: crawlDepth,
             expose_to_llm: exposeToLlm,
-            clear_history: clearHistoryFlag
+            clear_history: clearHistoryFlag,
+            effort: effortValue || null
         };
 
         clearHistoryFlag = false;
@@ -579,7 +618,7 @@ async function submitRequest() {
         addMessage('assistant', data.response + contextInfo, {
             model: data.model,
             tokens: data.tokens_used
-        }, false, data.downloadable_files);
+        }, false, data.saved_files);
 
     } catch (error) {
         if (error.name === 'AbortError') {
@@ -617,7 +656,7 @@ function generateUUID() {
     });
 }
 
-function addMessage(role, content, meta = null, isError = false, downloadableFiles = null) {
+function addMessage(role, content, meta = null, isError = false, savedFiles = null) {
     const chatArea = document.getElementById('chatArea');
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message ' + role;
@@ -638,20 +677,25 @@ function addMessage(role, content, meta = null, isError = false, downloadableFil
 
         setTimeout(() => renderMermaidDiagrams(markdownDiv), 0);
 
-        // Render download buttons for files saved by LLM
-        if (downloadableFiles && downloadableFiles.length > 0) {
+        // Render saved file links with view-on-click
+        if (savedFiles && savedFiles.length > 0) {
             const filesDiv = document.createElement('div');
-            filesDiv.className = 'downloadable-files';
-            downloadableFiles.forEach(file => {
+            filesDiv.className = 'saved-files';
+            savedFiles.forEach(file => {
                 const fileBtn = document.createElement('a');
-                fileBtn.className = 'file-download-btn';
-                fileBtn.href = '/api/files/' + file.file_id;
-                fileBtn.download = file.filename;
-                fileBtn.title = 'Download ' + file.filename;
+                fileBtn.className = 'file-view-btn';
+                fileBtn.href = '#';
+                fileBtn.title = 'View ' + file.filename;
+                fileBtn.onclick = function(e) {
+                    e.preventDefault();
+                    openFileViewer(file.saved_path, file.filename);
+                };
                 const sizeStr = file.size < 1024
                     ? file.size + ' B'
                     : (file.size / 1024).toFixed(1) + ' KB';
-                fileBtn.innerHTML = '📄 ' + file.filename + ' <span class="file-size">(' + sizeStr + ')</span>';
+                fileBtn.innerHTML = '<span class="file-icon">&#128196;</span> ' + file.filename
+                    + ' <span class="file-size">(' + sizeStr + ')</span>'
+                    + '<span class="file-path">' + file.saved_path + '</span>';
                 filesDiv.appendChild(fileBtn);
             });
             contentDiv.appendChild(filesDiv);
@@ -677,6 +721,76 @@ function addMessage(role, content, meta = null, isError = false, downloadableFil
 
     chatArea.appendChild(messageDiv);
     chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+// File viewer modal
+function openFileViewer(filePath, filename) {
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('fileViewerModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'fileViewerModal';
+        modal.className = 'file-viewer-modal';
+        modal.innerHTML = `
+            <div class="file-viewer-backdrop"></div>
+            <div class="file-viewer-content">
+                <div class="file-viewer-header">
+                    <span class="file-viewer-title"></span>
+                    <div class="file-viewer-actions">
+                        <button class="file-viewer-copy" title="Copy to clipboard">Copy</button>
+                        <button class="file-viewer-close" title="Close">&times;</button>
+                    </div>
+                </div>
+                <div class="file-viewer-body markdown-content"></div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        // Close handlers
+        modal.querySelector('.file-viewer-backdrop').onclick = () => modal.classList.remove('active');
+        modal.querySelector('.file-viewer-close').onclick = () => modal.classList.remove('active');
+        modal.querySelector('.file-viewer-copy').onclick = () => {
+            const body = modal.querySelector('.file-viewer-body');
+            navigator.clipboard.writeText(body.dataset.rawContent || body.textContent);
+        };
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal.classList.contains('active')) {
+                modal.classList.remove('active');
+            }
+        });
+    }
+
+    // Show loading state
+    const title = modal.querySelector('.file-viewer-title');
+    const body = modal.querySelector('.file-viewer-body');
+    title.textContent = filename;
+    body.innerHTML = '<p>Loading...</p>';
+    modal.classList.add('active');
+
+    // Fetch file content from gateway
+    fetch('/api/view-file?path=' + encodeURIComponent(filePath))
+        .then(r => {
+            if (!r.ok) throw new Error('Failed to load file');
+            return r.json();
+        })
+        .then(data => {
+            body.dataset.rawContent = data.content;
+            // Render as markdown if .md file, otherwise as preformatted text
+            if (filename.endsWith('.md')) {
+                body.innerHTML = marked.parse(data.content);
+                setTimeout(() => renderMermaidDiagrams(body), 0);
+            } else {
+                const pre = document.createElement('pre');
+                const code = document.createElement('code');
+                code.textContent = data.content;
+                pre.appendChild(code);
+                body.innerHTML = '';
+                body.appendChild(pre);
+            }
+        })
+        .catch(err => {
+            body.innerHTML = '<p class="error">Error: ' + err.message + '</p>';
+        });
 }
 
 async function exportToMarkdown() {

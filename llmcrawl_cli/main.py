@@ -49,6 +49,11 @@ def main() -> None:
 
         claude_bridge_main()
 
+    elif command == "copilot-bridge":
+        from llmcrawl_cli.copilot_bridge import main as copilot_bridge_main
+
+        copilot_bridge_main()
+
     else:
         print(f"Unknown command: {command}")
         print_help()
@@ -58,17 +63,18 @@ def main() -> None:
 def print_help() -> None:
     """Print help message."""
     print(
-        """usage: llmcrawl [-h] [--version] {deploy,auth,wcd-bridge,claude-bridge} ...
+        """usage: llmcrawl [-h] [--version] {deploy,auth,wcd-bridge,claude-bridge,copilot-bridge} ...
 
 LLMCrawl - Web RAG System CLI
 
 positional arguments:
-  {deploy,auth,wcd-bridge,claude-bridge}
+  {deploy,auth,wcd-bridge,claude-bridge,copilot-bridge}
                         Available commands
     deploy              Manage LLMCrawl deployment (Docker Compose)
     auth                Authenticate to internal sites for crawling
     wcd-bridge          Start Windows Composition Database bridge
     claude-bridge       Start Claude Code CLI bridge for LLM routing
+    copilot-bridge      Start GitHub Copilot CLI bridge for LLM routing
 
 options:
   -h, --help            show this help message and exit
@@ -84,6 +90,8 @@ Examples:
   llmcrawl wcd-bridge --build "\\\\winbuilds\\release\\..."
   llmcrawl claude-bridge                    Start Claude Bridge (port 8006)
   llmcrawl claude-bridge --port 8007        Start Claude Bridge on custom port
+  llmcrawl copilot-bridge                   Start Copilot Bridge (port 8009)
+  llmcrawl copilot-bridge --port 8010       Start Copilot Bridge on custom port
 """
     )
 

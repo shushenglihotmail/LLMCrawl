@@ -4,6 +4,7 @@ Agent API router - Chat endpoint for code intelligence.
 Provides:
 - POST /agent/chat - Execute agent workflow with tool calling
 - GET /agent/health - Health check
+- GET /api/view-file?path=... - Read a saved file from disk
 """
 
 import fnmatch
@@ -30,7 +31,6 @@ from gateway.routers.tools import get_tool_handler
 from gateway.utils.auth import get_bearer_token
 from gateway.utils.azdo_uri import is_azdo_uri, parse_azdo_uri
 from gateway.utils.conversation_store import get_conversation_store
-from gateway.utils.file_store import get_file_store
 from gateway.utils.logging import log_request, log_response
 from gateway.utils.memory_integration import (
     append_to_daily_log_async,
@@ -562,29 +562,28 @@ def _apply_workflow_restrictions(workflow: WorkflowType, expose_to_llm: dict) ->
 
 
 def _file_download_prompt_section() -> str:
-    """Build the file download instruction section for system prompts."""
+    """Build the file save instruction section for system prompts."""
     return (
-        "\nFILE DOWNLOAD RULES (MANDATORY):\n"
+        "\nFILE SAVE RULES (MANDATORY):\n"
         "- When you retrieve file content using ANY tool (get_azure_devops_file, "
         "read_local_file, get_azure_devops_commit_changes, "
         "get_azure_devops_commit_file_diff, search_azure_devops_code, or any "
         "other file-retrieving tool), you MUST call save_file_for_download with "
-        "the content so the user can download the file from the chat UI.\n"
+        "the content to save it to disk.\n"
         "- When you generate reports, analysis summaries, code, scripts, "
         "configuration files, or any document the user would want to save, "
-        "you MUST call save_file_for_download to offer a download.\n"
+        "you MUST call save_file_for_download to save it to disk.\n"
         "- CRITICAL: If you are producing a multi-part deliverable (e.g. Part 1, "
         "Part 2, Part 3...), you MUST call save_file_for_download for EVERY part, "
         "including Part 1.  Do NOT write any part as inline text — save ALL parts "
-        "as downloadable files. Your text response should only be a brief summary "
+        "as files. Your text response should only be a brief summary "
         "of what you produced, not the file content itself.\n"
-        "- CRITICAL: NEVER say 'I have saved the file' or 'a download is available' "
-        "unless you have ACTUALLY called the save_file_for_download tool in this "
-        "conversation. Claiming a file was saved without calling the tool is "
-        "incorrect behavior.\n"
-        "- You do NOT need to include download links in your response text. "
-        "The chat UI will automatically show download buttons when you call "
-        "save_file_for_download.\n"
+        "- CRITICAL: NEVER say 'I have saved the file' unless you have ACTUALLY "
+        "called the save_file_for_download tool in this conversation.\n"
+        "- Files are saved directly to disk. The optional 'path' parameter lets "
+        "you specify a directory or full file path. If omitted, files are saved "
+        "to the current working directory.\n"
+        "- The chat UI will automatically show saved file paths with a viewer.\n"
         "- Use an appropriate filename with the correct file extension.\n"
         "- When writing a report or analysis, save the full report as a "
         "markdown file via save_file_for_download.\n\n"
@@ -1015,7 +1014,7 @@ async def _load_tools(
         logger.info("Exposed memory_search tool to LLM")
 
     # Always expose save_file_for_download tool when any tools are being loaded
-    # This lets the LLM offer file downloads to the user
+    # This lets the LLM save files directly to disk
     if tools:  # Only add if we have at least one other tool
         tools.append(
             {
@@ -1023,16 +1022,15 @@ async def _load_tools(
                 "function": {
                     "name": TOOL_SAVE_FILE_FOR_DOWNLOAD,
                     "description": (
-                        "Save content as a downloadable file for the user. "
+                        "Save content as a file on disk. "
                         "You MUST call this tool whenever you retrieve file "
                         "content from ANY source (get_azure_devops_file, "
                         "read_local_file, get_azure_devops_commit_file_diff, "
-                        "search_azure_devops_code, etc.) so the user can "
-                        "download files directly from the chat UI. "
+                        "search_azure_devops_code, etc.) so the user gets "
+                        "the file saved to disk. "
                         "Also call this when you generate reports, analysis, "
                         "code, scripts, or any document the user would want "
-                        "to keep. The user will see a download button "
-                        "automatically. NEVER claim you saved a file without "
+                        "to keep. NEVER claim you saved a file without "
                         "actually calling this tool."
                     ),
                     "parameters": {
@@ -1041,7 +1039,7 @@ async def _load_tools(
                             "filename": {
                                 "type": "string",
                                 "description": (
-                                    "Filename for the download. Include the file "
+                                    "Filename for the file. Include the file "
                                     "extension. Examples: 'easyBMT.ps1', "
                                     "'config.json', 'analysis.md'"
                                 ),
@@ -1053,12 +1051,13 @@ async def _load_tools(
                                     "complete content, not truncated."
                                 ),
                             },
-                            "content_type": {
+                            "path": {
                                 "type": "string",
                                 "description": (
-                                    "MIME type of the file. Default: 'text/plain'. "
-                                    "Examples: 'text/plain', 'application/json', "
-                                    "'text/markdown', 'text/x-powershell'"
+                                    "Optional directory or full file path where "
+                                    "the file should be saved. If a directory, "
+                                    "the filename is appended. If omitted, saves "
+                                    "to the current working directory."
                                 ),
                             },
                         },
@@ -1137,7 +1136,7 @@ async def _execute_llm_with_tools(
     """Execute LLM with tool calling loop.
 
     Returns:
-        (response_text, tokens_used, saved_file_ids)
+        (response_text, tokens_used, saved_files)
     """
     # Check for cancellation at start
     if _is_request_cancelled(conversation_id):
@@ -1149,8 +1148,8 @@ async def _execute_llm_with_tools(
     tool_round = 0
     # Track per-tool usage
     tool_usage: Dict[str, int] = {}
-    # Track file IDs saved during this request (avoids duplicates from prior messages)
-    saved_file_ids: list[str] = []
+    # Track files saved during this request
+    saved_files: list[dict] = []
     # Track elapsed time for time-budget enforcement
     agent_start_time = time.monotonic()
 
@@ -1167,6 +1166,7 @@ async def _execute_llm_with_tools(
         tools=tools if tools else None,
         tool_choice="auto" if tools else "none",
         bearer_token=bearer_token,
+        effort=request.effort,
     )
     response = cast(Dict[str, Any], response)
 
@@ -1195,8 +1195,8 @@ async def _execute_llm_with_tools(
             )
 
             # Still execute any pending save_file_for_download calls —
-            # they are cheap (in-memory only) and losing them is very
-            # visible to the user (broken download buttons).
+            # they are cheap (quick disk writes) and losing them is very
+            # visible to the user (missing saved files).
             save_calls = [
                 tc
                 for tc in response.get("tool_calls", [])
@@ -1208,12 +1208,6 @@ async def _execute_llm_with_tools(
                     f"call(s) despite budget exceeded"
                 )
                 for tc in save_calls:
-                    try:
-                        args = json.loads(tc["function"]["arguments"])
-                        args["conversation_id"] = conversation_id
-                        tc["function"]["arguments"] = json.dumps(args)
-                    except (json.JSONDecodeError, KeyError):
-                        pass
                     tool_result = await tool_handler.handle_tool_call(
                         tc,
                         request_id,
@@ -1222,8 +1216,14 @@ async def _execute_llm_with_tools(
                     messages.append(tool_result)
                     try:
                         rd = json.loads(tool_result["content"])
-                        if rd.get("file_id"):
-                            saved_file_ids.append(rd["file_id"])
+                        if rd.get("saved_path"):
+                            saved_files.append(
+                                {
+                                    "filename": rd.get("filename", ""),
+                                    "saved_path": rd["saved_path"],
+                                    "size": rd.get("size", 0),
+                                }
+                            )
                     except Exception:
                         pass
 
@@ -1260,6 +1260,7 @@ async def _execute_llm_with_tools(
                 tools=tools,
                 tool_choice="auto" if tools else "none",
                 bearer_token=bearer_token,
+                effort=request.effort,
             )
             wrap_text = wrap_response.get("content") or ""
             wrap_tokens = wrap_response.get("usage", {}).get("total_tokens")
@@ -1281,8 +1282,14 @@ async def _execute_llm_with_tools(
                     )
                     try:
                         rd = json.loads(result["content"])
-                        if rd.get("file_id"):
-                            saved_file_ids.append(rd["file_id"])
+                        if rd.get("saved_path"):
+                            saved_files.append(
+                                {
+                                    "filename": rd.get("filename", ""),
+                                    "saved_path": rd["saved_path"],
+                                    "size": rd.get("size", 0),
+                                }
+                            )
                     except Exception:
                         pass
 
@@ -1312,7 +1319,7 @@ async def _execute_llm_with_tools(
                         try:
                             rd = json.loads(result["content"])
                             if rd.get("file_id"):
-                                saved_file_ids.append(rd["file_id"])
+                                saved_files.append(rd["file_id"])
                         except Exception:
                             pass
                     # Strip the JSON blocks from the displayed text
@@ -1323,7 +1330,7 @@ async def _execute_llm_with_tools(
                 f"({elapsed:.0f}s elapsed, {tool_round - 1} tool rounds). "
                 f"Some tool calls were skipped.*"
             )
-            return (wrap_text + budget_note), wrap_tokens, saved_file_ids
+            return (wrap_text + budget_note), wrap_tokens, saved_files
 
         # Check which tools have exceeded their limits
         exceeded_tools = _check_tool_limits(response["tool_calls"], tool_usage)
@@ -1368,19 +1375,9 @@ async def _execute_llm_with_tools(
                 logger.info(
                     f"Request cancelled before tool execution: {conversation_id}"
                 )
-                return "*Request was cancelled by user.*", None, saved_file_ids
+                return "*Request was cancelled by user.*", None, saved_files
 
             tool_name = tool_call.get("function", {}).get("name", "unknown")
-
-            # Inject conversation_id for save_file_for_download so files
-            # are tracked per conversation
-            if tool_name == TOOL_SAVE_FILE_FOR_DOWNLOAD:
-                try:
-                    args = json.loads(tool_call["function"]["arguments"])
-                    args["conversation_id"] = conversation_id
-                    tool_call["function"]["arguments"] = json.dumps(args)
-                except (json.JSONDecodeError, KeyError):
-                    pass
 
             # Increment tool usage counter
             tool_usage[tool_name] = tool_usage.get(tool_name, 0) + 1
@@ -1404,9 +1401,15 @@ async def _execute_llm_with_tools(
                 if "hits" in result_data:
                     context_gathered["tool_executed_urls"] = len(result_data["hits"])
                 if tool_name == TOOL_SAVE_FILE_FOR_DOWNLOAD and result_data.get(
-                    "file_id"
+                    "saved_path"
                 ):
-                    saved_file_ids.append(result_data["file_id"])
+                    saved_files.append(
+                        {
+                            "filename": result_data.get("filename", ""),
+                            "saved_path": result_data["saved_path"],
+                            "size": result_data.get("size", 0),
+                        }
+                    )
             except Exception:
                 pass
 
@@ -1417,6 +1420,7 @@ async def _execute_llm_with_tools(
             tools=tools,
             tool_choice="auto",
             bearer_token=bearer_token,
+            effort=request.effort,
         )
 
         if not response.get("tool_calls"):
@@ -1429,7 +1433,7 @@ async def _execute_llm_with_tools(
     if not response_text and tool_round > 0:
         response_text = "Tool execution completed but no final response generated."
 
-    return response_text, tokens_used, saved_file_ids
+    return response_text, tokens_used, saved_files
 
 
 # =============================================================================
@@ -1592,7 +1596,7 @@ async def execute(
 
         # Step 5: Execute LLM with tools (with metrics)
         async with AgentActivityTimer("llm_loop") as llm_timer:
-            response_text, tokens_used, saved_file_ids = await _execute_llm_with_tools(
+            response_text, tokens_used, saved_files = await _execute_llm_with_tools(
                 request,
                 messages,
                 tools,
@@ -1620,25 +1624,15 @@ async def execute(
         conversation_store.add_message(conversation_id, "user", request.user_message)
         conversation_store.add_message(conversation_id, "assistant", response_text)
 
-        # Step 7: Collect downloadable files saved during this request only.
-        # Use the tracked file IDs rather than querying all conversation files,
-        # which would include files from prior messages (duplicates).
-        file_store = get_file_store()
-        if saved_file_ids:
-            # Deduplicate by filename — keep latest version if same name saved twice
+        # Step 7: Collect saved files from this request.
+        # Deduplicate by filename — keep latest version if same name saved twice.
+        if saved_files:
             seen_filenames: dict[str, dict[str, Any]] = {}
-            for fid in saved_file_ids:
-                stored = file_store.get(fid)
-                if stored:
-                    seen_filenames[stored.filename] = {
-                        "file_id": stored.file_id,
-                        "filename": stored.filename,
-                        "size": stored.size,
-                        "content_type": stored.content_type,
-                    }
-            downloadable_files = list(seen_filenames.values())
+            for sf in saved_files:
+                seen_filenames[sf["filename"]] = sf
+            deduped_files = list(seen_filenames.values())
         else:
-            downloadable_files = []
+            deduped_files = []
 
         result = UnifiedWorkflowResponse(
             response=response_text,
@@ -1646,7 +1640,7 @@ async def execute(
             model=request.model or "default",
             tokens_used=tokens_used,
             context_gathered=context_gathered,
-            downloadable_files=downloadable_files,
+            saved_files=deduped_files,
         )
 
         # Record successful agent request
@@ -1744,6 +1738,33 @@ async def health_check() -> Any:
         return JSONResponse(
             status_code=503, content={"status": "unhealthy", "error": str(e)}
         )
+
+
+# =============================================================================
+# File Viewer Endpoint
+# =============================================================================
+
+
+@router.get("/api/view-file")
+async def view_file(path: str) -> Any:
+    """Read a saved file from disk and return its content for viewing."""
+    from pathlib import Path
+
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        return {
+            "filename": file_path.name,
+            "content": content,
+            "size": len(content.encode("utf-8")),
+        }
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {path}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
 
 
 # =============================================================================

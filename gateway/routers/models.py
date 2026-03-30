@@ -14,6 +14,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from gateway.utils.claude_bridge_manager import get_claude_bridge_manager
+from gateway.utils.copilot_bridge_manager import get_copilot_bridge_manager
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class ModelInfo(BaseModel):
 
     name: str
     display_name: str
+    provider: str = ""  # e.g. "azure", "claude", "copilot" — for UI grouping
 
 
 def get_available_models() -> List[ModelInfo]:
@@ -45,6 +47,7 @@ def get_available_models() -> List[ModelInfo]:
                 ModelInfo(
                     name=model["name"],
                     display_name=model.get("display_name", model["name"]),
+                    provider=model.get("provider_type", "azure"),
                 )
             )
 
@@ -69,7 +72,7 @@ async def list_available_models():
     """
     models = get_available_models()
 
-    # Append Claude models cached at startup
+    # Append Claude CLI models cached at startup
     bridge_mgr = get_claude_bridge_manager()
     if bridge_mgr.available:
         existing_names = {m.name for m in models}
@@ -79,6 +82,21 @@ async def list_available_models():
                     ModelInfo(
                         name=cm["name"],
                         display_name=cm["display_name"],
+                        provider="claude",
+                    )
+                )
+
+    # Append Copilot CLI models cached at startup
+    copilot_mgr = get_copilot_bridge_manager()
+    if copilot_mgr.available:
+        existing_names = {m.name for m in models}
+        for cm in copilot_mgr.cached_models:
+            if cm["name"] not in existing_names:
+                models.append(
+                    ModelInfo(
+                        name=cm["name"],
+                        display_name=cm["display_name"],
+                        provider="copilot",
                     )
                 )
 

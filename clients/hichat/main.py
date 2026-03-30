@@ -367,35 +367,27 @@ async def distill_memory(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Invalid JSON in request body")
 
 
-@app.get("/api/files/{file_id}")
-async def download_file(file_id: str):
-    """Proxy file download from gateway's in-memory file store."""
+@app.get("/api/view-file")
+async def view_file(path: str):
+    """Proxy file view request to gateway to read saved files from disk."""
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(f"{config['gateway_url']}/api/files/{file_id}")
+            response = await client.get(
+                f"{config['gateway_url']}/agent/api/view-file",
+                params={"path": path},
+            )
 
             if response.status_code != 200:
                 raise HTTPException(
                     status_code=response.status_code,
-                    detail="File not found or expired.",
+                    detail=response.json().get("detail", "File not found."),
                 )
 
-            # Forward the response with original headers
-            from fastapi.responses import Response
-
-            return Response(
-                content=response.content,
-                media_type=response.headers.get("content-type", "text/plain"),
-                headers={
-                    "Content-Disposition": response.headers.get(
-                        "content-disposition", "attachment"
-                    ),
-                },
-            )
+            return response.json()
 
     except httpx.HTTPError as e:
-        logger.error(f"File download proxy failed: {e}")
-        raise HTTPException(status_code=502, detail=f"File download failed: {str(e)}")
+        logger.error(f"File view proxy failed: {e}")
+        raise HTTPException(status_code=502, detail=f"File view failed: {str(e)}")
 
 
 @app.post("/api/files/browse")

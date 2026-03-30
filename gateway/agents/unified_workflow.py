@@ -118,6 +118,11 @@ class UnifiedWorkflowRequest(BaseModel):
 
     crawl_depth: int = Field(1, description="Depth for web crawling (1-5)")
 
+    effort: Optional[str] = Field(
+        None,
+        description="Reasoning effort level for CLI models (low, medium, high, max/xhigh)",
+    )
+
 
 class UnifiedWorkflowResponse(BaseModel):
     """Response from unified workflow execution."""
@@ -131,10 +136,10 @@ class UnifiedWorkflowResponse(BaseModel):
         default_factory=dict, description="Summary of context gathered by agent"
     )
 
-    downloadable_files: list = Field(
+    saved_files: list = Field(
         default_factory=list,
-        description="Files available for download (saved by LLM during tool calling)",
+        description="Files saved to disk by LLM during tool calling",
     )
     # Example: [
-    #     {"file_id": "uuid", "filename": "easyBMT.ps1", "size": 4280}
+    #     {"filename": "easyBMT.ps1", "saved_path": "C:/output/easyBMT.ps1", "size": 4280}
     # ]

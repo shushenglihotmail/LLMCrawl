@@ -114,12 +114,45 @@ class ClaudeBridgeManager:
                 if attempt < max_retries:
                     await asyncio.sleep(retry_delay)
 
+        # Try local CLI detection as fallback
+        from gateway.llm.cli_providers import ClaudeCLIProvider
+
+        cli = ClaudeCLIProvider()
+        if cli.available:
+            # Use curated model list (matches Claude Code CLI /model list)
+            from gateway.llm.cli_providers import CLAUDE_KNOWN_MODELS
+
+            self._cached_models = []
+            self._claude_model_names = set()
+            for name, display_name in CLAUDE_KNOWN_MODELS:
+                self._cached_models.append({"name": name, "display_name": display_name})
+                self._claude_model_names.add(name)
+
+            self.available = True
+            logger.info(f"Claude CLI available — {len(self._cached_models)} models")
+            return True
+
         logger.warning(
-            "Claude Bridge not available after all retries — "
+            "Claude not available (no CLI found, no bridge running) — "
             "gateway will start without Claude models"
         )
         self.available = False
         return False
+
+    @staticmethod
+    def _read_api_key() -> Optional[str]:
+        """Read primaryApiKey from ~/.claude.json."""
+        try:
+            import json
+            from pathlib import Path
+
+            config_path = Path.home() / ".claude.json"
+            if config_path.exists():
+                data = json.loads(config_path.read_text(encoding="utf-8"))
+                return data.get("primaryApiKey")
+        except Exception:
+            pass
+        return None
 
 
 # ---------------------------------------------------------------------------

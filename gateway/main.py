@@ -3,16 +3,22 @@ FastAPI Gateway Service - Main orchestrator for the Web RAG system.
 Handles chat interactions, tool calling, and coordinates with crawler/indexer services.
 """
 
-import os
-from contextlib import asynccontextmanager
+import os  # noqa: E402
+
+# Strip NODE_OPTIONS early — it can break Node.js-based CLI subprocesses
+# (e.g. Copilot, Claude) with errors like "unknown option '--no-warnings'".
+os.environ.pop("NODE_OPTIONS", None)
+
+from contextlib import asynccontextmanager  # noqa: E402
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from .routers import agent, export, files, models
+from .routers import agent, export, models
 from .utils.claude_bridge_manager import get_claude_bridge_manager
+from .utils.copilot_bridge_manager import get_copilot_bridge_manager
 from .utils.logging import get_logger, setup_logging
 from .utils.metrics import record_service_error, set_service_up
 from .utils.token_context import set_token
@@ -32,10 +38,13 @@ async def lifespan(app: FastAPI):
         # Mark service as up
         set_service_up("gateway", True)
 
-        # Probe Claude Bridge (host-side) and cache available models.
-        # If the bridge isn't running, gateway starts without Claude models.
+        # Probe Claude CLI/Bridge and cache available models.
         bridge_mgr = get_claude_bridge_manager()
         await bridge_mgr.probe_and_discover(max_retries=3, retry_delay=2.0)
+
+        # Probe Copilot CLI/Bridge and cache available models.
+        copilot_mgr = get_copilot_bridge_manager()
+        await copilot_mgr.probe_and_discover(max_retries=2, retry_delay=1.0)
 
         logger.info("Gateway service started successfully")
         yield
@@ -86,7 +95,7 @@ app.add_middleware(
 app.include_router(export.router, prefix="/api/v1")  # Export endpoints
 app.include_router(agent.router)  # Agent router has its own /agent prefix
 app.include_router(models.router, prefix="/api")  # Models endpoint
-app.include_router(files.router)  # File download endpoint (in-memory store)
+# File download endpoint removed — files are now saved directly to disk
 
 # Setup Prometheus metrics
 Instrumentator().instrument(app).expose(app)
@@ -103,7 +112,7 @@ async def root():
             "agent": "/agent/chat",
             "export": "/api/v1/export/markdown",
             "download": "/api/v1/export/download/{filename}",
-            "files": "/api/files/{file_id}",
+            "view_file": "/api/view-file?path=...",
             "health": "/health",
             "docs": "/docs",
         },

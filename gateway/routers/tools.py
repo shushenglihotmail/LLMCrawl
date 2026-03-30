@@ -13,7 +13,6 @@ import httpx
 
 from ..agents.windows_composition import get_composition_client
 from ..utils.azdo_uri import is_azdo_uri, parse_azdo_uri
-from ..utils.file_store import get_file_store
 from ..utils.logging import log_tool_call, log_tool_result
 from ..utils.metrics import (
     classify_error,
@@ -537,22 +536,21 @@ class ToolHandler:
         """
         Handle save_file_for_download tool call.
 
-        Stores file content in the in-memory file store and returns
-        metadata that the gateway will include in the response JSON.
-        The LLM does NOT need to construct download URLs — the gateway
-        and HiChat handle that automatically.
+        Writes file content directly to disk.  The gateway runs on the
+        host and has full filesystem access.
 
         Args:
-            arguments: Tool arguments (filename, content, content_type)
+            arguments: Tool arguments (filename, content, path)
             request_id: Request tracking ID
 
         Returns:
-            Dict with file_id and metadata for the LLM to acknowledge
+            Dict with saved_path and metadata for the LLM to acknowledge
         """
+        from pathlib import Path
+
         filename = arguments.get("filename")
         content = arguments.get("content")
-        content_type = arguments.get("content_type", "text/plain")
-        conversation_id = arguments.get("conversation_id")
+        save_path = arguments.get("path")
 
         if not filename:
             return {"error": "filename parameter is required"}
@@ -560,35 +558,44 @@ class ToolHandler:
             return {"error": "content parameter is required"}
 
         try:
-            store = get_file_store()
-            stored = store.store(
-                filename=filename,
-                content=content,
-                content_type=content_type,
-                conversation_id=conversation_id,
-            )
+            # Resolve the target file path
+            if save_path:
+                target = Path(save_path)
+                if target.is_dir() or not target.suffix:
+                    # path is a directory — append filename
+                    target = target / filename
+            else:
+                # Default to current working directory
+                target = Path.cwd() / filename
 
+            # Create parent directories if needed
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write file to disk
+            size = len(content.encode("utf-8"))
+            target.write_text(content, encoding="utf-8")
+
+            resolved = str(target.resolve())
             logger.info(
-                f"File stored for download: {filename} "
-                f"({stored.size} bytes) -> {stored.file_id}"
+                f"File saved to disk: {filename} " f"({size} bytes) -> {resolved}"
             )
 
             return {
                 "success": True,
-                "file_id": stored.file_id,
-                "filename": stored.filename,
-                "size": stored.size,
+                "filename": filename,
+                "saved_path": resolved,
+                "size": size,
                 "message": (
-                    f"File '{filename}' ({stored.size} bytes) has been saved. "
-                    f"The user will see a download button in the chat UI. "
-                    f"You do NOT need to include a download link in your response."
+                    f"File '{filename}' ({size} bytes) saved to {resolved}. "
+                    f"The user will see the file path in the chat UI."
                 ),
             }
-        except ValueError as e:
-            return {"error": str(e)}
+        except PermissionError as e:
+            logger.error(f"Permission denied saving file: {e}")
+            return {"error": f"Permission denied: {e}"}
         except Exception as e:
-            logger.error(f"Failed to store file: {e}")
-            return {"error": f"Failed to store file: {e}"}
+            logger.error(f"Failed to save file: {e}")
+            return {"error": f"Failed to save file: {e}"}
 
     async def _handle_memory_search(
         self, arguments: Dict[str, Any], request_id: str

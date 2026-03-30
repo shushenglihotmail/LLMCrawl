@@ -1,5 +1,5 @@
 """
-LLM client for OpenAI, Azure OpenAI, and Anthropic integration.
+LLM client for OpenAI, Azure OpenAI, Anthropic, Claude CLI, and Copilot CLI.
 Handles chat completions, tool calling, and streaming.
 """  # noqa: F401
 
@@ -47,7 +47,9 @@ class LLMClient:
                 f"Azure OpenAI client initialized (Entra ID auth: {api_key == 'dummy-key-for-entra-id'})"
             )
         else:
-            self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            # API key may not be set if user only uses CLI providers (Claude/Copilot)
+            openai_key = os.getenv("OPENAI_API_KEY", "")
+            self.openai_client = AsyncOpenAI(api_key=openai_key or "unused")
 
         # Store Anthropic endpoint configuration for direct HTTP calls
         self.anthropic_endpoint = (
@@ -62,6 +64,17 @@ class LLMClient:
         self.claude_bridge_url = os.getenv("CLAUDE_BRIDGE_URL")
         if self.claude_bridge_url:
             logger.info(f"Claude Bridge configured: {self.claude_bridge_url}")
+
+        # Copilot Bridge configuration (host-side Copilot CLI bridge)
+        self.copilot_bridge_url = os.getenv("COPILOT_BRIDGE_URL")
+        if self.copilot_bridge_url:
+            logger.info(f"Copilot Bridge configured: {self.copilot_bridge_url}")
+
+        # Direct CLI providers (preferred over HTTP bridges when available)
+        from gateway.llm.cli_providers import ClaudeCLIProvider, CopilotCLIProvider
+
+        self.claude_cli = ClaudeCLIProvider()
+        self.copilot_cli = CopilotCLIProvider()
 
         # For backward compatibility
         self.client = self.openai_client
@@ -130,21 +143,23 @@ class LLMClient:
 
     def get_model_config(self, model_name: str) -> tuple[str, str, int]:
         """
-        Get Azure deployment name, provider type, and max output tokens for a given model name.
+        Resolve model name to (deployment_name, provider_type, max_output_tokens).
 
-        For Azure: Maps from model name (user selection) to deployment_name, provider_type, and max_output_tokens.
-        For OpenAI: Returns model_name as-is with 'openai' provider and default max tokens.
+        Resolution priority:
+        1. LLM_MODELS config — explicit provider_type set by user (e.g. openai,
+           anthropic, claude, copilot).  Highest priority so users can override
+           any automatic detection.
+        2. Claude CLI/Bridge — model discovered at startup from Anthropic API.
+        3. Copilot CLI/Bridge — model from hardcoded known-models list.
+        4. Default LLM_PROVIDER fallback (self.provider, e.g. "openai").
 
         Args:
-            model_name: The model name selected by user (e.g., 'claude-sonnet-4-5')
+            model_name: The model name selected by user
 
         Returns:
             Tuple of (deployment_name, provider_type, max_output_tokens)
         """
-        if self.provider != "azure":
-            return model_name, "openai", DEFAULT_MAX_RESPONSE_TOKENS
-
-        # Parse LLM_MODELS to find deployment_name, provider_type, and max_output_tokens
+        # --- 1. Explicit config in LLM_MODELS (highest priority) ---
         try:
             models_json = os.getenv("LLM_MODELS", "[]")
             models_config = json.loads(models_json)
@@ -153,38 +168,42 @@ class LLMClient:
                 if model.get("name") == model_name:
                     deployment_name = model.get("deployment_name", model_name)
                     provider_type = model.get("provider_type", "openai")
-                    # Get max_output_tokens from config, or use provider-specific defaults
                     max_output_tokens = model.get("max_output_tokens")
                     if max_output_tokens is None:
-                        # Provider-specific defaults
-                        if provider_type == "anthropic":
-                            max_output_tokens = 64000  # Claude supports up to 64K
+                        if provider_type in ("anthropic", "claude"):
+                            max_output_tokens = 64000
                         else:
-                            max_output_tokens = 16384  # GPT-4 supports up to 16K
+                            max_output_tokens = 16384
                     logger.info(
-                        f"Resolved model '{model_name}' to deployment '{deployment_name}' "
-                        f"(provider: {provider_type}, max_output_tokens: {max_output_tokens})"
+                        f"Model '{model_name}' -> '{deployment_name}' "
+                        f"(provider: {provider_type}, from LLM_MODELS config)"
                     )
                     return deployment_name, provider_type, max_output_tokens
-
-            # Model not found in config — check if it's a Claude model
-            # discovered from the bridge at startup
-            from gateway.utils.claude_bridge_manager import get_claude_bridge_manager
-
-            bridge_mgr = get_claude_bridge_manager()
-            if bridge_mgr.is_claude_model(model_name):
-                logger.info(f"Model '{model_name}' routed to Claude Bridge")
-                return model_name, "claude", DEFAULT_MAX_RESPONSE_TOKENS
-
-            # Model not found in config, assume OpenAI with default
-            logger.warning(
-                f"Model '{model_name}' not found in LLM_MODELS config, assuming OpenAI"
-            )
-            return model_name, "openai", DEFAULT_MAX_RESPONSE_TOKENS
-
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse LLM_MODELS: {e}")
-            return model_name, "openai", DEFAULT_MAX_RESPONSE_TOKENS
+
+        # --- 2. Claude CLI/Bridge (discovered at startup) ---
+        from gateway.utils.claude_bridge_manager import get_claude_bridge_manager
+
+        claude_mgr = get_claude_bridge_manager()
+        if claude_mgr.is_claude_model(model_name):
+            logger.info(f"Model '{model_name}' -> Claude CLI/Bridge")
+            return model_name, "claude", DEFAULT_MAX_RESPONSE_TOKENS
+
+        # --- 3. Copilot CLI/Bridge (discovered at startup) ---
+        from gateway.utils.copilot_bridge_manager import get_copilot_bridge_manager
+
+        copilot_mgr = get_copilot_bridge_manager()
+        if copilot_mgr.is_copilot_model(model_name):
+            logger.info(f"Model '{model_name}' -> Copilot CLI/Bridge")
+            return model_name, "copilot", DEFAULT_MAX_RESPONSE_TOKENS
+
+        # --- 4. Default LLM_PROVIDER fallback ---
+        logger.warning(
+            f"Model '{model_name}' not in LLM_MODELS or CLI providers, "
+            f"falling back to LLM_PROVIDER={self.provider}"
+        )
+        return model_name, self.provider, DEFAULT_MAX_RESPONSE_TOKENS
 
     async def chat_completion(
         self,
@@ -196,6 +215,7 @@ class LLMClient:
         max_tokens: Optional[int] = None,
         stream: bool = False,
         bearer_token: Optional[str] = None,
+        effort: Optional[str] = None,
     ) -> Dict[str, Any] | AsyncGenerator[Dict[str, Any], None]:
         """
         Create a chat completion with optional tool calling.
@@ -238,14 +258,25 @@ class LLMClient:
                 )
 
             # Route to appropriate client based on provider type
-            if provider_type == "claude":
-                return await self._claude_bridge_chat_completion(
+            if provider_type == "copilot":
+                return await self._copilot_chat_completion(
                     deployment_name,
                     messages,
                     tools,
                     tool_choice,
                     temperature,
                     effective_max_tokens,
+                    effort=effort,
+                )
+            elif provider_type == "claude":
+                return await self._claude_chat_completion(
+                    deployment_name,
+                    messages,
+                    tools,
+                    tool_choice,
+                    temperature,
+                    effective_max_tokens,
+                    effort=effort,
                 )
             elif provider_type == "anthropic":
                 return await self._anthropic_chat_completion(
@@ -623,6 +654,262 @@ class LLMClient:
                 completion_tokens=completion_tokens,
                 request_size=request_size,
                 response_size=response_size,
+                error_type=error_type,
+            )
+
+    def _build_tools_system_prompt(
+        self, tools: Optional[List[Dict[str, Any]]]
+    ) -> Optional[str]:
+        """Build a system prompt with tool definitions for CLI providers."""
+        if not tools:
+            return None
+        tool_schemas = []
+        for tool in tools:
+            fn = tool.get("function", {})
+            schema_entry = {
+                "name": fn.get("name", ""),
+                "description": fn.get("description", ""),
+                "parameters": fn.get("parameters", {}),
+            }
+            tool_schemas.append(schema_entry)
+
+        tools_json = json.dumps(tool_schemas, indent=2)
+        return (
+            "You have access to the following tools:\n\n"
+            f"{tools_json}\n\n"
+            "IMPORTANT: When you need to call a tool, respond with "
+            "JSON objects in this EXACT format (each in its own ```json block):\n"
+            "```json\n"
+            "{\n"
+            '  "tool_name": "<tool_name>",\n'
+            '  "arguments": { <arguments matching the tool\'s parameters> }\n'
+            "}\n"
+            "```\n\n"
+            "Rules for tool calling:\n"
+            "1. Output ONLY the JSON block(s) when calling tools — no explanation before or after\n"
+            "2. Use the exact tool name from the list above\n"
+            "3. Include all required parameters\n"
+            "4. If you do NOT need to call a tool, respond normally with text\n"
+            "5. You may call multiple tools in one response — use a separate ```json block for each\n"
+            "6. NEVER repeat or echo back tool call arguments (especially file content) in your text responses"
+        )
+
+    async def _claude_chat_completion(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]],
+        tool_choice: str,
+        temperature: float,
+        max_tokens: int,
+        effort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Handle Claude chat completion — try direct CLI first, fall back to HTTP bridge."""
+        tools_system = self._build_tools_system_prompt(tools)
+
+        # Try direct CLI first
+        if self.claude_cli.available:
+            start_time = time.time()
+            status = "success"
+            error_type = None
+            try:
+                result = await self.claude_cli.run_chat(
+                    model=model,
+                    messages=messages,
+                    system_prompt=tools_system,
+                    effort=effort,
+                )
+                # Extract tool calls from response if tools were passed
+                if tools and not result.get("tool_calls"):
+                    all_calls = self._try_convert_all_json_tool_calls(
+                        result.get("content", ""), tools
+                    )
+                    if all_calls:
+                        names = [c["function"]["name"] for c in all_calls]
+                        logger.info(
+                            f"Claude CLI: converted {len(all_calls)} JSON "
+                            f"tool call(s): {names}"
+                        )
+                        result["tool_calls"] = all_calls
+                        result["content"] = self._strip_all_json_from_content(
+                            result.get("content", "")
+                        )
+                return result
+            except Exception as e:
+                status = "error"
+                error_type = type(e).__name__
+                logger.error(f"Claude CLI failed: {e}")
+                # Fall through to HTTP bridge if available
+                if not self.claude_bridge_url:
+                    raise Exception(f"Claude CLI error: {e}") from e
+                logger.info("Falling back to Claude HTTP bridge")
+            finally:
+                duration = time.time() - start_time
+                record_llm_request(
+                    model=model,
+                    provider="claude_cli",
+                    status=status,
+                    duration=duration,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    request_size=0,
+                    response_size=0,
+                    error_type=error_type,
+                )
+
+        # Fall back to HTTP bridge
+        return await self._claude_bridge_chat_completion(
+            model, messages, tools, tool_choice, temperature, max_tokens
+        )
+
+    async def _copilot_chat_completion(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]],
+        tool_choice: str,
+        temperature: float,
+        max_tokens: int,
+        effort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Handle Copilot chat completion — try direct CLI first, fall back to HTTP bridge."""
+        tools_system = self._build_tools_system_prompt(tools)
+
+        # Try direct CLI first
+        if self.copilot_cli.available:
+            start_time = time.time()
+            status = "success"
+            error_type = None
+            try:
+                result = await self.copilot_cli.run_chat(
+                    model=model,
+                    messages=messages,
+                    system_prompt=tools_system,
+                    effort=effort,
+                )
+                # Extract tool calls from response if tools were passed
+                if tools and not result.get("tool_calls"):
+                    all_calls = self._try_convert_all_json_tool_calls(
+                        result.get("content", ""), tools
+                    )
+                    if all_calls:
+                        names = [c["function"]["name"] for c in all_calls]
+                        logger.info(
+                            f"Copilot CLI: converted {len(all_calls)} JSON "
+                            f"tool call(s): {names}"
+                        )
+                        result["tool_calls"] = all_calls
+                        result["content"] = self._strip_all_json_from_content(
+                            result.get("content", "")
+                        )
+                return result
+            except Exception as e:
+                status = "error"
+                error_type = type(e).__name__
+                logger.error(f"Copilot CLI failed: {e}")
+                if not self.copilot_bridge_url:
+                    raise Exception(f"Copilot CLI error: {e}") from e
+                logger.info("Falling back to Copilot HTTP bridge")
+            finally:
+                duration = time.time() - start_time
+                record_llm_request(
+                    model=model,
+                    provider="copilot_cli",
+                    status=status,
+                    duration=duration,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    request_size=0,
+                    response_size=0,
+                    error_type=error_type,
+                )
+
+        # Fall back to HTTP bridge
+        if not self.copilot_bridge_url:
+            raise Exception(
+                "Copilot CLI not available and COPILOT_BRIDGE_URL not configured."
+            )
+        return await self._copilot_bridge_chat_completion(
+            model, messages, tools, tool_choice, temperature, max_tokens
+        )
+
+    async def _copilot_bridge_chat_completion(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]],
+        tool_choice: str,
+        temperature: float,
+        max_tokens: int,
+    ) -> Dict[str, Any]:
+        """Handle chat completion via the host-side Copilot Bridge HTTP service."""
+        start_time = time.time()
+        status = "success"
+        error_type = None
+
+        payload: Dict[str, Any] = {"model": model, "messages": messages}
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
+        if temperature is not None:
+            payload["temperature"] = temperature
+
+        tools_system = self._build_tools_system_prompt(tools)
+        if tools_system:
+            payload["system_prompt"] = tools_system
+
+        try:
+            async with httpx.AsyncClient(timeout=1860.0) as client:
+                response = await client.post(
+                    f"{self.copilot_bridge_url.rstrip('/')}/chat",
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            content = data.get("content", "")
+            usage = data.get("usage", {})
+
+            result = {
+                "content": content,
+                "role": "assistant",
+                "finish_reason": data.get("finish_reason", "end_turn"),
+                "usage": usage,
+            }
+
+            if tools and not result.get("tool_calls"):
+                all_calls = self._try_convert_all_json_tool_calls(content, tools)
+                if all_calls:
+                    result["tool_calls"] = all_calls
+                    result["content"] = self._strip_all_json_from_content(content)
+
+            return result
+
+        except httpx.HTTPStatusError as e:
+            status = "error"
+            error_type = "HTTPStatusError"
+            detail = e.response.text[:500]
+            raise Exception(
+                f"Copilot Bridge error ({e.response.status_code}): {detail}"
+            ) from e
+        except httpx.TimeoutException:
+            status = "error"
+            error_type = "TimeoutException"
+            raise Exception("Copilot Bridge timeout: request took too long (>1860s)")
+        except Exception as e:
+            status = "error"
+            error_type = type(e).__name__
+            raise Exception(f"Copilot Bridge error: {str(e)}") from e
+        finally:
+            duration = time.time() - start_time
+            record_llm_request(
+                model=model,
+                provider="copilot_bridge",
+                status=status,
+                duration=duration,
+                prompt_tokens=0,
+                completion_tokens=0,
+                request_size=0,
+                response_size=0,
                 error_type=error_type,
             )
 
