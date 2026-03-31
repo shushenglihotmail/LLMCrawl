@@ -1,6 +1,6 @@
 # External Integrations
 
-**Analysis Date:** 2026-03-29
+**Analysis Date:** 2026-03-31
 
 ## LLM Provider Integrations
 
@@ -20,6 +20,7 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 - Auth: `AZURE_OPENAI_API_KEY` or Entra ID bearer token
 - Implementation: `gateway/llm/client.py` method `_anthropic_chat_completion()`
 - Converts OpenAI-format messages to Anthropic format
+- Context limit: 200,000 tokens (defined in `gateway/utils/prompt_compressor.py`)
 
 **Claude Code CLI (`provider_type: "claude"`):**
 - Direct subprocess execution of `claude.exe` CLI
@@ -27,7 +28,9 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 - CLI discovery: `CLAUDE_CLI_PATH` env var > PATH > Windows default locations
 - Output format: `--output-format stream-json` parsed by `_parse_stream_json()`
 - Models: `sonnet`, `sonnet[1m]`, `opus`, `opus[1m]`, `haiku` (defined in `CLAUDE_KNOWN_MODELS`)
+- Effort levels: low, medium, high, max (maps `xhigh` -> `max`)
 - Timeout: 1800s per request
+- Flags: `--no-session-persistence`, `--tools ""` (disables built-in tools)
 - Fallback: HTTP bridge at `CLAUDE_BRIDGE_URL` (port 8006) via `tools/claude_bridge.py`
 
 **GitHub Copilot CLI (`provider_type: "copilot"`):**
@@ -36,7 +39,9 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 - CLI discovery: `COPILOT_CLI_PATH` env var > PATH (skip .bat wrappers) > Windows default locations
 - Output format: `--output-format json` (JSONL) parsed by `_parse_copilot_jsonl()`
 - Models: Claude variants + GPT-5.x + GPT-4.1 (defined in `COPILOT_KNOWN_MODELS`)
+- Effort levels: low, medium, high, xhigh (maps `max` -> `xhigh`)
 - Tools disabled via `--available-tools=` flag to act as pure LLM endpoint
+- Flags: `-s` (silent), `--no-custom-instructions`
 - Timeout: 1800s per request
 - Fallback: HTTP bridge at `COPILOT_BRIDGE_URL` (port 8009) via `tools/copilot_bridge.py`
 
@@ -58,8 +63,9 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 
 **Windows Composition Database Bridge (`tools/windows_composition_bridge.py`):**
 - Port: 8005
-- Purpose: Windows Composition Database queries
+- Purpose: Windows Composition Database queries (Windows-only, runs on host)
 - Tool constant: `TOOL_QUERY_COMPOSITION_DB` in `gateway/utils/tool_constants.py`
+- Config: `WIN_COMP_BRIDGE_URL=http://host.docker.internal:8005`
 
 ## Data Storage
 
@@ -69,6 +75,7 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 - Used by: Firecrawl (crawl metadata), Indexer (pgvector embeddings)
 - Connection: `PG_DSN=postgresql://postgres:password@postgres:5432/rag_db` (indexer)
 - Init script: `deploy/nuq.sql`
+- Adapter: `indexer/adapters/pgvector_adapter.py`
 
 **Qdrant v1.7.0:**
 - Image: `qdrant/qdrant:v1.7.0`
@@ -92,7 +99,7 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 - Connection: `redis://redis:6379`
 
 **File Storage:**
-- Memory service markdown files at `MEMORY_DATA_PATH` (default `/data/memory`)
+- Memory service markdown files at `MEMORY_DATA_PATH` (default `/data/memory` in Docker, `./memory` locally)
 - Layout: `{MEMORY_DATA_PATH}/daily/YYYY-MM-DD.md` (daily logs), `{MEMORY_DATA_PATH}/MEMORY.md` (durable facts)
 - Gateway conversation store: in-memory with 24h TTL (`gateway/utils/conversation_store.py`)
 
@@ -103,19 +110,21 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 - Port: 3002
 - Client: `crawler/clients/firecrawl_client.py`
 - Dependencies: PostgreSQL + Redis + Playwright
+- Config: `FIRECRAWL_URL`, `FIRECRAWL_AUTH_TYPE` (none|cookies|headers|basic|bearer)
 
 **Playwright Service:**
 - Image: `ghcr.io/firecrawl/playwright-service:latest`
 - Port: 3003
 - Purpose: JS-heavy page rendering fallback
 - Client: `crawler/clients/playwright_client.py`
+- Config: `CONCURRENT=5`, `TIMEOUT=300000`
 
 **Trafilatura:**
 - Library: `trafilatura` >=1.6.0
 - Extractor: `crawler/extractors/trafilatura_extractor.py`
 - Purpose: Content extraction from HTML
 
-## MCP Servers
+## MCP Servers (Tool Providers)
 
 **Azure DevOps MCP Server:**
 - Location: `mcp_servers/azure_devops_mcp_server/`
@@ -124,6 +133,7 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 - Auth: PAT (`AZURE_DEVOPS_PAT`) or MSAL (`AZURE_DEVOPS_AUTH_MODE=pat|msal`)
 - Config: `AZURE_DEVOPS_ORG`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_REPO`, `AZURE_DEVOPS_BRANCH`
 - SDK: `azure-devops` >=7.1.0b3, `msal` >=1.24.0
+- Gateway discovers tools via `GET /tools` endpoint, converts to OpenAI format with `convert_mcp_tool_to_openai()`
 
 **Local Access MCP Server:**
 - Location: `mcp_servers/local_access_mcp_server/`
@@ -138,11 +148,15 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 - Location: `mcp_servers/wcd_bridge_mcp_server/`
 - Tool: `query_composition_db`
 
+**Gateway-native Tools (no MCP server):**
+- `save_file_for_download` - File download tool defined in `gateway/utils/tool_constants.py`
+- `memory_search` - Memory search tool calling memory service HTTP API
+
 ## Memory Service
 
 **Service:** `services/memory_service/main.py`
 - Port: 8007
-- Library: `memsearch` (MemSearch class with `memsearch.watch()` for auto-indexing)
+- Library: `memsearch` (MemSearch class with `memsearch.watch()` for auto-indexing file changes)
 - Embeddings: Local sentence-transformers (`EMBEDDING_PROVIDER=local`)
 - Vector store: Milvus (via pymilvus)
 
@@ -163,24 +177,32 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 
 **Azure Entra ID (Token-based):**
 - Used for: Azure OpenAI, Azure Anthropic endpoints
-- Config: `ENTRA_CLIENT_ID`, `ENTRA_TENANT_ID`
-- Implementation: Bearer token passed through gateway middleware (`gateway/main.py` lines 68-76)
+- Config: `ENTRA_CLIENT_ID`, `ENTRA_TENANT_ID`, `AZURE_FOUNDRY_SCOPE`
+- JWT validation: `JWT_VALIDATION_ENABLED` (optional, using `PyJWT` + `cryptography`)
 - MSAL client: `clients/hichat/msal_auth.py`, `tools/msauth/authenticate.py`
+- Token passed as bearer in gateway middleware via `gateway/utils/token_context.py`
 
 **Azure DevOps Auth:**
 - PAT: `AZURE_DEVOPS_PAT` env var
 - MSAL: Via `msal` library with `AZURE_DEVOPS_AUTH_MODE`
-- Config in: `deploy/docker-compose.dev.yml` (azure-devops-mcp-server service)
 
-**API Keys:**
+**API Keys (deprecated in favor of Entra ID):**
 - `AZURE_OPENAI_API_KEY` - OpenAI/Anthropic Azure endpoints (optional with Entra ID)
 - `OPENAI_API_KEY` - Direct OpenAI API (optional, only if provider=openai)
+
+**Crawl Authentication:**
+- `FIRECRAWL_AUTH_TYPE` - none|cookies|headers|basic|bearer
+- `llmcrawl auth <url>` CLI command captures browser cookies for authenticated crawling
 
 ## Monitoring & Observability
 
 **Metrics:**
-- Prometheus FastAPI Instrumentator - Auto-instrumented HTTP metrics
-- Custom metrics: `gateway/utils/metrics.py` (`record_llm_request`, `record_crawl_request`, `record_tool_call`, `record_service_error`)
+- Prometheus FastAPI Instrumentator (`prometheus-fastapi-instrumentator`) - Auto-instrumented HTTP metrics
+- Custom Prometheus metrics in `gateway/utils/metrics.py`:
+  - `CRAWL_REQUESTS_TOTAL` - Counter by status, domain, source (playwright/firecrawl)
+  - `CRAWL_DURATION_SECONDS` - Histogram by domain, source
+  - `CRAWL_PAGES_PROCESSED` - Counter by domain, source
+  - Functions: `record_llm_request()`, `record_crawl_request()`, `record_tool_call()`, `record_service_error()`, `set_service_up()`
 
 **Monitoring Stack (optional, Docker compose profile "monitoring"):**
 - Prometheus at port 9090, config: `deploy/prometheus.yml`
@@ -189,7 +211,21 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 **Logging:**
 - Python `logging` module throughout
 - Custom setup: `gateway/utils/logging.py` (setup_logging, get_logger, log_tool_call, log_tool_result)
+- Config: `LOG_LEVEL` (DEBUG|INFO|WARNING|ERROR|CRITICAL), `LOG_FORMAT` (json|text)
 - Log directory: `deploy/logs/`
+
+## Message Queues & Events
+
+- None. All inter-service communication is synchronous HTTP REST.
+- Firecrawl uses Redis internally for job queuing, but this is opaque to the project.
+
+## Webhooks & Callbacks
+
+**Incoming:**
+- None detected
+
+**Outgoing:**
+- None detected
 
 ## CI/CD & Deployment
 
@@ -200,18 +236,15 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 **Deployment Scripts (Windows):**
 - `scripts/start-services.ps1` - Start all services (Docker containers + Gateway + Memory)
 - `scripts/stop-services.ps1` - Stop all services
-- `scripts/setup_dev.ps1` - Windows dev setup
 
 **CLI Deployment:**
 - `llmcrawl deploy --up` - Start services
 - `llmcrawl deploy --status` - Health check all services
-- `llmcrawl claude-bridge` - Start Claude Bridge (optional)
-- `llmcrawl copilot-bridge` - Start Copilot Bridge (optional)
 
 ## Environment Configuration
 
 **Required env vars (in `deploy/.env`):**
-- `LLM_PROVIDER` - azure | openai | anthropic
+- `LLM_PROVIDER` - azure | openai
 - `LLM_MODELS` - JSON model routing config
 - `VECTOR_DB` - qdrant | pgvector
 - `MEMORY_SERVICE_URL` - http://localhost:8007
@@ -224,8 +257,10 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 - `MEMORY_AUTO_LOG`, `MEMORY_AUTO_FLUSH`, `MEMORY_FLUSH_THRESHOLD`
 - `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION`
 - `AZURE_ANTHROPIC_ENDPOINT`
-- `ENTRA_CLIENT_ID`, `ENTRA_TENANT_ID`
+- `ENTRA_CLIENT_ID`, `ENTRA_TENANT_ID`, `AZURE_FOUNDRY_SCOPE`
 - `AZURE_DEVOPS_PAT`, `AZURE_DEVOPS_ORG`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_REPO`
+- `WIN_COMP_BRIDGE_URL`
+- `JWT_VALIDATION_ENABLED`
 
 ## Service Port Map
 
@@ -250,4 +285,4 @@ The gateway routes LLM requests based on `provider_type` resolved in `gateway/ll
 
 ---
 
-*Integration audit: 2026-03-29*
+*Integration audit: 2026-03-31*

@@ -1,6 +1,6 @@
 # Architecture
 
-**Analysis Date:** 2026-03-29
+**Analysis Date:** 2026-03-31
 
 ## Pattern Overview
 
@@ -32,6 +32,8 @@
 
 **Data stores (Docker):**
 - PostgreSQL (5432), Qdrant (6333), Redis (6379), Milvus (19530)
+
+**Docker network:** All containers communicate via `webrag-network` external bridge. Create with: `docker network create webrag-network`
 
 ## Layers
 
@@ -66,15 +68,15 @@
 **Crawler Layer:**
 - Purpose: Fetches and extracts web content
 - Location: `crawler/`
-- Contains: FireCrawl client (`crawler/clients/firecrawl.py`), Trafilatura extraction (`crawler/extract/`), Playwright rendering (`crawler/render/`)
-- Depends on: External web URLs, Playwright browser
+- Contains: FireCrawl client (`crawler/clients/firecrawl.py`), Trafilatura extraction (`crawler/extract/trafilatura_wrap.py`), Playwright rendering (`crawler/render/playwright_runner.py`)
+- Depends on: External web URLs, Playwright browser service (Docker)
 - Used by: Gateway (direct HTTP), Gateway tool handler (`crawl_and_refresh`)
 
 **Indexer Layer:**
 - Purpose: Indexes crawled content into vector DB for RAG retrieval
 - Location: `indexer/`
-- Contains: LlamaIndex integration, Qdrant adapter (`indexer/adapters/llamaindex_store.py`)
-- Depends on: Qdrant or pgvector
+- Contains: LlamaIndex integration (`indexer/adapters/llamaindex_store.py`), Qdrant adapter (`indexer/vector/qdrant_store.py`), pgvector adapter (`indexer/vector/pgvector_store.py`)
+- Depends on: Qdrant or pgvector (Docker)
 - Used by: Gateway (after crawling when `enable_embedding=true`)
 
 **Memory Layer:**
@@ -90,7 +92,7 @@
 
 1. User sends message via HiChat UI (`clients/hichat/static/app.js`)
 2. HiChat proxies POST to Gateway `/agent/chat` with `UnifiedWorkflowRequest`
-3. Gateway `execute()` in `gateway/routers/agent.py` (line 1458) begins processing:
+3. Gateway `execute()` in `gateway/routers/agent.py` begins processing:
    a. Expands reference file paths (`_expand_paths`) -- local or Azure DevOps
    b. Gathers reference file content (`_gather_reference_files`) -- reads from filesystem or AzDO MCP
    c. Crawls seed URLs (`_crawl_urls`) -- calls Crawler HTTP API, optionally indexes via Indexer
@@ -102,7 +104,7 @@
    i. Builds message list with conversation history (`_build_messages`)
    j. Loads tool definitions (`_load_tools`) -- fetches MCP schemas from AzDO server, builds OpenAI-format tool defs
    k. Checks for 80% context flush trigger
-4. Gateway calls `_execute_llm_with_tools()` (line 1127)
+4. Gateway calls `_execute_llm_with_tools()`
 5. `LLMClient.chat_completion()` routes to appropriate provider (see Model Routing below)
 6. If LLM returns `tool_calls`, gateway enters tool loop (see Tool Loop below)
 7. Gateway saves conversation history, logs assistant response to memory, returns `UnifiedWorkflowResponse`
@@ -126,7 +128,7 @@
 - `crawl_and_refresh` -> Crawler HTTP POST `/crawl`, then optionally Indexer POST `/index`
 - `search_azure_devops_code`, `get_azure_devops_file`, etc. -> Azure DevOps MCP HTTP POST `/invoke`
 - `query_composition_db` -> WCD Bridge HTTP POST
-- `save_file_for_download` -> Direct filesystem write (handled in `gateway/utils/file_store.py`)
+- `save_file_for_download` -> Direct filesystem write (gateway-native, no MCP)
 - `memory_search` -> Memory Service HTTP POST `/search`
 
 **File Save Pipeline:**
@@ -135,6 +137,13 @@
 3. Response includes `saved_path` in `UnifiedWorkflowResponse.saved_files[]`
 4. HiChat UI renders saved file links with viewer integration
 
+**Crawl Pipeline (inside `crawl_and_refresh` tool or `_crawl_urls` context gathering):**
+1. Gateway sends URLs to Crawler POST `/crawl` with depth and max_results
+2. Crawler tries FireCrawl first (fast, supports auth cookies)
+3. If FireCrawl fails for any URL, Playwright fallback renders the page
+4. Trafilatura extracts clean text/markdown from HTML
+5. Optionally, Gateway sends docs to Indexer POST `/index` for vector indexing
+
 **State Management:**
 - Conversation history: In-memory `ConversationStore` with 24h TTL, 50 messages max per conversation (`gateway/utils/conversation_store.py`)
 - Long-term memory: Markdown files managed by Memory Service, semantic search via Milvus
@@ -142,7 +151,7 @@
 
 ## Model Routing
 
-**4-Tier Resolution in `LLMClient.get_model_config()` (`gateway/llm/client.py` line 144):**
+**4-Tier Resolution in `LLMClient.get_model_config()` (`gateway/llm/client.py`):**
 
 1. **LLM_MODELS config (highest priority):** JSON array in env var. Each entry has `name`, `deployment_name`, `provider_type` (openai/anthropic/claude/copilot), `max_output_tokens`. User explicitly controls routing.
 
@@ -152,7 +161,7 @@
 
 4. **Default `LLM_PROVIDER` fallback:** Falls back to `LLM_PROVIDER` env var (azure/openai/anthropic).
 
-**Provider Dispatch in `LLMClient.chat_completion()` (`gateway/llm/client.py` line 208):**
+**Provider Dispatch in `LLMClient.chat_completion()` (`gateway/llm/client.py`):**
 - `copilot` -> `_copilot_chat_completion()` -> `CopilotCLIProvider.run_chat()` (subprocess) or HTTP bridge fallback
 - `claude` -> `_claude_chat_completion()` -> `ClaudeCLIProvider.run_chat()` (subprocess) or HTTP bridge fallback
 - `anthropic` -> `_anthropic_chat_completion()` -> Direct HTTP POST to Azure Anthropic endpoint
@@ -177,10 +186,10 @@
 | `FILE_EXPLORER` | DevOps assistant | Yes | Yes | File browsing/searching |
 
 Each workflow has a dedicated system prompt builder in `gateway/routers/agent.py`:
-- `_build_system_prompt_general_chat()` (line 593)
-- `_build_system_prompt_code_analysis()` (line 627)
-- `_build_system_prompt_build_system()` (line 677)
-- `_build_system_prompt_file_explorer()` (line 730)
+- `_build_system_prompt_general_chat()`
+- `_build_system_prompt_code_analysis()`
+- `_build_system_prompt_build_system()`
+- `_build_system_prompt_file_explorer()`
 
 ## Key Abstractions
 
@@ -192,7 +201,7 @@ Each workflow has a dedicated system prompt builder in `gateway/routers/agent.py
 **AgentConfig (`gateway/agents/agent_config.py`):**
 - Purpose: Holds service URLs for all downstream services
 - Examples: `crawler_url`, `indexer_url`, `azure_devops_mcp_url`, `memory_service_url`
-- Pattern: Singleton, created once in `get_agent_config()` at `gateway/routers/agent.py` line 1438
+- Pattern: Singleton, created once in `get_agent_config()`
 
 **LLMClient (`gateway/llm/client.py`):**
 - Purpose: Unified interface to all LLM providers with model resolution
@@ -201,6 +210,11 @@ Each workflow has a dedicated system prompt builder in `gateway/routers/agent.py
 **ToolHandler (`gateway/routers/tools.py`):**
 - Purpose: Dispatches tool calls to appropriate backend service
 - Pattern: Command pattern -- tool name determines handler method
+
+**ConversationStore (`gateway/utils/conversation_store.py`):**
+- Purpose: In-memory conversation history with automatic TTL cleanup
+- Pattern: Simple dict-based store, 24h max age, 50 messages max per conversation
+- Used by: Agent router to inject conversation history into LLM messages
 
 ## Entry Points
 
@@ -222,32 +236,48 @@ Each workflow has a dedicated system prompt builder in `gateway/routers/agent.py
 **CLI Entry Point:**
 - Location: `llmcrawl_cli/main.py`
 - Triggers: `llmcrawl` command
-- Responsibilities: Deploy commands, bridge startup, service management
+- Responsibilities: Deploy commands (`deploy --up/--down/--status`), bridge startup (`claude-bridge`, `copilot-bridge`), auth (`auth <url>`), WCD bridge (`wcd-bridge`)
+
+**Crawler Service:**
+- Location: `crawler/main.py`
+- Triggers: `uvicorn crawler.main:app` (in Docker)
+- Endpoints: `POST /crawl`, `POST /render`, `POST /extract`, `GET /health`
+
+**Indexer Service:**
+- Location: `indexer/main.py`
+- Triggers: `uvicorn indexer.main:app` (in Docker)
+- Endpoints: `POST /index`, `POST /retrieve`, `GET /collection/info`, `DELETE /documents`, `GET /health`
+
+**Memory Service:**
+- Location: `services/memory_service/main.py`
+- Triggers: `uvicorn services.memory_service.main:app`
+- Endpoints: `POST /write_daily`, `POST /write_memory`, `POST /search`, `GET /context`, `POST /reindex`, `GET /health`
 
 ## Error Handling
 
 **Strategy:** Catch-and-log with graceful degradation
 
 **Patterns:**
-- LLM errors: Caught in `chat_completion()`, re-raised with extracted error message. Tool loop continues if individual tool calls fail.
-- Tool errors: Caught in `ToolHandler.handle_tool_call()`, returned as `{"error": "..."}` in tool result so LLM can adapt.
+- LLM errors: Caught in `chat_completion()`, re-raised with extracted error message from Azure/OpenAI response body. Tool loop continues if individual tool calls fail.
+- Tool errors: Caught in `ToolHandler.handle_tool_call()`, returned as `{"error": "..."}` in tool result so LLM can adapt its strategy.
 - Time budget: After `MAX_AGENT_ELAPSED_SECONDS` (default 900s), pending `save_file_for_download` calls are executed, then LLM is asked for a wrap-up response with a budget-exceeded note.
-- Per-tool limits: `TOOL_ROUND_LIMITS` dict controls max calls per tool. Exceeded tools are filtered from subsequent rounds. If all tools exceeded, loop breaks.
+- Per-tool limits: `TOOL_ROUND_LIMITS` dict (env-configurable) controls max calls per tool. Exceeded tools are filtered from subsequent rounds. If all tools exceeded, loop breaks.
 - Cancellation: Active requests tracked in `_active_requests` dict. Checked before each tool round and tool execution. Returns `"*Request was cancelled.*"`.
 - CLI subprocess: 1800s timeout, exit code checking, stderr/stdout error extraction.
+- Service health: All services expose `GET /health` endpoint. `deploy/.env` + `scripts/health_check.ps1` for monitoring.
 
 ## Cross-Cutting Concerns
 
 **Logging:** Python `logging` module, configured in `gateway/utils/logging.py`. Structured log helpers: `log_request()`, `log_response()`, `log_tool_call()`, `log_tool_result()`.
 
-**Metrics:** Prometheus via `prometheus_fastapi_instrumentator`. Custom metrics in `gateway/utils/metrics.py` for LLM requests, tool calls, crawl requests, agent activity timing.
+**Metrics:** Prometheus via `prometheus_fastapi_instrumentator`. Custom metrics in `gateway/utils/metrics.py` for LLM requests, tool calls, crawl requests, agent activity timing. Optional Grafana dashboards in `deploy/grafana-provisioning/`.
 
-**Authentication:** Bearer token middleware in `gateway/main.py` extracts `Authorization` header, stores in context var (`gateway/utils/token_context.py`). Entra ID auth for Azure OpenAI/Anthropic. MSAL auth in HiChat client (`clients/hichat/msal_auth.py`).
+**Authentication:** Bearer token middleware in `gateway/main.py` extracts `Authorization` header, stores in context var (`gateway/utils/token_context.py`). Entra ID auth for Azure OpenAI/Anthropic. MSAL auth in HiChat client (`clients/hichat/msal_auth.py`). PAT auth for Azure DevOps MCP server.
 
-**Prompt Compression:** `gateway/utils/prompt_compressor.py` -- estimates token count via tiktoken, compresses with LLMLingua-2 or truncation if messages exceed provider context limits (200k Anthropic, 128k OpenAI/Azure).
+**Prompt Compression:** `gateway/utils/prompt_compressor.py` -- estimates token count via tiktoken, compresses with LLMLingua-2 (BERT-based, CPU-friendly) or truncation fallback if messages exceed provider context limits (200k Anthropic, 128k OpenAI/Azure).
 
-**Memory Integration:** `gateway/utils/memory_integration.py` -- auto-logs messages to daily log, injects durable memory at conversation start, triggers 80% context flush with distillation prompt.
+**Memory Integration:** `gateway/utils/memory_integration.py` -- auto-logs messages to daily log (`MEMORY_AUTO_LOG`), injects durable memory at conversation start, triggers 80% context flush with distillation prompt (`MEMORY_AUTO_FLUSH`, `MEMORY_FLUSH_THRESHOLD`).
 
 ---
 
-*Architecture analysis: 2026-03-29*
+*Architecture analysis: 2026-03-31*

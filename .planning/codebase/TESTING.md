@@ -1,6 +1,6 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-03-29
+**Analysis Date:** 2026-03-31
 
 ## Test Framework
 
@@ -31,11 +31,11 @@ python tests/integration/test_end_to_end.py # Direct integration test execution
 ```
 tests/
 └── integration/
-    └── test_end_to_end.py       # Full pipeline integration tests
+    └── test_end_to_end.py       # Full pipeline integration tests (custom runner, NOT pytest)
 
 gateway/tests/
 ├── test_gateway.py              # Gateway unit tests (prompts, tool handler)
-└── test_expand_paths.py         # Manual test script for path expansion (CLI tool, not pytest)
+└── test_expand_paths.py         # Manual test script for path expansion (CLI tool, NOT pytest)
 
 crawler/tests/
 └── test_crawler.py              # Crawler unit tests (robots, extraction, firecrawl)
@@ -116,6 +116,7 @@ with patch.dict('sys.modules', {
     'fastapi': Mock()
 }):
     from gateway.llm.prompts import CRAWL_AND_REFRESH_TOOL
+    from gateway.routers.tools import ToolHandler
 ```
 
 This pattern is used in:
@@ -127,6 +128,19 @@ This pattern is used in:
 ```python
 with patch.object(tool_handler, "_call_crawler", new_callable=AsyncMock) as mock_crawler:
     mock_crawler.return_value = mock_crawl_response
+    result = await tool_handler._handle_crawl_and_refresh(arguments, "test_id")
+```
+
+**Multi-Patch Context Manager:**
+```python
+with (
+    patch.object(tool_handler, "_call_crawler", new_callable=AsyncMock) as mock_crawler,
+    patch.object(tool_handler, "_call_indexer_index", new_callable=AsyncMock) as mock_indexer,
+    patch.object(tool_handler, "_call_indexer_retrieve", new_callable=AsyncMock) as mock_retrieve,
+):
+    mock_crawler.return_value = mock_crawl_response
+    mock_indexer.return_value = mock_index_response
+    mock_retrieve.return_value = mock_retrieve_response
     result = await tool_handler._handle_crawl_and_refresh(arguments, "test_id")
 ```
 
@@ -215,7 +229,7 @@ pytest tests/ -v --cov=. --cov-report=term-missing  # Terminal output (default v
 - Located in `gateway/tests/`, `crawler/tests/`, `indexer/tests/`
 - Test individual components in isolation with mocked dependencies
 - Focus on logic correctness (scoring algorithms, data structures, schema validation)
-- Many tests verify expected data structures rather than exercising real code paths (assertion on manually constructed dicts)
+- Many tests verify expected data structures rather than exercising real code paths (assertions on manually constructed dicts)
 
 **Integration Tests:**
 - Located in `tests/integration/test_end_to_end.py`
@@ -232,27 +246,6 @@ pytest tests/ -v --cov=. --cov-report=term-missing  # Terminal output (default v
 **E2E Tests:**
 - The integration test in `tests/integration/test_end_to_end.py` serves as the E2E suite
 - No browser-based E2E testing framework (Selenium, Playwright for testing, etc.)
-
-## Pre-Commit Hooks
-
-**Config:** `.pre-commit-config.yaml`
-
-**Hooks (in order):**
-1. `trailing-whitespace` - Remove trailing whitespace
-2. `end-of-file-fixer` - Ensure files end with newline
-3. `check-yaml` - Validate YAML syntax
-4. `check-added-large-files` - Prevent large file commits
-5. `check-merge-conflict` - Detect merge conflict markers
-6. `black` (v23.1.0) - Code formatting
-7. `isort` (v5.12.0) - Import sorting (black profile)
-8. `flake8` (v6.0.0) - Linting (max-line-length=88, extends E203/E221/E231/E713)
-9. `mypy` (v1.0.1) - Type checking (excludes tests/ and migrations/)
-
-**Run Manually:**
-```bash
-make pre-commit          # Run all hooks on all files
-pre-commit run --all-files  # Equivalent direct command
-```
 
 ## CI/CD Pipeline
 
@@ -335,7 +328,34 @@ if __name__ == "__main__":
 - Use `@pytest.mark.asyncio` for any async test function
 - Use `AsyncMock` (not `Mock`) for async method patches
 - Create fixtures via `@pytest.fixture` methods within test classes
+- Construct test data inline within the test function or as class-level fixtures
+- Include `if __name__ == "__main__": pytest.main([__file__, "-v"])` at file end
+
+## Test Gaps
+
+**Gateway service (`gateway/`):**
+- No tests for `gateway/llm/client.py` (LLM routing, streaming, token management)
+- No tests for `gateway/llm/cli_providers.py` (Claude/Copilot CLI subprocess management)
+- No tests for `gateway/routers/agent.py` (the main chat endpoint, path expansion, file gathering)
+- No tests for `gateway/utils/memory_integration.py` (memory service HTTP client)
+- No tests for `gateway/utils/prompt_compressor.py` (token estimation, context compression)
+- No tests for `gateway/utils/conversation_store.py` (TTL cleanup, message trimming)
+
+**Crawler service (`crawler/`):**
+- No tests for `crawler/clients/firecrawl.py` (actual Firecrawl API interaction)
+- No tests for `crawler/render/playwright_runner.py` (browser rendering)
+- No tests for `crawler/main.py` (FastAPI endpoints, crawl orchestration)
+
+**Indexer service (`indexer/`):**
+- No tests for vector store adapters with real connections
+- No tests for embedding generation
+
+**Cross-cutting:**
+- No tests for auth middleware (`gateway/main.py`)
+- No tests for Prometheus metrics recording
+- No contract tests between services
+- No load/performance tests
 
 ---
 
-*Testing analysis: 2026-03-29*
+*Testing analysis: 2026-03-31*

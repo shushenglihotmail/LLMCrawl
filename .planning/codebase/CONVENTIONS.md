@@ -1,6 +1,6 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-03-29
+**Analysis Date:** 2026-03-31
 
 ## Naming Patterns
 
@@ -13,7 +13,7 @@
 - Use `snake_case` for all functions and methods: `get_bearer_token()`, `record_llm_request()`, `parse_azdo_uri()`
 - Private/internal functions prefixed with underscore: `_mark_request_active()`, `_handle_crawl_and_refresh()`, `_cleanup_old_conversations()`
 - Async functions: prefix with `async def`, no naming distinction from sync: `async def export_to_markdown()`
-- Factory/accessor functions use `get_` prefix: `get_logger()`, `get_conversation_store()`, `get_claude_bridge_manager()`, `get_file_store()`
+- Factory/accessor functions use `get_` prefix: `get_logger()`, `get_conversation_store()`, `get_claude_bridge_manager()`, `get_copilot_bridge_manager()`
 
 **Variables:**
 - Use `snake_case` for local variables and parameters
@@ -81,11 +81,12 @@
 
 **Path Style:**
 - Absolute imports for cross-module references: `from gateway.llm.client import LLMClient`
-- Relative imports within the same package: `from ..utils.logging import get_logger` (seen in `gateway/routers/export.py`)
+- Relative imports within the same package: `from ..utils.logging import get_logger` (seen in `gateway/routers/tools.py`, `gateway/routers/export.py`)
 - Both styles coexist; prefer absolute imports for clarity
 
 **Noqa Comments:**
 - Use `# noqa: F401` for imports used indirectly: `import asyncio  # noqa: F401`
+- Use `# noqa: E402` for imports after module-level code: `from contextlib import asynccontextmanager  # noqa: E402` (seen in `gateway/main.py` where `os.environ.pop()` runs before imports)
 
 ## Error Handling
 
@@ -99,6 +100,11 @@
 - Silent fallbacks for non-critical operations (e.g., memory logging failures are logged but don't break the main flow)
 - Catch specific exceptions where possible: `except (json.JSONDecodeError, KeyError):`
 - Broad `except Exception` as outer catch-all in request handlers
+
+**CLI Provider Errors** (in `gateway/llm/cli_providers.py`):
+- Use `RuntimeError` for CLI-level failures: `raise RuntimeError("Claude CLI not found")`
+- Use `ValueError` for input validation: `raise ValueError("No prompt text derived from messages")`
+- Use generic `Exception` for bridge HTTP errors: `raise Exception(f"Claude Bridge error: {str(e)}")`
 
 **Error Classification:**
 - Use `gateway/utils/metrics.py` `classify_error()` function to categorize errors for metrics
@@ -116,12 +122,29 @@
 **Logger Creation:**
 - Use `get_logger(__name__)` from `gateway/utils/logging.py` OR direct `logging.getLogger(__name__)`
 - Both patterns coexist; `get_logger()` is a thin wrapper
+- Create logger at module level: `logger = logging.getLogger(__name__)`
 
 **Structured Logging Helpers** (in `gateway/utils/logging.py`):
 - `log_request(logger, request_id, method, path, **kwargs)` - HTTP request entry
 - `log_response(logger, request_id, status_code, duration_ms, **kwargs)` - HTTP response
 - `log_tool_call(logger, request_id, tool_name, arguments)` - Tool invocations
 - `log_tool_result(logger, request_id, tool_name, success, duration_ms, result_size)` - Tool results
+
+**JSON Formatter** (in `gateway/utils/logging.py`):
+```python
+class JSONFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        log_entry = {
+            "timestamp": datetime.fromtimestamp(record.created).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno
+        }
+        return json.dumps(log_entry, default=str)
+```
 
 **Conventions:**
 - Always log at service startup/shutdown: `logger.info("Starting Gateway service")`
@@ -214,17 +237,80 @@ def get_conversation_store() -> ConversationStore:
         _store = ConversationStore()
     return _store
 ```
-Used in: `gateway/utils/conversation_store.py`, `gateway/utils/claude_bridge_manager.py`, `gateway/utils/copilot_bridge_manager.py`, `gateway/utils/file_store.py`
+Used in: `gateway/utils/conversation_store.py`, `gateway/utils/claude_bridge_manager.py`, `gateway/utils/copilot_bridge_manager.py`
+
+## Pre-Commit Hooks
+
+**Config:** `.pre-commit-config.yaml`
+
+**Hooks (in order):**
+1. `trailing-whitespace` - Remove trailing whitespace
+2. `end-of-file-fixer` - Ensure files end with newline
+3. `check-yaml` - Validate YAML syntax
+4. `check-added-large-files` - Prevent large file commits
+5. `check-merge-conflict` - Detect merge conflict markers
+6. `black` (v23.1.0) - Code formatting
+7. `isort` (v5.12.0) - Import sorting (black profile)
+8. `flake8` (v6.0.0) - Linting (max-line-length=88, extends E203/E221/E231/E713)
+9. `mypy` (v1.0.1) - Type checking (excludes tests/ and migrations/)
+
+**Run Manually:**
+```bash
+make pre-commit          # Run all hooks on all files
+pre-commit run --all-files  # Equivalent direct command
+```
 
 ## Comments
 
 **When to Comment:**
 - Explain "why" for non-obvious decisions: `# Strip NODE_OPTIONS early -- it can break Node.js-based CLI subprocesses`
 - Mark TODO items for known limitations: `# For production, consider using Redis`
-- Document env var purposes inline
+- Document timeout values: `# Increased to 90s to allow for depth crawling with Playwright`
 
-**JSDoc/TSDoc:** Not applicable (Python project). Use Google-style docstrings with Args/Returns sections for public API functions.
+**Docstrings:** Use Google-style docstrings with Args/Returns sections for public API functions.
+
+## Middleware Pattern
+
+**Pattern:** FastAPI middleware in `gateway/main.py`:
+```python
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Middleware to extract Bearer token and set it in context."""
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        set_token(token)
+    response = await call_next(request)
+    return response
+```
+
+## Router Organization
+
+**Pattern:** One router per domain area, prefixed at mount:
+- `gateway/routers/agent.py` - Agent/chat endpoints (`/agent` prefix)
+- `gateway/routers/export.py` - Export endpoints (`/api/v1` prefix)
+- `gateway/routers/models.py` - Model listing (`/api/models` prefix)
+
+**Router Creation:**
+```python
+router = APIRouter(prefix="/agent", tags=["agent"])
+```
+
+## Metrics Pattern
+
+**Framework:** `prometheus_client` with `prometheus-fastapi-instrumentator`
+
+**Convention:** Define metrics as module-level constants in `gateway/utils/metrics.py`:
+```python
+CRAWL_REQUESTS_TOTAL = Counter(
+    "crawl_requests_total",
+    "Total number of crawl requests",
+    ["status", "domain", "source"],
+)
+```
+
+**Helper functions** wrap metric recording: `record_crawl_request()`, `record_tool_call()`, `record_llm_request()`, `record_service_error()`
 
 ---
 
-*Convention analysis: 2026-03-29*
+*Convention analysis: 2026-03-31*

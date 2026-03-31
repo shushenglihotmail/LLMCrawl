@@ -1,127 +1,234 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-03-29
+**Analysis Date:** 2026-03-31
 
-## Tech Debt
+## Security Concerns
 
-**Orphaned In-Memory File Store (dead code):**
-- Issue: `gateway/utils/file_store.py` and `gateway/routers/files.py` are orphaned code from the old in-memory file download system. The file download route was removed from `gateway/main.py` (line 97 comment: "File download endpoint removed -- files are now saved directly to disk"), but the modules themselves were never deleted.
-- Files: `gateway/utils/file_store.py`, `gateway/routers/files.py`
-- Impact: Dead code that confuses future developers. `file_store.py` defines a full `FileStore` class with TTL, eviction, and thread-safety that is imported by nobody except the orphaned `files.py` router.
-- Fix approach: Delete both files. Verify no imports remain (currently only `files.py` imports `file_store`; `main.py` does not include the router).
-
-**Hardcoded Model Lists Require Manual Maintenance:**
-- Issue: `CLAUDE_KNOWN_MODELS` and `COPILOT_KNOWN_MODELS` in `gateway/llm/cli_providers.py` (lines 122-128, 391-410) are manually curated lists that must be updated whenever Anthropic or GitHub release new models. Neither CLI exposes a programmatic model listing API.
-- Files: `gateway/llm/cli_providers.py`
-- Impact: New models (e.g., future Claude or GPT releases) are invisible in the HiChat dropdown until a developer manually adds them to the list and redeploys. Users can still use unlisted models via `LLM_MODELS` env config, but discoverability suffers.
-- Fix approach: Add a periodic or on-demand model refresh. For Claude, parse `claude --help` or `claude /model list` output. For Copilot, no API exists yet -- keep manual list but add a warning log at startup noting the list may be stale.
-
-**Duplicated Fallback Logic in Crawl Pipeline:**
-- Issue: `_handle_crawl_and_refresh()` in `gateway/routers/tools.py` has three nearly identical fallback blocks (lines 218-241, 253-280, 289-321) that format crawled documents when indexing or retrieval fails. The same dict-comprehension pattern is copy-pasted with minor differences (full content vs truncated to 500 chars).
-- Files: `gateway/routers/tools.py`
-- Impact: Bug-prone -- changes to the result format must be applied in three places. The `skip_embedding` path returns full markdown while the `fallback_mode` paths truncate to 500 chars, which is inconsistent.
-- Fix approach: Extract a shared `_format_crawl_fallback(docs, query, truncate=True)` helper.
-
-**setuptools Version Conflict (memsearch vs llama-index):**
-- Issue: `memsearch` requires `setuptools<75` (pinned in `pyproject.toml` line 42: `"setuptools>=61.0,<75"`), while `llama-index` (used by the indexer service) requires `setuptools>=80.9`. These cannot coexist in the same Python environment.
-- Files: `pyproject.toml` (lines 42, 51-52)
-- Impact: The indexer service must run in Docker or a separate virtualenv. Local development of both gateway+memory and indexer simultaneously requires environment juggling. The conflict is documented in `CLAUDE.md` but remains a pain point.
-- Fix approach: No easy fix -- this is an upstream dependency conflict. Continue running the indexer in Docker. Monitor memsearch and llama-index releases for relaxed constraints.
-
-## Security Considerations
-
-**Path Traversal in save_file_for_download Tool:**
-- Risk: The `_handle_save_file_for_download()` method in `gateway/routers/tools.py` (lines 533-599) accepts an arbitrary `path` parameter from the LLM tool call and writes content to that location. There is no path validation, no allowlist check, and no guard against directory traversal (e.g., `../../etc/passwd` or `C:\Windows\System32\...`). The method calls `target.parent.mkdir(parents=True, exist_ok=True)` which will create any intermediate directories.
-- Files: `gateway/routers/tools.py` (lines 553-572)
+**Path Traversal in File Save Tool:**
+- Risk: The `_handle_save_file_for_download()` method in `gateway/routers/tools.py` (lines 533-598) accepts LLM-controlled `path` and `filename` parameters without any path traversal validation. An LLM could craft arguments like `filename="../../etc/passwd"` or `path="/etc"` to write files to arbitrary locations on the host filesystem. The method calls `target.parent.mkdir(parents=True, exist_ok=True)` which will create any intermediate directories.
+- Files: `gateway/routers/tools.py` (lines 553-576)
 - Current mitigation: The gateway runs as the current user, so OS-level permissions provide some protection. The LLM decides the path, not the end user directly, but prompt injection could influence it.
-- Recommendations: Add path validation: resolve the target path and verify it is within an allowed directory (e.g., cwd or a configured save root). Reject paths containing `..` segments. Add a configurable `ALLOWED_SAVE_DIRS` env var.
+- Recommendations: Resolve the target path and verify it stays within an allowed directory (e.g., cwd or a configured `ALLOWED_SAVE_DIRS` env var). Reject paths containing `..` segments.
+
+**Path Traversal in File Viewer Endpoint:**
+- Risk: The `GET /agent/api/view-file?path=...` endpoint (`gateway/routers/agent.py`, lines 1748-1767) accepts arbitrary file paths and reads them. Any user (authenticated or not, since JWT validation is disabled by default) can read any file on the host that the process can access.
+- Files: `gateway/routers/agent.py` (lines 1748-1767)
+- Current mitigation: None. The path is passed directly to `Path(path).read_text()`.
+- Recommendations: Restrict readable paths to a whitelist of allowed directories. At minimum, reject paths outside the save directory.
+
+**CORS Wildcard on All Services:**
+- Risk: Every FastAPI service uses `allow_origins=["*"]` in CORS middleware with `allow_credentials=True`. This allows any web origin to make authenticated requests to these APIs.
+- Files: `gateway/main.py` (line 84), `crawler/main.py` (line 102), `indexer/main.py` (line 115), `services/memory_service/main.py` (line 272), `mcp_servers/local_access_mcp_server/main.py` (line 32)
+- Current mitigation: Comment says "Configure appropriately for production" but no production config exists. The `allow_credentials=True` with `allow_origins=["*"]` combination technically violates the CORS spec.
+- Recommendations: Set specific allowed origins via environment variable for production. Remove `allow_credentials=True` when using wildcard origin.
+
+**No Authentication on Most Endpoints:**
+- Risk: JWT validation is disabled by default (`JWT_VALIDATION_ENABLED` defaults to `"false"` in `gateway/utils/auth.py` line 29). The bearer token is extracted but only passed through to LLM providers, not validated at the gateway level. The `auto_error=False` setting means missing tokens are silently accepted.
+- Files: `gateway/utils/auth.py` (lines 28-29, 44)
+- Current mitigation: Optional JWT validation exists but must be explicitly enabled.
+- Recommendations: For any internet-exposed deployment, enable JWT validation or add API key authentication.
+
+**JWKS Keys Not Cached:**
+- Risk: When JWT validation IS enabled, every request fetches JWKS keys from Microsoft via HTTP. This is slow, unreliable, and creates a DoS vector.
+- Files: `gateway/utils/auth.py` (lines 156-192). Comment on line 167 acknowledges: "In production, you should cache JWKS to avoid repeated requests."
+- Recommendations: Cache JWKS keys with a TTL (e.g., use `PyJWKClient` with built-in caching).
+
+**PowerShell Injection via WCD Bridge:**
+- Risk: The `query_composition_db` tool passes LLM-generated PowerShell snippets directly to the WCD bridge for execution. If the LLM is manipulated via prompt injection, arbitrary PowerShell could be executed on the host.
+- Files: `gateway/routers/agent.py` (lines 932-981), `mcp_servers/wcd_bridge_mcp_server/wcd_bridge_mcp_server/windows_composition_bridge.py`
+- Current mitigation: The bridge presumably sandboxes execution to `$d` object methods, but the gateway sends raw LLM output.
+- Recommendations: Validate queries against a whitelist of allowed `$d` methods. Reject queries containing dangerous cmdlets.
 
 **Full Environment Inherited by CLI Subprocesses:**
-- Risk: `_clean_subprocess_env()` in `gateway/llm/cli_providers.py` (lines 29-46) copies the entire `os.environ` to CLI subprocesses, only stripping `NODE_OPTIONS`. This means API keys (`AZURE_OPENAI_API_KEY`, `OPENAI_API_KEY`), database credentials, and any other secrets in the gateway process environment are visible to the Claude/Copilot CLI subprocesses.
+- Risk: `_clean_subprocess_env()` in `gateway/llm/cli_providers.py` (lines 29-46) copies the entire `os.environ` to CLI subprocesses, only stripping `NODE_OPTIONS`. API keys, database credentials, and other secrets in the gateway environment are visible to Claude/Copilot subprocesses.
 - Files: `gateway/llm/cli_providers.py` (lines 29-46)
-- Current mitigation: CLI subprocesses are trusted (Claude Code, GitHub Copilot) and run locally, so the practical risk is low.
-- Recommendations: Build a minimal env for CLI subprocesses containing only `PATH`, `HOME`, `USERPROFILE`, `LOCALAPPDATA`, `TEMP`, `PYTHONIOENCODING`, and explicitly needed vars. Strip all `*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD` vars.
+- Current mitigation: CLI subprocesses are trusted tools running locally; practical risk is low.
+- Recommendations: Build a minimal env containing only `PATH`, `HOME`, `USERPROFILE`, `TEMP`, `PYTHONIOENCODING`. Strip all `*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD` vars.
 
-**Wildcard CORS Configuration:**
-- Risk: `gateway/main.py` (lines 81-87) sets `allow_origins=["*"]` and `allow_credentials=True`. This allows any origin to make authenticated requests to the gateway API.
-- Files: `gateway/main.py` (lines 81-87)
-- Current mitigation: Comment says "Configure appropriately for production." The system runs on localhost in development.
-- Recommendations: Before any non-localhost deployment, restrict `allow_origins` to the HiChat frontend origin. The `allow_credentials=True` with `allow_origins=["*"]` combination is flagged by security scanners and technically violates the CORS spec (browsers should reject it, but behavior varies).
+**Hardcoded Default Credentials:**
+- Risk: PgVector store uses `postgresql://postgres:password@postgres:5432/rag_db` as default DSN.
+- Files: `indexer/vector/pgvector_store.py` (line 28)
+- Current mitigation: Environment variable override via `PG_DSN`.
+- Recommendations: Remove default password from source code. Require explicit configuration.
 
-## Fragile Areas
+## Performance Concerns
 
-**Dual Gateway Process on Restart:**
-- Files: `scripts/start-services.ps1`, `scripts/restart-services.ps1`
-- Why fragile: `start-services.ps1` does not check whether a gateway or memory service is already running before starting new instances. If a user runs `start-services.ps1` twice, or runs `start-services.ps1` after `restart-services.ps1`, two gateway processes will bind to port 8000. The second process may fail silently (log goes to file) or the first may hold the port while the PID file points to the second.
-- Safe modification: `restart-services.ps1` (lines 122-137) does read the PID file and kill old processes before starting new ones, so it is safer. But `start-services.ps1` has no such guard.
-- Fix approach: In `start-services.ps1`, before starting local services: (1) check if the PID file exists and the process is still alive, (2) if alive, warn and skip or kill, (3) also check if port 8000/8007 is already in use via `Test-NetConnection` or `Get-NetTCPConnection`.
+**LLMClient Instantiated Per Request:**
+- Problem: `LLMClient()` is created fresh on every request in `_execute_llm_with_tools()` (line 1146) and `manual_distill()` (line 1873). The constructor probes for CLI executables, imports modules, and creates HTTP clients.
+- Files: `gateway/routers/agent.py` (lines 1146, 1873), `gateway/llm/client.py` (lines 34-81)
+- Cause: A `get_llm_client()` singleton exists at line 1500 of `client.py` but is never called from the agent router.
+- Improvement path: Use `get_llm_client()` singleton or FastAPI dependency injection.
 
-**WinGet Symlink Issues with CLI Discovery:**
-- Files: `gateway/llm/cli_providers.py` (lines 150-178 for Claude, 432-466 for Copilot)
-- Why fragile: On Windows, `shutil.which()` may find a WinGet AppExecution alias (a zero-byte stub in `%LOCALAPPDATA%\Microsoft\WindowsApps`) rather than the real executable. The code calls `os.path.realpath()` to resolve symlinks, but WinGet aliases are not true symlinks -- they are reparse points that `os.path.realpath()` may not resolve correctly on all Python versions. The Copilot `_find_cli()` also hard-codes `WinGet\Links\copilot.exe` as a fallback candidate (line 459), which may or may not work depending on how WinGet installed it.
-- Test coverage: No tests for CLI discovery logic.
-- Fix approach: Add a validation step after discovery: run `<cli> --version` (or `--help`) and verify it returns a zero exit code before accepting the path. This catches broken symlinks, stale paths, and .bat wrappers that don't support the expected flags.
+**In-Memory Conversation Store Not Scalable:**
+- Problem: `ConversationStore` uses a plain Python dict with no persistence. All conversations are lost on restart. Cannot scale horizontally (each gateway instance has its own store).
+- Files: `gateway/utils/conversation_store.py` (entire file, 82 lines)
+- Current capacity: Limited by process memory. 50 messages per conversation, 24-hour TTL.
+- Limit: Single-process, single-host only.
+- Scaling path: Move to Redis or PostgreSQL as noted in the file's own docstring (line 3).
 
-**Conversation Store In-Memory Only:**
+**httpx Client Created Per Tool Call:**
+- Problem: A new `httpx.AsyncClient` is created for each tool call, MCP invocation, and crawl request. Connection pooling is lost.
+- Files: `gateway/routers/tools.py` (lines 347, 379, 402, 468), `gateway/routers/agent.py` (lines 216, 369)
+- Improvement path: Share a persistent `httpx.AsyncClient` per service connection, created at startup.
+
+**CLI Subprocess Overhead:**
+- Problem: Each Claude/Copilot request spawns a new subprocess (`subprocess.run`), which on Windows involves process creation overhead (~200-500ms) plus CLI initialization time. The 1800-second (30-minute) timeout is generous; a stuck subprocess blocks an async worker for the full duration.
+- Files: `gateway/llm/cli_providers.py` (lines 228-239, 529-540)
+- Cause: CLI tools load the full Node.js runtime per invocation. No way to cancel a running subprocess if the HTTP client disconnects.
+- Improvement path: For Claude, use the direct Anthropic API (`provider_type: anthropic`) to avoid subprocess overhead. Add subprocess cancellation via `asyncio.Task` cancellation.
+
+## Maintainability Concerns
+
+**Massive Agent Router File:**
+- Problem: `gateway/routers/agent.py` is 1920 lines -- a single file handling path expansion, context gathering, crawling, system prompt construction (4 workflow types), tool loading, LLM execution loop with tool calling, message building, memory integration, and multiple API endpoints.
+- Files: `gateway/routers/agent.py` (1920 lines)
+- Impact: Difficult to navigate, test, and modify. High risk of merge conflicts.
+- Fix approach: Extract into modules: `agent/prompts.py`, `agent/context.py`, `agent/execution.py`, `agent/tools.py`.
+
+**Large LLM Client File:**
+- Problem: `gateway/llm/client.py` is 1505 lines handling OpenAI, Azure, Anthropic, Claude CLI, and Copilot CLI -- plus JSON tool call parsing and prompt stripping utilities.
+- Files: `gateway/llm/client.py` (1505 lines)
+- Fix approach: Extract provider-specific logic into separate files (already partially done with `cli_providers.py`).
+
+**Bare `except:` Clauses:**
+- Issue: 13+ bare `except:` clauses that silently swallow all exceptions including `KeyboardInterrupt` and `SystemExit`.
+- Files:
+  - `crawler/utils/robots.py` (lines 103, 124, 165, 231)
+  - `crawler/render/playwright_runner.py` (lines 205, 299, 378, 386, 457, 459)
+  - `crawler/main.py` (line 86)
+  - `indexer/main.py` (line 82)
+  - `indexer/vector/qdrant_store.py` (line 291)
+- Fix approach: Replace with `except Exception:` at minimum. For cleanup code, use `finally` blocks.
+
+**Broad `except Exception` Overuse:**
+- Issue: Over 80 catch-all `except Exception as e` blocks that log and continue. This masks bugs and makes debugging difficult.
+- Files: Nearly every module -- `gateway/routers/agent.py`, `crawler/clients/firecrawl.py`, `gateway/llm/client.py`, `tools/claude_bridge.py`, `clients/hichat/msal_auth.py`
+- Fix approach: Catch specific exception types. Let unexpected exceptions propagate.
+
+**Duplicate Code for Save File Tracking:**
+- Issue: The pattern of "inject conversation_id into save_file args, execute tool, parse result, append to saved_files" is duplicated 3 times in `_execute_llm_with_tools()`.
+- Files: `gateway/routers/agent.py` (lines 1210-1228, 1270-1294, 1296-1326)
+- Fix approach: Extract a helper function like `_execute_and_track_save_calls()`.
+
+**Inconsistent Singleton Patterns:**
+- Issue: Some modules use module-level globals with getter functions (`_conversation_store`, `_tool_handler`, `_llm_client`, `_agent_config`), but usage is inconsistent -- `LLMClient()` is called directly in the agent router instead of using the existing `get_llm_client()`.
+- Files: `gateway/utils/conversation_store.py`, `gateway/routers/tools.py`, `gateway/llm/client.py`, `gateway/routers/agent.py`
+- Fix approach: Standardize on FastAPI dependency injection or a consistent singleton pattern.
+
+## Technical Debt
+
+| Item | Severity | Location | Description |
+|------|----------|----------|-------------|
+| setuptools version conflict | Medium | `pyproject.toml` (lines 42, 51-52) | memsearch requires `setuptools<75`, llama-index requires `setuptools>=80.9`. Cannot install both in same venv. Indexer must run in Docker. |
+| CLI tool calling via text parsing | Medium | `gateway/llm/client.py` (lines 660-695, 724-736) | Claude/Copilot CLIs cannot use native tool calling. Tools are injected into system prompt as JSON, then tool calls are parsed from response text. Fragile and error-prone. |
+| Prompt token estimation inaccurate | Low | `gateway/utils/prompt_compressor.py` (line 32) | Uses `cl100k_base` tiktoken encoding for all providers including Anthropic, which uses a different tokenizer. Token estimates may be wrong by 10-20% for non-OpenAI models. |
+| Hardcoded model lists | Low | `gateway/llm/cli_providers.py` (lines 121-127, 391-410) | Claude and Copilot model lists are hardcoded. Must be manually updated when new models are released. |
+| Duplicated crawl fallback formatting | Low | `gateway/routers/tools.py` (lines 218-241, 253-280, 289-321) | Three near-identical dict-comprehension blocks for formatting crawled docs when indexing/retrieval fails. Inconsistent truncation (full vs 500 chars). |
+
+## Dependency Risks
+
+**memsearch and setuptools Conflict:**
+- Risk: Core dependency conflict between memsearch (`setuptools<75`) and llama-index (indexer, `setuptools>=80.9`). Documented and managed via Docker isolation, but creates friction for local development.
+- Impact: Cannot run indexer and memory service in the same Python environment.
+- Migration plan: Wait for upstream to relax constraints, or replace memsearch with direct Milvus client.
+
+**Optional Import Pattern:**
+- Risk: Several modules use try/except to make dependencies optional (`asyncpg`, `playwright`, `numpy`, `jwt`). Services start but fail at runtime when functionality is needed.
+- Files: `indexer/vector/pgvector_store.py` (lines 14-19), `crawler/render/playwright_runner.py` (lines 16-20), `gateway/utils/auth.py` (lines 11-19)
+- Impact: Silent failures. Service appears healthy but specific operations fail.
+- Migration plan: Fail fast at startup if required dependencies are missing. Use health checks that exercise critical imports.
+
+**memsearch Library Maintenance:**
+- Risk: Relatively new library with a restrictive setuptools constraint. If unmaintained, the memory service is affected.
+- Impact: Memory service search functionality depends on it.
+- Migration plan: memsearch is contained within `services/memory_service/`. Could be replaced with direct Milvus client + custom embedding logic.
+
+## Operational Risks
+
+**No Data Persistence for Conversations:**
+- Risk: All conversation history is in-memory. A gateway restart loses all active conversations.
 - Files: `gateway/utils/conversation_store.py`
-- Why fragile: Conversations are stored in-memory with 24-hour TTL. A gateway restart loses all active conversations. Users in the middle of multi-turn chats will get context-free responses.
-- Fix approach: The memory service provides some durability (daily logs), but mid-conversation context is lost. Consider persisting conversation state to Redis or the filesystem.
+- Recovery: None. Conversations cannot be recovered after restart.
+- Recommendations: Use Redis or PostgreSQL for conversation storage.
 
-## In-Progress / Uncommitted Work
+**No Health Check for Dependent Services:**
+- Risk: Gateway starts successfully even if crawler, indexer, or memory service are down. Tool calls fail at runtime.
+- Files: `gateway/main.py` (lifespan, lines 31-57)
+- Current mitigation: Health endpoint at `/agent/health` shows configured URLs but does not probe them.
+- Recommendations: Add startup probes or lazy health checks.
 
-**Copilot CLI Integration (new, uncommitted):**
-- Issue: Several new files related to Copilot CLI integration are untracked: `gateway/llm/cli_providers.py`, `gateway/utils/copilot_bridge_manager.py`, `llmcrawl_cli/copilot_bridge.py`, `tools/copilot_bridge.py`. Additionally, many gateway files show modifications in git status. This represents a significant in-flight feature that has not been committed.
-- Files: `gateway/llm/cli_providers.py`, `gateway/utils/copilot_bridge_manager.py`, `llmcrawl_cli/copilot_bridge.py`, `tools/copilot_bridge.py`
-- Impact: Risk of losing work if the working tree is cleaned. Other developers pulling `main` will not have this feature. The changes touch core routing logic (`gateway/llm/client.py`, `gateway/routers/models.py`, `gateway/main.py`).
-- Fix approach: Commit this feature to a branch. It appears functional based on code review.
+**CLI Subprocess Timeout Risk:**
+- Risk: Claude CLI has a 1800-second (30-minute) timeout. A stuck CLI process blocks an async worker for the full duration. With default uvicorn workers, a few stuck calls can exhaust all workers.
+- Files: `gateway/llm/cli_providers.py` (line 236)
+- Recommendations: Reduce timeout. Add process group kill on cancellation. Monitor for long-running subprocesses.
+
+**No Request Size Limits:**
+- Risk: The `/agent/chat` endpoint accepts unbounded request bodies. Large `reference_files`, `user_message`, or `seed_urls` payloads can consume memory.
+- Files: `gateway/routers/agent.py` (line 1464, `execute()`)
+- Recommendations: Add request body size limits via middleware or Pydantic validators.
+
+**Dual Gateway on Restart:**
+- Risk: `scripts/start-services.ps1` does not check whether a gateway or memory service is already running before starting new instances. Running it twice creates conflicting processes on the same port.
+- Files: `scripts/start-services.ps1`
+- Fix: Check PID file and port availability before starting.
 
 ## Test Coverage Gaps
 
-**No Tests for CLI Providers:**
-- What's not tested: `gateway/llm/cli_providers.py` -- the entire Claude and Copilot CLI subprocess integration, including `_find_cli()`, `build_prompt_from_messages()`, `_parse_stream_json()`, `_parse_copilot_jsonl()`, and `run_chat()`.
-- Files: `gateway/llm/cli_providers.py` (647 lines, zero test coverage)
-- Risk: CLI discovery, prompt building, and JSON parsing are complex with many edge cases (empty output, timeout, malformed JSON, multi-turn responses). Bugs here affect all Claude/Copilot interactions.
-- Priority: High -- this is the primary LLM interface for local development.
+**Gateway Agent Router (Core Logic) Untested:**
+- What's not tested: The core `execute()` endpoint and `_execute_llm_with_tools()` (the main business logic loop) have no unit tests. Existing `test_gateway.py` only tests tool schema structure.
+- Files: `gateway/tests/test_gateway.py` (147 lines), `gateway/routers/agent.py` (1920 lines)
+- Risk: Regressions in tool calling, prompt building, context gathering, and memory integration go undetected.
+- Priority: High
 
-**No Tests for Bridge Managers:**
-- What's not tested: `gateway/utils/claude_bridge_manager.py` and `gateway/utils/copilot_bridge_manager.py` -- startup probe logic, model caching, fallback to CLI detection.
-- Files: `gateway/utils/claude_bridge_manager.py`, `gateway/utils/copilot_bridge_manager.py`
-- Risk: Gateway startup behavior is untested. A broken probe could delay startup by the full retry timeout (6+ seconds) or fail to detect available CLIs.
-- Priority: Medium
+**LLM Client Untested:**
+- What's not tested: No tests for `gateway/llm/client.py` (1505 lines). Model resolution, Anthropic format conversion, CLI fallback logic, JSON tool call parsing -- all untested.
+- Files: `gateway/llm/client.py`
+- Risk: Provider routing bugs and format conversion errors.
+- Priority: High
 
-**No Tests for File Save Tool:**
-- What's not tested: `_handle_save_file_for_download()` in `gateway/routers/tools.py` -- path resolution, directory creation, permission errors, the path traversal vulnerability noted above.
-- Files: `gateway/routers/tools.py` (lines 533-599)
+**CLI Providers Untested:**
+- What's not tested: `gateway/llm/cli_providers.py` (650 lines). Subprocess spawning, stream-json parsing, prompt building, CLI discovery -- all untested.
+- Files: `gateway/llm/cli_providers.py`
+- Risk: Claude/Copilot CLI integration breaks silently.
+- Priority: High
+
+**File Save Tool Untested (Security-Sensitive):**
+- What's not tested: `_handle_save_file_for_download()` in `gateway/routers/tools.py` -- path resolution, directory creation, permission errors, and the path traversal vulnerability.
+- Files: `gateway/routers/tools.py` (lines 533-598)
 - Risk: Security-sensitive code with no test coverage.
 - Priority: High
 
-**No Tests for Memory Integration:**
-- What's not tested: `gateway/utils/memory_integration.py` -- daily log appending, durable memory reads, flush prompt generation.
+**Memory Integration Untested:**
+- What's not tested: `gateway/utils/memory_integration.py` (379 lines) -- daily log appending, flush detection, distillation parsing.
 - Files: `gateway/utils/memory_integration.py`
-- Risk: Memory features are a core differentiator; regressions would be silent.
+- Risk: Memory features silently break or corrupt stored memory.
 - Priority: Medium
 
-**Existing Tests Are Minimal:**
-- What's tested: `gateway/tests/test_gateway.py` has only 3 test cases: tool schema structure, tool call handling structure, and a mocked crawl pipeline. `gateway/tests/test_expand_paths.py` is a manual CLI test script, not a pytest test suite.
-- Files: `gateway/tests/test_gateway.py` (147 lines), `gateway/tests/test_expand_paths.py` (manual script)
-- Risk: Very low confidence in regression detection. Most gateway functionality (LLM routing, CORS, auth middleware, model config resolution) is untested.
-- Priority: High
+**Overall Coverage:**
+- Approximately 1,176 lines of test code covering ~24,153 lines of source. Most tests are integration-level or cover peripheral functionality. The core gateway agent loop, LLM client routing, and CLI providers have zero test coverage.
 
-## Dependencies at Risk
+## Recommendations
 
-**memsearch Library:**
-- Risk: Relatively new library with a hard `setuptools<75` constraint that conflicts with mainstream Python packaging. If the library becomes unmaintained, the memory service is affected.
-- Impact: Memory service search functionality depends on it.
-- Migration plan: The memory service is a standalone microservice with a clean REST API. The memsearch dependency is contained within `services/memory_service/`. Could be replaced with direct Milvus client + custom embedding logic.
+1. **[Critical] Fix path traversal in file save/view** -- Add path validation to `_handle_save_file_for_download()` and `/api/view-file`. Restrict operations to an allowed directory tree.
 
-## Performance Bottlenecks
+2. **[Critical] Add CORS restrictions for production** -- Replace `allow_origins=["*"]` with configurable origins via environment variable across all services.
 
-**CLI Subprocess Overhead:**
-- Problem: Each Claude/Copilot request spawns a new subprocess (`subprocess.run`), which on Windows involves process creation overhead (~200-500ms) plus CLI initialization time. The 1800-second timeout (30 minutes) is generous but there is no way to cancel a running subprocess from the HTTP handler if the client disconnects.
-- Files: `gateway/llm/cli_providers.py` (lines 228-239, 529-540)
-- Cause: CLI tools are designed for interactive use, not high-throughput API proxying. Each invocation loads the full Node.js runtime.
-- Improvement path: For Claude, the direct Anthropic API (via `provider_type: anthropic`) avoids subprocess overhead entirely. For Copilot, no HTTP API alternative exists yet. Consider adding request cancellation via `asyncio.Task` cancellation that kills the subprocess.
+3. **[High] Add tests for core gateway logic** -- The agent router, LLM client, and CLI providers are the heart of the system and have zero test coverage. Start with unit tests for `_execute_llm_with_tools`, `get_model_config`, and `build_prompt_from_messages`.
+
+4. **[High] Use LLMClient singleton** -- Replace `LLMClient()` calls in agent router with `get_llm_client()` to avoid per-request initialization overhead.
+
+5. **[High] Break up large files** -- Split `gateway/routers/agent.py` (1920 lines) and `gateway/llm/client.py` (1505 lines) into focused modules.
+
+6. **[Medium] Replace bare `except:` clauses** -- All 13+ bare `except:` blocks should use `except Exception:` at minimum.
+
+7. **[Medium] Persist conversation store** -- Move from in-memory dict to Redis or PostgreSQL for conversation history.
+
+8. **[Medium] Share httpx clients** -- Create persistent `httpx.AsyncClient` instances at startup instead of per-request.
+
+9. **[Low] Cache JWKS keys** -- If JWT validation is enabled, cache signing keys to avoid per-request HTTP calls.
+
+10. **[Low] Add request body size limits** -- Prevent oversized payloads from consuming memory or blocking workers.
 
 ---
 
-*Concerns audit: 2026-03-29*
+*Concerns audit: 2026-03-31*
