@@ -929,10 +929,11 @@ async def _load_tools(
             logger.info("Exposed crawler tool to LLM")
 
     # Windows Composition Tool
-    # Only expose if configured via environment variable AND requested by client
-    if os.getenv("WIN_COMP_BRIDGE_URL") and expose_to_llm.get(
-        "windows_composition", False
-    ):
+    # Only expose if WCD bridge is available AND requested by client
+    from gateway.utils.wcd_bridge_manager import get_wcd_bridge_manager
+
+    wcd_mgr = get_wcd_bridge_manager()
+    if wcd_mgr.available and expose_to_llm.get("windows_composition", False):
         tools.append(
             {
                 "type": "function",

@@ -1,5 +1,4 @@
 import logging
-import os
 from typing import Optional
 
 import httpx
@@ -9,7 +8,10 @@ logger = logging.getLogger(__name__)
 
 class WindowsCompositionClient:
     """
-    Client for the Windows Composition Bridge service running on the host.
+    Client for the Windows Composition Bridge service.
+
+    The bridge is started on demand by WcdBridgeManager and the URL is
+    obtained from it — no manual WIN_COMP_BRIDGE_URL needed.
     """
 
     def __init__(self, bridge_url: str):
@@ -47,21 +49,19 @@ _client: Optional[WindowsCompositionClient] = None
 
 
 def get_composition_client() -> Optional[WindowsCompositionClient]:
-    """Get or create the global Windows Composition client."""
+    """Get or create the global Windows Composition client.
+
+    Uses WcdBridgeManager to get the bridge URL (on-demand startup).
+    """
     global _client
 
-    # Check if bridge URL is configured
-    bridge_url = os.getenv("WIN_COMP_BRIDGE_URL")
+    from gateway.utils.wcd_bridge_manager import get_wcd_bridge_manager
 
-    # Fallback: If SHARE_CMD is set but BRIDGE_URL is not, we might be in a mode
-    # where we expect the bridge to be at a default location
-    # (e.g. host.docker.internal:8005)
-    # But explicit config is better.
-
-    if not bridge_url:
+    mgr = get_wcd_bridge_manager()
+    if not mgr.available or not mgr.bridge_url:
         return None
 
-    if _client is None:
-        _client = WindowsCompositionClient(bridge_url)
+    if _client is None or _client.bridge_url != mgr.bridge_url.rstrip("/"):
+        _client = WindowsCompositionClient(mgr.bridge_url)
 
     return _client

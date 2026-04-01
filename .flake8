@@ -1,0 +1,26 @@
+[flake8]
+max-line-length = 88
+# E203: whitespace before ':' — conflicts with black
+# E221: multiple spaces before operator — alignment style
+# E231: missing whitespace after ',' — conflicts with black
+# E501: line too long — black enforces 88-char on new code; legacy lines grandfathered
+# E713: test for membership should be 'not in x' — style preference
+# W292: no newline at end of file — auto-fixed by pre-commit
+# W293: whitespace before ':' — auto-fixed by pre-commit
+extend-ignore = E203,E221,E231,E501,E713,W292,W293
+per-file-ignores =
+    # E402: module level import not at top — strips NODE_OPTIONS before imports
+    # F401: imported but unused — re-exports
+    # F541: f-string without placeholders — legacy code
+    # F841: local variable assigned but unused — legacy code
+    gateway/main.py:E402,F401
+    gateway/llm/prompts.py:F401
+    gateway/routers/agent.py:F541,F841
+exclude =
+    .git,
+    __pycache__,
+    build,
+    dist,
+    venv,
+    .eggs,
+    *.egg

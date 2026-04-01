@@ -18,7 +18,7 @@ LLMCrawl is a containerized Python Web RAG system that enables LLMs to trigger w
 - **Azure DevOps MCP (8004)**: Code search with MSAL/PAT auth
 
 ### Host-side Bridges (optional, not containerized)
-- **WCD Bridge (8005)**: Windows Composition Database queries
+- **WCD Bridge (8005)**: Windows Composition Database queries (gateway starts on demand; MCP server standalone for IDE use)
 - **Claude Bridge (8006)**: Claude Code CLI HTTP wrapper (optional — gateway calls CLI directly)
 - **Copilot Bridge (8009)**: GitHub Copilot CLI HTTP wrapper (optional — gateway calls CLI directly)
 

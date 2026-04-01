@@ -180,7 +180,7 @@ try {
             $env:LOG_LEVEL = "DEBUG"
             # Override bridge URLs for local gateway (use localhost, not host.docker.internal)
             $env:CLAUDE_BRIDGE_URL = "http://localhost:8006"
-            $env:WIN_COMP_BRIDGE_URL = "http://localhost:8005"
+            # WCD Bridge is started on demand by the gateway — no manual URL needed
 
             # Start gateway in background
             $GatewayProcess = Start-Process -FilePath $PythonExe `

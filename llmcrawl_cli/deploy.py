@@ -554,9 +554,17 @@ def start_local_services(
         child_env["CLAUDE_BRIDGE_URL"] = env_vars.get(
             "CLAUDE_BRIDGE_URL", "http://localhost:8006"
         ).replace("host.docker.internal", "localhost")
-        child_env["WIN_COMP_BRIDGE_URL"] = env_vars.get(
-            "WIN_COMP_BRIDGE_URL", "http://localhost:8005"
-        ).replace("host.docker.internal", "localhost")
+        # WCD Bridge is started on demand by the gateway — pass through WCD env vars
+        for wcd_var in (
+            "WIN_COMP_PATH",
+            "WIN_COMP_SHARE_CMD",
+            "WIN_COMP_PS_COMMAND",
+            "WIN_COMP_ARCH",
+            "WCD_BUILD_NAME",
+            "WCD_BRANCH",
+        ):
+            if wcd_var in env_vars:
+                child_env[wcd_var] = env_vars[wcd_var]
 
         try:
             with open(gateway_log, "a") as log_file:

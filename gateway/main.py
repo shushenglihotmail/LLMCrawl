@@ -22,6 +22,7 @@ from .utils.copilot_bridge_manager import get_copilot_bridge_manager
 from .utils.logging import get_logger, setup_logging
 from .utils.metrics import record_service_error, set_service_up
 from .utils.token_context import set_token
+from .utils.wcd_bridge_manager import get_wcd_bridge_manager
 
 # Setup logging
 setup_logging()
@@ -46,12 +47,21 @@ async def lifespan(app: FastAPI):
         copilot_mgr = get_copilot_bridge_manager()
         await copilot_mgr.probe_and_discover(max_retries=2, retry_delay=1.0)
 
+        # Start WCD Bridge on demand if configured.
+        wcd_mgr = get_wcd_bridge_manager()
+        if wcd_mgr.detect():
+            await wcd_mgr.start()
+
         logger.info("Gateway service started successfully")
         yield
     except Exception as e:
         record_service_error("gateway", e)
         raise
     finally:
+        # Stop WCD Bridge if running
+        wcd_mgr = get_wcd_bridge_manager()
+        wcd_mgr.stop()
+
         # Mark service as down on shutdown
         set_service_up("gateway", False)
         logger.info("Shutting down Gateway service")

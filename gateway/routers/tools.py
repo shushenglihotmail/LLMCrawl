@@ -519,8 +519,9 @@ class ToolHandler:
         client = get_composition_client()
         if not client:
             return {
-                "error": "Windows Composition Bridge not configured. "
-                "Set WIN_COMP_BRIDGE_URL environment variable."
+                "error": "Windows Composition Bridge not available. "
+                "Set WIN_COMP_PATH, WIN_COMP_SHARE_CMD, or WCD_BUILD_NAME "
+                "environment variable to enable WCD."
             }
 
         try:

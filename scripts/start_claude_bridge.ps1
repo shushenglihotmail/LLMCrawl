@@ -6,7 +6,7 @@
     Launches the Claude Bridge HTTP service (port 8006) which bridges requests
     from the Docker-based gateway to the Claude Code CLI on the host.
 
-    Same pattern as start_wcd_bridge.ps1 (Windows Composition Bridge on port 8005).
+    WCD bridge is now started on demand by the gateway — no manual script needed.
 
 .PARAMETER Port
     Port to run the bridge on (default: 8006).

@@ -6,7 +6,7 @@ The bridge implementation has moved to the wheel-buildable MCP package at:
 
 This file remains so existing flows continue to work:
 - `llmcrawl wcd-bridge ...` (imports `tools.windows_composition_bridge:app`)
-- `scripts/start_wcd_bridge.ps1` (runs this file directly)
+- Gateway on-demand bridge startup (imports `create_app` via this shim)
 """
 
 from __future__ import annotations
