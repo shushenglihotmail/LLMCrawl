@@ -36,8 +36,8 @@ class ToolHandler:
     """Handles tool function calls and orchestrates the RAG pipeline."""
 
     def __init__(self) -> None:
-        self.crawler_url = "http://crawler:8001"
-        self.indexer_url = "http://indexer:8002"
+        self.crawler_url = os.getenv("CRAWLER_URL", "http://crawler:8001")
+        self.indexer_url = os.getenv("INDEXER_URL", "http://indexer:8002")
         self.memory_service_url = os.getenv("MEMORY_SERVICE_URL")
         # Increased to 90s to allow for depth crawling with Playwright
         # which can take 60-70s for depth=2 with authentication
@@ -160,8 +160,19 @@ class ToolHandler:
                 "count": 0,
             }
 
-        urls_to_crawl = [query]
-        logger.info(f"Crawling URL: {query}")
+        # Handle LLMs that concatenate multiple URLs with semicolons or spaces
+        raw_urls = [
+            u.strip()
+            for u in query.replace(";", " ").split()
+            if u.strip().startswith(("http://", "https://"))
+        ]
+        if not raw_urls:
+            raw_urls = [query]
+        elif len(raw_urls) > 1:
+            logger.info(f"Split multi-URL query into {len(raw_urls)} URLs: {raw_urls}")
+
+        urls_to_crawl = raw_urls
+        logger.info(f"Crawling {len(urls_to_crawl)} URL(s): {urls_to_crawl}")
 
         # Crawl the URL (crawler just does: crawl → render → extract)
         crawl_result = None

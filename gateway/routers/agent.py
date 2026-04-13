@@ -488,13 +488,15 @@ async def _crawl_urls(
                         headers=index_headers,
                     )
 
-                # Add crawled content
+                # Add crawled content — include full text so the LLM
+                # doesn't need to re-crawl via the tool.
                 for doc in docs:
                     source = doc.get("source", "unknown")
+                    markdown = doc.get("markdown", "")
                     crawled_content.append(
                         f"URL: {doc.get('url', 'unknown')}\n"
                         f"Source: {source}\n\n"
-                        f"{doc.get('markdown', '')[:2000]}"
+                        f"{markdown}"
                     )
                     if source == "firecrawl":
                         context_gathered["web_search_results"] += 1

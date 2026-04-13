@@ -103,6 +103,15 @@ def build_prompt_from_messages(
 
     system_text = "\n".join(system_parts) if system_parts else None
 
+    # If conversation ends with tool results, add a continuation prompt
+    # so CLI models know to synthesize an answer from the results.
+    # Without this, the model may echo back the tool history or return empty.
+    if conversation_parts and conversation_parts[-1].startswith("Tool result"):
+        conversation_parts.append(
+            "Human: Now provide your complete answer to my original question, "
+            "using the information from the tool results above."
+        )
+
     if len(conversation_parts) == 1 and conversation_parts[0].startswith("Human: "):
         prompt = conversation_parts[0][len("Human: ") :]
     else:

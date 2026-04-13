@@ -24,7 +24,11 @@ class CrawlAndRefreshInput(BaseModel):
     Use .to_openai_tool() or other conversion methods for LLM-specific formats.
     """
 
-    query: str = Field(description="URL or topic to crawl")
+    query: str = Field(
+        description="Full URL to crawl (must start with http:// or https://). "
+        "Example: https://www.osgwiki.com/wiki/Timebuild. "
+        "Do NOT pass search queries or keywords — pass the actual page URL."
+    )
     freshness_days: int = Field(
         default=7, ge=1, description="How recent the content should be (in days)"
     )
@@ -217,25 +221,34 @@ class ToolSchemaConverter:
 # =============================================================================
 
 
+# Shared tool description — single source of truth
+_CRAWL_TOOL_DESCRIPTION = (
+    "Crawl a specific web page URL, extract its content, and return it for answering with citations. "
+    "The 'query' parameter MUST be a full URL (e.g. https://example.com/page). "
+    "Do NOT pass search queries, keywords, or 'site:' operators — only actual page URLs. "
+    "For internal/authenticated sites (e.g. osgwiki.com), the crawler handles authentication automatically. "
+    "Keep depth low (1-2 recommended, max 5) to avoid high query overhead."
+)
+
 # Tool schema that gets registered with the LLM (OpenAI format)
 CRAWL_AND_REFRESH_TOOL = ToolSchemaConverter.to_openai_tool(
     model=CrawlAndRefreshInput,
     name=TOOL_CRAWL_AND_REFRESH,
-    description="Search & crawl the web for up-to-date info; clean, index, and return fresh sources for answering with citations.",
+    description=_CRAWL_TOOL_DESCRIPTION,
 )
 
 # Claude format (for future use)
 CRAWL_AND_REFRESH_TOOL_CLAUDE = ToolSchemaConverter.to_claude_tool(
     model=CrawlAndRefreshInput,
     name=TOOL_CRAWL_AND_REFRESH,
-    description="Search & crawl the web for up-to-date info; clean, index, and return fresh sources for answering with citations.",
+    description=_CRAWL_TOOL_DESCRIPTION,
 )
 
 # Gemini format (for future use)
 CRAWL_AND_REFRESH_TOOL_GEMINI = ToolSchemaConverter.to_gemini_tool(
     model=CrawlAndRefreshInput,
     name=TOOL_CRAWL_AND_REFRESH,
-    description="Search & crawl the web for up-to-date info; clean, index, and return fresh sources for answering with citations.",
+    description=_CRAWL_TOOL_DESCRIPTION,
 )
 
 
@@ -259,11 +272,7 @@ def build_crawler_tool_with_seed_urls(
     Returns:
         OpenAI-compatible tool schema dict with dynamic description
     """
-    base_description = (
-        "Search & crawl the web for up-to-date info; clean, index, and return "
-        "fresh sources for answering with citations. "
-        "**IMPORTANT**: Keep depth low (1-2 recommended, max 5) to avoid high query overhead."
-    )
+    base_description = _CRAWL_TOOL_DESCRIPTION
 
     if seed_urls:
         # Build a description that tells LLM about the priority URLs
